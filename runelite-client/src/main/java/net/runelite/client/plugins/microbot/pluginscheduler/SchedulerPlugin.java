@@ -55,6 +55,7 @@ import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerConfig;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerScript;
 import net.runelite.client.plugins.microbot.pluginscheduler.api.SchedulablePlugin;
+import net.runelite.client.plugins.microbot.pluginscheduler.automation.SocketAutomationManager;
 import net.runelite.client.plugins.microbot.pluginscheduler.condition.Condition;
 import net.runelite.client.plugins.microbot.pluginscheduler.condition.time.TimeCondition;
 import net.runelite.client.plugins.microbot.pluginscheduler.event.PluginScheduleEntryFinishedEvent;
@@ -163,6 +164,9 @@ public class SchedulerPlugin extends Plugin {
     @Inject
     private Notifier notifier;
     
+    // Socket automation manager
+    private SocketAutomationManager socketAutomationManager;
+    
     // UI update throttling
     private long lastPanelUpdateTime = 0;
     private static final long PANEL_UPDATE_THROTTLE_MS = 500; // Minimum 500ms between panel updates
@@ -185,6 +189,10 @@ public class SchedulerPlugin extends Plugin {
         if (config.showOverlay()) {
             overlayManager.add(overlay);
         }
+        
+        // Initialize and start socket automation manager
+        socketAutomationManager = new SocketAutomationManager(this);
+        socketAutomationManager.startSocketListener();
 
         // Load saved schedules from config
 
@@ -318,6 +326,15 @@ public class SchedulerPlugin extends Plugin {
             schedulerWindow.dispose(); // This will stop the timer
             schedulerWindow = null;
         }
+        
+        // Shutdown socket automation manager
+        if (socketAutomationManager != null) {
+            Microbot.log("socket automation shutdown != null");
+            log.info("socket automation shutdown != null");
+            socketAutomationManager.shutdown();
+            socketAutomationManager = null;
+        }
+        
         setState(SchedulerState.UNINITIALIZED);
         this.lastGameState = GameState.UNKNOWN;
     }
@@ -1172,7 +1189,7 @@ public class SchedulerPlugin extends Plugin {
      * Update all UI panels with the current state.
      * Throttled to prevent excessive refresh calls.
      */
-    void updatePanels() {
+    public void updatePanels() {
         long currentTime = System.currentTimeMillis();
         
         // Throttle panel updates to prevent excessive refreshes
@@ -1225,6 +1242,9 @@ public class SchedulerPlugin extends Plugin {
         }
     }
 
+    public void updateScheduledPluginFromJson(List<PluginScheduleEntry> newPluginEntry) {
+        scheduledPlugins = newPluginEntry;
+    }
 
     /**
      * Adds conditions to a scheduled plugin with support for saving to a specific file
@@ -1342,7 +1362,8 @@ public class SchedulerPlugin extends Plugin {
             }
             
             // Replace current plugins
-            scheduledPlugins = loadedPlugins;
+            updateScheduledPluginFromJson(loadedPlugins);
+            // scheduledPlugins = loadedPlugins;
             
             // Update UI
             SwingUtilities.invokeLater(this::updatePanels);
@@ -1507,7 +1528,7 @@ public class SchedulerPlugin extends Plugin {
      * This must be done after deserialization since Plugin objects can't be
      * serialized directly.
      */
-    private void resolvePluginReferences(PluginScheduleEntry scheduled) {
+    public void resolvePluginReferences(PluginScheduleEntry scheduled) {
         if (scheduled.getName() == null) {
             return;
         }
@@ -2795,7 +2816,7 @@ public class SchedulerPlugin extends Plugin {
      * 
      * @param entry The plugin schedule entry to register the callback with
      */
-    private void registerStopCompletionCallback(PluginScheduleEntry entry) {
+    public void registerStopCompletionCallback(PluginScheduleEntry entry) {
         entry.setStopCompletionCallback((stopEntry, wasSuccessful) -> {
             // Save scheduled plugins state when a plugin stop is completed
             saveScheduledPlugins();

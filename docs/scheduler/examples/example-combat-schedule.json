@@ -1,0 +1,48 @@
+[
+  {
+    "name": "AIOFighter",
+    "enabled": true,
+    "priority": 1,
+    "schedulerX": 3200,
+    "schedulerY": 3200,
+    "schedulerZ": 0,
+    "useSchedulerCoordinates": true,
+    "startConditions": [
+      {
+        "type": "time",
+        "startTime": "14:30",
+        "endTime": "16:00",
+        "daysOfWeek": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+      }
+    ],
+    "stopConditions": [
+      {
+        "type": "duration",
+        "maxDuration": "01:30:00"
+      }
+    ]
+  },
+  {
+    "name": "Example Plugin",
+    "enabled": true,
+    "priority": 2,
+    "schedulerX": 3100,
+    "schedulerY": 3100,
+    "schedulerZ": 0,
+    "useSchedulerCoordinates": true,
+    "startConditions": [
+      {
+        "type": "time",
+        "startTime": "16:30",
+        "endTime": "18:00",
+        "daysOfWeek": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+      }
+    ],
+    "stopConditions": [
+      {
+        "type": "duration",
+        "maxDuration": "01:00:00"
+      }
+    ]
+  }
+]
