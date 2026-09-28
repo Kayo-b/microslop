@@ -1,0 +1,23 @@
+{
+  "name": "@microbot/agent-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Structured state/decision/action loop for Microbot: snapshot -> System 1 decision engine (Jev/Laya) -> synthetic actions.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-reporter=spec \"test/**/*.test.ts\"",
+    "test:live-jev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/*.live.ts",
+    "kb:dump": "bash scripts/kb-dump.sh",
+    "kb:wiki": "node src/kb/wiki.ts",
+    "kb:build": "node --disable-warning=ExperimentalWarning src/kb/build.ts",
+    "agent": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^5.9.3"
+  }
+}
