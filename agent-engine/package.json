@@ -15,7 +15,8 @@
     "kb:wiki": "node src/kb/wiki.ts",
     "kb:build": "node --disable-warning=ExperimentalWarning src/kb/build.ts",
     "agent": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/cli.ts",
-    "test:live-claude": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/claude.live.ts"
+    "test:live-claude": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/claude.live.ts",
+    "dataset:export": "node --disable-warning=ExperimentalWarning src/dataset/export.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

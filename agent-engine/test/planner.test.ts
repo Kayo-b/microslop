@@ -129,3 +129,32 @@ test('agent: task tree + engine run the full gather/bank loop against the fake c
     await server.close();
   }
 });
+
+test('dataset export keeps verified model decisions and successful escalations', async () => {
+  const { toExample } = await import('../src/dataset/export.ts');
+  const base = {
+    runId: 'r', step: 1, time: '', tick: 1, subgoal: 'chop', engine: 'jev',
+    state: { subgoal: 'chop' } as never,
+    questions: {
+      op: { type: 'choice' as const, instructions: '', criteria: { interact: '', walk: '' } },
+      target: { type: 'choice' as const, instructions: '', criteria: { a: 'Tree', b: 'Rock' } },
+      destination: { type: 'choice' as const, instructions: '', criteria: { 'dest:0': 'bank' } },
+    },
+    answers: { target: { type: 'choice' as const, questionId: 'target', choice: 'a', confidence: 0.9, probabilities: { a: 0.9, b: 0.1 } } },
+  };
+  const ok = toExample({ ...base, source: 'model', chosen: { op: 'interact', optionId: 'a' }, outcome: { success: true, effect: 'changed: animation', ticks: 1, messages: [] } });
+  assert.deepEqual(ok?.labels, { op: 'interact', target: 'a' });
+  assert.deepEqual(ok?.soft, { target: { a: 0.9, b: 0.1 } });
+  assert.deepEqual(Object.keys(ok!.questions!), ['op', 'target'], 'unlabelled questions dropped');
+
+  const failed = toExample({ ...base, source: 'model', chosen: { op: 'interact', optionId: 'a' }, outcome: { success: false, effect: 'no effect', ticks: 5, messages: [] } });
+  assert.equal(failed, null);
+
+  const esc = toExample({ ...base, source: 'escalation', chosen: { op: 'interact', optionId: 'b' }, outcome: { success: true, effect: 'changed: animation', ticks: 1, messages: [] } });
+  assert.equal(esc?.labels.target, 'b');
+  assert.equal(esc?.soft, null);
+
+  assert.equal(toExample({ ...base, source: 'reflex', chosen: { op: 'interact' } }), null);
+  assert.equal(toExample({ ...base, source: 'model', chosen: { op: 'done' } }), null);
+  assert.deepEqual(toExample({ ...base, source: 'model', chosen: { op: 'done' } }, true)?.labels, { op: 'done' });
+});
