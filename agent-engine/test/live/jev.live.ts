@@ -66,3 +66,38 @@ test('Jev chooses the dialogue option that matches the sub-goal', { skip: !hasKe
   const { action } = await decideOnce(dlg, { text: 'open the bank through the banker' });
   assert.deepEqual(action, { op: 'dialogue_select', option: "I'd like to access my bank account, please." });
 });
+
+test('Jev drives a full chop -> bank -> deposit -> close loop on the fake client', { skip: !hasKey && 'JEV_API_KEY not set' }, async () => {
+  const { FakeGame, startFakeServer } = await import('../support/FakeMicrobotServer.ts');
+  const { MicrobotBackend } = await import('../../src/backend/MicrobotBackend.ts');
+  const { Agent } = await import('../../src/agent/Agent.ts');
+  const { TaskTreePlanner } = await import('../../src/planner/TaskTreePlanner.ts');
+  const { tree } = await import('../support/fixtures.ts');
+  const initial = snapshot({
+    inventory: { freeSlots: 2, items: [item(0, 1351, 'Bronze axe', { actions: ['Wield', 'Drop'] })] },
+    objects: [
+      tree(),
+      { id: 10355, name: 'Bank booth', type: 'GAME', actions: ['Bank', 'Collect'], position: { x: 3238, y: 3150, plane: 0 }, distance: 5, reachable: true, pathDistance: 4 },
+    ],
+  });
+  const game = new FakeGame({ initial, actionTicks: 3 });
+  const server = await startFakeServer(game, 'tok');
+  const backend = new MicrobotBackend({ port: server.port, token: 'tok' });
+  const logger = new MemoryStepLogger();
+  const engine = new GameIntentEngine({ backend, decisionEngine: createJevAdapter(), kb, logger, verify: { sleep: async () => {}, pollMs: 0 } });
+  const results: string[] = [];
+  const agent = new Agent({
+    backend, engine, planner: TaskTreePlanner.fromPreset('chop-trees', { bank: true }), kb, maxSubGoals: 4, sleep: async () => {},
+    onEvent: (e) => { if (e.type === 'report') { results.push(e.report.result); console.log(`  ${e.report.result}: ${e.report.subgoal} (${e.report.steps} steps)`); } },
+  });
+  try {
+    await agent.run('chop and bank');
+    const modelCalls = logger.records.filter((r) => r.source === 'model').length;
+    console.log(`  ${modelCalls} Jev decisions, ${logger.records.length} logged steps`);
+    assert.deepEqual(results, ['done', 'done', 'done', 'done']);
+    assert.ok(game.state.inventory.items.some((i) => i.name === 'Bronze axe'), 'kept the axe');
+    assert.ok(!game.state.inventory.items.some((i) => i.name === 'Logs'), 'logs deposited');
+  } finally {
+    await server.close();
+  }
+});

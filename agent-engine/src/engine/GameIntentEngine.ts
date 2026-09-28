@@ -12,7 +12,7 @@ import type { GameBackend } from '../backend/MicrobotBackend.ts';
 import type { ChoiceAnswer, DecisionEngineAdapter, DecisionQuestion } from '../decision/types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { Candidate, Destination, GameAction, Snapshot, SubGoal } from '../types.ts';
-import { buildCandidates, type CandidateOptions } from './candidates.ts';
+import { buildCandidates, matchesAny, type CandidateOptions } from './candidates.ts';
 import type { DecisionSource, StepLogger, StepRecord } from './log.ts';
 import { checkReflexes, DEFAULT_REFLEXES, type ReflexConfig } from './reflexes.ts';
 import { buildDecisionState, relevantSkillsFor, type DecisionState, type HistoryEntry } from './state.ts';
@@ -141,18 +141,26 @@ export class GameIntentEngine {
       return { kind: 'blocked', reason: 'no options (nothing interactable nearby and no known destination)', snapshot: snap };
     }
 
+    // Only offer ops the deterministic layers cannot settle. Waiting is the busy gate's job
+    // (offered here only once its wait budget ran out while still busy) and completion is the
+    // sub-goal's own check when it has one. Classifiers are strong at "which option" and weak at
+    // abstract "what now" questions, so the op question is skipped whenever one op remains.
     const ops: Op[] = [];
     if (candidates.length > 0) ops.push('interact');
-    if (destinations.length > 0) ops.push('walk');
-    ops.push('wait', 'done');
+    // Travel is only a real option when nothing the sub-goal names is usable right here.
+    const targetHere = candidates.some((c) => matchesAny(c.name, goal.targets) && !(c.unmet && c.unmet.length > 0));
+    if (destinations.length > 0 && !targetHere) ops.push('walk');
+    if (busy) ops.push('wait');
+    if (!goal.isDone) ops.push('done');
 
-    const questions: Record<string, DecisionQuestion> = {
-      op: { type: 'choice', instructions: 'Given the sub-goal and the current state, what should the player do next?', criteria: Object.fromEntries(ops.map((op) => [op, OP_DESCRIPTIONS[op]])) },
-    };
+    const questions: Record<string, DecisionQuestion> = {};
+    if (ops.length > 1) {
+      questions.op = { type: 'choice', instructions: 'Given the sub-goal and the current state, what should the player do next?', criteria: Object.fromEntries(ops.map((op) => [op, OP_DESCRIPTIONS[op]])) };
+    }
     if (candidates.length > 0) {
       questions.target = { type: 'choice', instructions: `Which action best serves the sub-goal "${goal.text}"?`, criteria: Object.fromEntries(candidates.map((c) => [c.id, c.label])) };
     }
-    if (destinations.length > 0) {
+    if (ops.includes('walk')) {
       questions.destination = { type: 'choice', instructions: `If the player must travel for "${goal.text}", where should they go?`, criteria: Object.fromEntries(destinations.map((d) => [d.id, d.label])) };
     }
 
@@ -163,14 +171,15 @@ export class GameIntentEngine {
       return { kind: 'blocked', reason: `decision engine error: ${err instanceof Error ? err.message : err}`, snapshot: snap };
     }
 
-    const opAns = decision.answers.op as ChoiceAnswer;
-    const op = opAns.choice as Op;
+    const opAns = decision.answers.op as ChoiceAnswer | undefined;
+    const op = (opAns?.choice ?? ops[0]!) as Op;
+    const opConfidence = opAns?.confidence ?? 1;
     const optionAns = (op === 'interact' ? decision.answers.target : op === 'walk' ? decision.answers.destination : undefined) as ChoiceAnswer | undefined;
-    const confidence = Math.min(opAns.confidence, optionAns?.confidence ?? 1);
+    const confidence = Math.min(opConfidence, optionAns?.confidence ?? 1);
 
     let chosen: { op: Op; optionId?: string; source: DecisionSource; confidence?: number } = { op, optionId: optionAns?.choice, source: 'model', confidence };
     let escalation: StepRecord['escalation'];
-    const lowConfidence = confidence < this.o.minConfidence || (op === 'done' && opAns.confidence < this.o.doneConfidence);
+    const lowConfidence = confidence < this.o.minConfidence || (op === 'done' && opConfidence < this.o.doneConfidence);
     if (lowConfidence && this.o.escalator) {
       const reason = `low confidence (${confidence.toFixed(2)})`;
       const esc = await this.o.escalator

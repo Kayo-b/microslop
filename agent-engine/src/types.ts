@@ -242,6 +242,8 @@ export interface SubGoal {
   targets?: string[];
   actions?: string[];
   destination?: { name?: string; point?: WorldPoint };
+  /** Items that must never be dropped or deposited (tools, bait). Case-insensitive substrings. */
+  keep?: string[];
   /** Deterministic completion check; when absent the decision engine's `done` answer decides. */
   isDone?: (snapshot: Snapshot) => boolean;
   /** Give up after this many engine steps without completion. */

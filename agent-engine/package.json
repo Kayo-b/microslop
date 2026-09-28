@@ -10,14 +10,19 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --disable-warning=ExperimentalWarning --test --test-reporter=spec \"test/**/*.test.ts\"",
-    "test:live-jev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/*.live.ts",
+    "test:live-jev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/jev.live.ts",
     "kb:dump": "bash scripts/kb-dump.sh",
     "kb:wiki": "node src/kb/wiki.ts",
     "kb:build": "node --disable-warning=ExperimentalWarning src/kb/build.ts",
-    "agent": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/cli.ts"
+    "agent": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/cli.ts",
+    "test:live-claude": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env --test --test-reporter=spec test/live/claude.live.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.129.0",
+    "zod": "^4.6.5"
   }
 }

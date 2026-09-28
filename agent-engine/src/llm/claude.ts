@@ -1,0 +1,246 @@
+/**
+ * Claude-backed System 2: an adaptive planner (next sub-goal when one ends) and an escalator
+ * (picks an option when the System 1 model is unsure). Both are called rarely - on sub-goal
+ * boundaries and low-confidence ticks - never every tick.
+ *
+ * Model: CLAUDE_MODEL, default claude-sonnet-5-5. Credentials: ANTHROPIC_API_KEY or an
+ * `ant auth login` profile (the SDK resolves either).
+ *
+ * Structured outputs (output_config.format) make every reply schema-valid JSON. Requests opt into
+ * server-side refusal fallback ("default" routing) so a safety-classifier decline is retried on
+ * Anthropic's recommended fallback model instead of stalling the agent.
+ */
+import Anthropic from '@anthropic-ai/sdk';
+import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+import { z } from 'zod';
+import type { Escalator, EscalationRequest, EscalationResponse } from '../engine/GameIntentEngine.ts';
+import { foldInventory } from '../engine/state.ts';
+import { compile, describe, type DoneCondition } from '../planner/conditions.ts';
+import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from '../planner/types.ts';
+
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
+const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+
+export interface ClaudeOptions {
+  client?: Anthropic;
+  model?: string;
+  effort?: 'low' | 'medium' | 'high';
+}
+
+function makeClient(opts: ClaudeOptions): Anthropic {
+  return opts.client ?? new Anthropic();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Planner
+// ---------------------------------------------------------------------------------------------
+
+const PLANNER_SYSTEM = `You plan Old School RuneScape gameplay for an automated agent, one sub-goal at a time.
+
+Each sub-goal you write is executed by a fast classifier that sees the player's state and a short list of concrete options (nearby NPCs/objects with their menu actions, inventory items, open dialogue or bank buttons, and walk destinations) and picks one option per game tick. It is good at matching a clear sub-goal to those options and bad at planning, so:
+
+- Make each sub-goal one concrete activity at one place, completable in roughly 1-400 actions: "chop oak trees until the inventory is full", "walk to the nearest bank and open it", "deposit all oak logs", "talk to the Cook in Lumbridge Castle kitchen".
+- Put the exact in-game names the classifier should look for in "targets" (e.g. "Oak tree", "Bank booth", "Banker", "Cook") and the menu actions in "actions" (e.g. "Chop down", "Bank", "Talk-to"). Use real OSRS names.
+- List tools and supplies that must never be dropped or deposited (axe, pickaxe, net, bait, food) in "keep_items".
+- Set "destination_name" to a place name (town, bank, area) when the player must travel; the agent resolves it with a map database. Leave it null when the targets are already nearby.
+- Always give a deterministic "done_when" condition when one exists (inventory full, has/lacks an item, bank open, skill level, near a point). Only leave every field null when completion can only be judged by looking.
+- Use the reports of previous sub-goals: if one was blocked, change approach (different place, get the missing tool, open a door or gate first) rather than repeating it.
+- Answer "complete" when the overall goal is achieved and "impossible" when it cannot be achieved from here without human help (missing membership, quest requirement, money you cannot obtain).
+- Keep the account safe: avoid the Wilderness and monsters far above the player's combat level unless the goal requires them.`;
+
+const DoneWhenSchema = z.object({
+  inventory_full: z.boolean().nullable(),
+  has_item: z.object({ name: z.string(), count: z.number().int() }).nullable(),
+  lacks_item: z.string().nullable(),
+  bank_open: z.boolean().nullable(),
+  skill_level: z.object({ skill: z.string(), level: z.number().int() }).nullable(),
+  near: z.object({ x: z.number().int(), y: z.number().int(), plane: z.number().int(), radius: z.number().int() }).nullable(),
+});
+
+const PlanSchema = z.object({
+  status: z.enum(['continue', 'complete', 'impossible']),
+  reasoning: z.string(),
+  subgoal: z
+    .object({
+      text: z.string(),
+      targets: z.array(z.string()),
+      actions: z.array(z.string()),
+      destination_name: z.string().nullable(),
+      keep_items: z.array(z.string()),
+      done_when: DoneWhenSchema,
+      max_steps: z.number().int(),
+    })
+    .nullable(),
+});
+
+type Plan = z.infer<typeof PlanSchema>;
+
+export function toDoneCondition(d: z.infer<typeof DoneWhenSchema>): DoneCondition {
+  const c: DoneCondition = {};
+  if (d.inventory_full !== null) c.inventoryFull = d.inventory_full;
+  if (d.has_item) c.hasItem = { name: d.has_item.name, count: d.has_item.count };
+  if (d.lacks_item) c.lacksItem = d.lacks_item;
+  if (d.bank_open !== null) c.bankOpen = d.bank_open;
+  if (d.skill_level) c.skillLevel = d.skill_level;
+  if (d.near) c.near = d.near;
+  return c;
+}
+
+export function planToStep(plan: Plan): PlanStep {
+  if (plan.status === 'complete') return { kind: 'complete', reason: plan.reasoning };
+  if (plan.status === 'impossible' || !plan.subgoal) return { kind: 'impossible', reason: plan.reasoning };
+  const sg = plan.subgoal;
+  const doneWhen = toDoneCondition(sg.done_when);
+  const subgoal: PlannedSubGoal = {
+    text: sg.text,
+    targets: sg.targets,
+    actions: sg.actions,
+    destination: sg.destination_name ? { name: sg.destination_name } : undefined,
+    keep: sg.keep_items,
+    doneWhen,
+    isDone: compile(doneWhen),
+    maxSteps: Math.min(Math.max(sg.max_steps, 5), 600),
+  };
+  return { kind: 'subgoal', subgoal };
+}
+
+export function plannerPrompt(ctx: PlannerContext): string {
+  const s = ctx.snapshot;
+  const pos = s.player?.position;
+  const kb = ctx.kb;
+  const lines: string[] = [`Overall goal: ${ctx.goal}`, ''];
+  if (pos) {
+    const area = kb?.labelsNear(pos, 60, 2).map((p) => p.name).join(', ');
+    lines.push(`Position: (${pos.x}, ${pos.y}, floor ${pos.plane})${area ? ` near ${area}` : ''}`);
+    const banks = kb?.nearestBanks(pos, 2).map((b) => `${b.name} (${b.distance} tiles)`).join(', ');
+    if (banks) lines.push(`Nearest banks: ${banks}`);
+  }
+  if (s.player) {
+    lines.push(`HP ${s.player.hp.current}/${s.player.hp.max}, combat level ${s.player.combatLevel}, run ${s.player.runEnergy}%`);
+  }
+  lines.push(`Skills: ${s.skills.map((k) => `${k.name} ${k.level}`).join(', ')}`);
+  lines.push(`Inventory: ${foldInventory(s)}`);
+  lines.push(`Equipped: ${s.equipment.map((e) => e.name).join(', ') || 'nothing'}`);
+  const nearby = [...new Set([...s.npcs.map((n) => n.name), ...s.objects.map((o) => o.name)])].slice(0, 25);
+  lines.push(`Nearby: ${nearby.join(', ') || 'nothing interactable'}`);
+  if (s.bank.open) lines.push(`Bank is open (${s.bank.items.length} item stacks visible)`);
+  if (s.dialogue.inDialogue) lines.push(`Dialogue open: ${[s.dialogue.text, ...s.dialogue.options].filter(Boolean).join(' | ')}`);
+  lines.push('');
+  if (ctx.reports.length === 0) {
+    lines.push('No sub-goals attempted yet.');
+  } else {
+    lines.push('Previous sub-goals (oldest first):');
+    for (const r of ctx.reports.slice(-6)) {
+      lines.push(`- "${r.subgoal}" -> ${r.result} after ${r.steps} steps: ${r.reason}`);
+      for (const t of r.trail.slice(-3)) lines.push(`    ${t}`);
+    }
+  }
+  lines.push('', 'Decide the next sub-goal.');
+  return lines.join('\n');
+}
+
+export class ClaudePlanner implements Planner {
+  readonly name = 'claude';
+  private readonly client: Anthropic;
+  private readonly model: string;
+  private readonly effort: 'low' | 'medium' | 'high';
+
+  constructor(opts: ClaudeOptions = {}) {
+    this.client = makeClient(opts);
+    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+    this.effort = opts.effort ?? 'medium';
+  }
+
+  async next(ctx: PlannerContext): Promise<PlanStep> {
+    const response = await this.client.beta.messages.parse({
+      model: this.model,
+      max_tokens: 16000,
+      betas: [FALLBACK_BETA],
+      fallbacks: 'default',
+      system: [{ type: 'text', text: PLANNER_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      output_config: { effort: this.effort, format: betaZodOutputFormat(PlanSchema) },
+      messages: [{ role: 'user', content: plannerPrompt(ctx) }],
+    });
+    if (response.stop_reason === 'refusal') {
+      return { kind: 'impossible', reason: `planner request declined (${response.stop_details?.category ?? 'no category'})` };
+    }
+    if (!response.parsed_output) {
+      throw new Error(`planner returned no parseable plan (stop_reason ${response.stop_reason})`);
+    }
+    return planToStep(response.parsed_output);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Escalator
+// ---------------------------------------------------------------------------------------------
+
+const ESCALATOR_SYSTEM = `You are the fallback decider for an Old School RuneScape agent. A fast classifier was unsure which action to take this game tick. You get the current sub-goal, a compact player state, and the exact option lists the classifier saw. Choose the single best next step:
+
+- "interact" with one option id from the action options,
+- "walk" with one option id from the destinations,
+- "wait" when the current activity is still in progress,
+- "done" when the sub-goal is already complete.
+
+Only use option ids that appear in the lists. Prefer options without missing requirements. Keep "note" to one short sentence explaining the choice.`;
+
+const EscalationSchema = z.object({
+  op: z.enum(['interact', 'walk', 'wait', 'done']),
+  option_id: z.string().nullable(),
+  note: z.string(),
+});
+
+export function escalationPrompt(req: EscalationRequest): string {
+  const lines = [
+    `Sub-goal: ${req.goal.text}`,
+    `Why you are asked: ${req.reason}`,
+    req.modelChoice ? `Classifier's tentative choice: ${req.modelChoice.op} ${req.modelChoice.optionId ?? ''} (confidence ${req.modelChoice.confidence.toFixed(2)})` : '',
+    '',
+    `State: ${JSON.stringify(req.state)}`,
+    '',
+    'Action options:',
+    ...req.candidates.map((c) => `- ${c.id}: ${c.label}`),
+    '',
+    'Destinations:',
+    ...(req.destinations.length ? req.destinations.map((d) => `- ${d.id}: ${d.label}`) : ['- (none)']),
+  ];
+  return lines.filter((l) => l !== undefined).join('\n');
+}
+
+export class ClaudeEscalator implements Escalator {
+  private readonly client: Anthropic;
+  private readonly model: string;
+  private readonly effort: 'low' | 'medium' | 'high';
+
+  constructor(opts: ClaudeOptions = {}) {
+    this.client = makeClient(opts);
+    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+    // Low effort: this sits on the tick path and only has to pick from a short list.
+    this.effort = opts.effort ?? 'low';
+  }
+
+  async choose(req: EscalationRequest): Promise<EscalationResponse | null> {
+    const response = await this.client.beta.messages.parse({
+      model: this.model,
+      max_tokens: 4000,
+      betas: [FALLBACK_BETA],
+      fallbacks: 'default',
+      system: [{ type: 'text', text: ESCALATOR_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      output_config: { effort: this.effort, format: betaZodOutputFormat(EscalationSchema) },
+      messages: [{ role: 'user', content: escalationPrompt(req) }],
+    });
+    if (response.stop_reason === 'refusal' || !response.parsed_output) return null;
+    const out = response.parsed_output;
+    return { op: out.op, optionId: out.option_id ?? undefined, note: out.note };
+  }
+}
+
+/** For logs and the CLI: one line describing a planned sub-goal. */
+export function describeSubGoal(sg: PlannedSubGoal): string {
+  const parts = [sg.text];
+  if (sg.targets?.length) parts.push(`targets: ${sg.targets.join(', ')}`);
+  if (sg.destination?.name) parts.push(`destination: ${sg.destination.name}`);
+  parts.push(`done when: ${describe(sg.doneWhen)}`);
+  return parts.join(' | ');
+}
+

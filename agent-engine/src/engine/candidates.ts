@@ -35,10 +35,15 @@ const IGNORED_INVENTORY_ACTIONS = new Set(['examine', 'check', 'rub', 'commune',
 
 const lc = (s: string) => s.toLowerCase();
 
-function matchesAny(name: string, hints: string[] | undefined): boolean {
+export function matchesAny(name: string, hints: string[] | undefined): boolean {
   if (!hints || hints.length === 0) return false;
   const n = lc(name);
   return hints.some((h) => n.includes(lc(h)) || lc(h).includes(n));
+}
+
+function isKept(name: string, keep: string[] | undefined): boolean {
+  const n = lc(name);
+  return !!keep?.some((k) => n.includes(lc(k)));
 }
 
 function actionHinted(action: string, hints: string[] | undefined): boolean {
@@ -127,7 +132,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     });
   }
 
-  out.push(...inventoryCandidates(s));
+  out.push(...inventoryCandidates(s, goal.keep));
   out.push(...equipmentCandidates(s, goal));
 
   const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
@@ -162,13 +167,14 @@ function objectHint(kb: KnowledgeBase, ctx: PlayerContext, name: string, action:
   return { text: '', unmet: [] };
 }
 
-function inventoryCandidates(s: Snapshot): Candidate[] {
+function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
   const out: Candidate[] = [];
   const seen = new Set<string>();
   const items = s.inventory.items;
   for (const item of items) {
     for (const action of item.actions) {
       if (IGNORED_INVENTORY_ACTIONS.has(lc(action))) continue;
+      if (action === 'Drop' && isKept(item.name, keep)) continue;
       const key = `${item.name}|${action}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -252,7 +258,8 @@ function productionCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
 
 function bankCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
   const out: Candidate[] = [];
-  if (s.inventory.items.length > 0) {
+  // "Deposit inventory" would take the protected tools with it.
+  if (s.inventory.items.length > 0 && !s.inventory.items.some((i) => isKept(i.name, goal.keep))) {
     out.push({
       id: 'bank:deposit_all',
       kind: 'bank_item',
@@ -264,7 +271,7 @@ function bankCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
   }
   const seenInv = new Set<string>();
   for (const item of s.inventory.items) {
-    if (seenInv.has(item.name)) continue;
+    if (seenInv.has(item.name) || isKept(item.name, goal.keep)) continue;
     seenInv.add(item.name);
     out.push({
       id: `bank:deposit:${item.id}`,
