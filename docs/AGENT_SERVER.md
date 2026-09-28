@@ -159,6 +159,77 @@ Response includes `reason` field when `clicked` is `false`.
 }
 ```
 
+#### GET /snapshot
+
+The whole decision-relevant state in one response, for agents that decide once per tick (used by
+`agent-engine/`). Entities are read in one client-thread pass; `reachable`/`pathDistance` come from a
+single BFS from the player, counting a tile beside the entity's footprint as reachable. Only objects with
+at least one action are listed. `messages` holds game/system messages only, never player chat.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `radius` | 15 (max 30) | Entity search radius in tiles |
+| `maxNpcs` / `maxObjects` / `maxGroundItems` | 25 / 40 / 20 | Caps, nearest first |
+| `bankItems` | 100 (max 800) | Bank items included while the bank is open |
+| `messages` | 20 (max 50) | Recent game messages |
+
+```json
+{
+  "tick": 18234, "timestamp": 1790000000000, "loggedIn": true, "gameState": "LOGGED_IN",
+  "player": {
+    "name": "PlayerName", "combatLevel": 3, "position": {"x": 3243, "y": 3152, "plane": 0},
+    "hp": {"current": 10, "max": 10}, "prayer": {"current": 1, "max": 1},
+    "runEnergy": 100, "runEnabled": true, "specialAttack": 100,
+    "animation": -1, "animating": false, "moving": false, "inCombat": false, "interacting": null
+  },
+  "skills": [{"name": "Fishing", "level": 5, "boosted": 5, "xp": 388}],
+  "npcs": [{"index": 1530, "id": 1530, "name": "Fishing spot", "combatLevel": 0, "actions": ["Net", "Bait"],
+            "position": {"x": 3245, "y": 3152, "plane": 0}, "distance": 2, "reachable": true, "pathDistance": 1,
+            "healthRatio": -1, "healthScale": -1, "interactingWithPlayer": false, "animation": -1}],
+  "objects": [{"id": 10820, "name": "Bank booth", "type": "GAME", "actions": ["Bank", "Collect"],
+               "position": {"x": 3208, "y": 3221, "plane": 2}, "distance": 3, "reachable": true, "pathDistance": 2}],
+  "groundItems": [{"id": 526, "name": "Bones", "quantity": 1, "position": {"x": 3240, "y": 3150, "plane": 0},
+                   "distance": 3, "geValue": 100, "lootable": true, "reachable": true, "pathDistance": 3}],
+  "inventory": {"freeSlots": 27, "items": [{"slot": 0, "id": 303, "name": "Small fishing net", "quantity": 1,
+                "noted": false, "stackable": false, "actions": ["Drop"]}]},
+  "equipment": [{"slot": "WEAPON", "id": 1351, "name": "Bronze axe"}],
+  "dialogue": {"inDialogue": false, "hasContinue": false, "hasOptions": false, "options": []},
+  "production": {"open": false, "options": []},
+  "bank": {"open": false, "items": []},
+  "walk": {"active": false},
+  "messages": [{"tick": 18230, "type": "SPAM", "text": "You catch some shrimps."}]
+}
+```
+
+#### POST /act
+
+One structured action per request, addressed at an exact instance: NPCs by client `index`, objects and
+ground items by `id` + tile, inventory items by `slot` (plus optional `id` to guard against a changed
+slot). Actions go through the normal `Rs2*` interaction helpers (menu entry + synthetic click). The
+response only says whether the action was dispatched; verify effects from the next `/snapshot`.
+
+| `op` | Fields |
+|------|--------|
+| `interact` | `target` (`{kind: npc, index}`, `{kind: object, id, x, y, plane}`, `{kind: ground_item, id, x, y, plane}`, `{kind: inventory, slot, id?}`, `{kind: equipment, slot}`, `{kind: dialogue, option}`), `action` |
+| `use_item_on` | `itemSlot`, `target` (npc, object or inventory) |
+| `walk` / `walk_cancel` | `to: {x, y, plane}`, optional `distance` (shares the `/walk` walker) |
+| `dialogue_continue` / `dialogue_select` | `option` (text) for select |
+| `production_select` | `option` (product name in the make-X interface) |
+| `bank_open` / `bank_close` / `bank_deposit_all` | none |
+| `bank_deposit` / `bank_withdraw` | `itemId`, `amount` (number or `"all"`) |
+| `drop` | `slot` |
+| `toggle_run` | `enabled` |
+
+```json
+{"op": "interact", "target": {"kind": "npc", "index": 1530}, "action": "Net"}
+→ {"success": true, "op": "interact", "tick": 18235}
+{"op": "interact", "target": {"kind": "object", "id": 11364, "x": 3285, "y": 3368, "plane": 0}, "action": "Mine"}
+→ {"success": false, "op": "interact", "tick": 18236, "reason": "target_not_found"}
+```
+
+Unknown ops and malformed bodies return 400; failure reasons include `not_logged_in`,
+`target_not_found`, `slot_changed`, `slot_empty`, `bank_not_open`, `option_not_found`, `click_failed`.
+
 #### GET /skills
 
 | Parameter | Required | Description |

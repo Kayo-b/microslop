@@ -179,7 +179,8 @@ public class WalkHandler extends AgentHandler {
 		sendJson(exchange, 200, response);
 	}
 
-	private static synchronized Future<WalkerState> submitWalk(WorldPoint destination, int reachedDistance) {
+	/** Shared with {@link ActHandler}: one walker at a time, whichever endpoint started it. */
+	static synchronized Future<WalkerState> submitWalk(WorldPoint destination, int reachedDistance) {
 		if (activeWalk != null && !activeWalk.isDone()
 			&& destination.equals(activeWalkTarget)
 			&& reachedDistance == activeWalkReachedDistance) {
@@ -193,6 +194,35 @@ public class WalkHandler extends AgentHandler {
 		activeWalkReachedDistance = reachedDistance;
 		activeWalk = WALK_EXECUTOR.submit(() -> Rs2Walker.walkWithState(destination, reachedDistance));
 		return activeWalk;
+	}
+
+	/** Stops the active walk, if any. Returns whether one was running. */
+	static synchronized boolean cancelActiveWalk() {
+		if (activeWalk == null || activeWalk.isDone()) {
+			return false;
+		}
+		activeWalk.cancel(true);
+		Rs2Walker.setTarget(null);
+		activeWalk = null;
+		activeWalkTarget = null;
+		activeWalkReachedDistance = DEFAULT_REACHED_DISTANCE;
+		return true;
+	}
+
+	/** Walk status for {@code /snapshot}: {active, target, distanceToTarget}. */
+	static synchronized Map<String, Object> activeWalkStatus() {
+		Map<String, Object> status = new LinkedHashMap<>();
+		boolean active = activeWalk != null && !activeWalk.isDone();
+		status.put("active", active);
+		if (active && activeWalkTarget != null) {
+			Map<String, Integer> target = new LinkedHashMap<>();
+			target.put("x", activeWalkTarget.getX());
+			target.put("y", activeWalkTarget.getY());
+			target.put("plane", activeWalkTarget.getPlane());
+			status.put("target", target);
+			status.put("distanceToTarget", distanceTo(activeWalkTarget));
+		}
+		return status;
 	}
 
 	private static synchronized void clearActiveWalk(Future<WalkerState> walkFuture) {

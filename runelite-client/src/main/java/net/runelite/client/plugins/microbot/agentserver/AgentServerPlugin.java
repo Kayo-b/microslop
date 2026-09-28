@@ -9,6 +9,7 @@ import net.runelite.api.Client;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.agentserver.handler.*;
@@ -152,7 +153,9 @@ public class AgentServerPlugin extends Plugin {
 				new QuestHelperHandler(gson),
 				new StateMachineDebugHandler(gson),
 				new ProfileHandler(gson),
-				new DynamicScriptDeployHandler(gson)
+				new DynamicScriptDeployHandler(gson),
+				new SnapshotHandler(gson, client),
+				new ActHandler(gson, client)
 		);
 	}
 
@@ -200,6 +203,11 @@ public class AgentServerPlugin extends Plugin {
 			udsServer = null;
 			return false;
 		}
+	}
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event) {
+		GameMessageLog.record(client.getTickCount(), event.getType(), event.getMessage());
 	}
 
 	@Subscribe
