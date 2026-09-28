@@ -68,6 +68,9 @@ export interface SnapshotNpc {
   healthScale: number;
   interactingWithPlayer: boolean;
   animation: number;
+  reachable: boolean;
+  /** Walking distance to the best tile beside it; -1 when unreachable. */
+  pathDistance: number;
 }
 
 export interface SnapshotObject {
@@ -78,6 +81,7 @@ export interface SnapshotObject {
   position: WorldPoint;
   distance: number;
   reachable: boolean;
+  pathDistance: number;
 }
 
 export interface SnapshotGroundItem {
@@ -88,6 +92,8 @@ export interface SnapshotGroundItem {
   distance: number;
   geValue: number;
   lootable: boolean;
+  reachable: boolean;
+  pathDistance: number;
 }
 
 export interface DialogueState {
@@ -111,6 +117,18 @@ export interface BankState {
   items: BankItem[];
 }
 
+/** The skilling "how many?" interface (cook, smelt, fletch...). */
+export interface ProductionState {
+  open: boolean;
+  options: string[];
+}
+
+export interface WalkStatus {
+  active: boolean;
+  target?: WorldPoint;
+  distanceToTarget?: number;
+}
+
 export interface GameMessage {
   tick: number;
   type: string;
@@ -131,7 +149,9 @@ export interface Snapshot {
   objects: SnapshotObject[];
   groundItems: SnapshotGroundItem[];
   dialogue: DialogueState;
+  production: ProductionState;
   bank: BankState;
+  walk: WalkStatus;
   /** Recent game/system messages only; other players' chat is never included. */
   messages: GameMessage[];
 }
@@ -146,16 +166,16 @@ export type TargetRef =
   | { kind: 'ground_item'; id: number; x: number; y: number; plane: number }
   | { kind: 'inventory'; slot: number; id: number }
   | { kind: 'equipment'; slot: string; id: number }
-  | { kind: 'bank_item'; id: number; name: string }
-  | { kind: 'dialogue'; option: string; index: number }
-  | { kind: 'widget'; name: string };
+  | { kind: 'dialogue'; option: string };
 
 export type GameAction =
   | { op: 'interact'; target: TargetRef; action: string }
   | { op: 'use_item_on'; itemSlot: number; target: TargetRef }
-  | { op: 'walk'; to: WorldPoint; label?: string }
+  | { op: 'walk'; to: WorldPoint; distance?: number; label?: string }
+  | { op: 'walk_cancel' }
   | { op: 'dialogue_continue' }
   | { op: 'dialogue_select'; option: string }
+  | { op: 'production_select'; option: string }
   | { op: 'bank_open' }
   | { op: 'bank_close' }
   | { op: 'bank_deposit_all' }
@@ -185,7 +205,8 @@ export type CandidateKind =
   | 'equipment'
   | 'bank_item'
   | 'dialogue'
-  | 'widget';
+  | 'production'
+  | 'destination';
 
 export interface Candidate {
   /** Stable within one step, e.g. "npc:1530#Net". Used as the decision-engine option key. */
