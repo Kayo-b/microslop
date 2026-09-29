@@ -1,35 +1,33 @@
 /**
- * Claude-backed System 2: an adaptive planner (next sub-goal when one ends) and an escalator
- * (picks an option when the System 1 model is unsure). Both are called rarely - on sub-goal
- * boundaries and low-confidence ticks - never every tick.
+ * LLM-backed System 2: an adaptive planner (next sub-goal when one ends), a rescuer (one sub-goal
+ * when a scripted planner gives up or gets stuck) and an escalator (picks an option when the
+ * System 1 model is unsure). All are called rarely - on sub-goal boundaries, rescues and
+ * low-confidence ticks - never every tick.
  *
- * Model: CLAUDE_MODEL, default claude-sonnet-5-5. Credentials: ANTHROPIC_API_KEY or an
- * `ant auth login` profile (the SDK resolves either).
- *
- * Structured outputs (output_config.format) make every reply schema-valid JSON. Requests opt into
- * server-side refusal fallback ("default" routing) so a safety-classifier decline is retried on
- * Anthropic's recommended fallback model instead of stalling the agent.
+ * Backend: any provider from providers.ts (Anthropic, OpenAI-compatible APIs, or Claude Code via
+ * `claude -p`), chosen by --llm / LLM_PROVIDER or the API key present. Every reply is validated
+ * against a zod schema.
  */
-import Anthropic from '@anthropic-ai/sdk';
-import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { z } from 'zod';
 import type { Escalator, EscalationRequest, EscalationResponse } from '../engine/GameIntentEngine.ts';
 import { foldInventory } from '../engine/state.ts';
 import { compile, describe, type DoneCondition } from '../planner/conditions.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from '../planner/types.ts';
+import { createLlmClient, DEFAULT_ANTHROPIC_MODEL, type LlmClient } from './providers.ts';
 import type { RescueRequest, Rescuer } from './rescue.ts';
 
-export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
-const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+export const DEFAULT_CLAUDE_MODEL = DEFAULT_ANTHROPIC_MODEL;
 
-export interface ClaudeOptions {
-  client?: Anthropic;
-  model?: string;
+export interface LlmOptions {
+  /** Backend; default: the one configured in the environment (see providers.ts). */
+  llm?: LlmClient;
   effort?: 'low' | 'medium' | 'high';
 }
 
-function makeClient(opts: ClaudeOptions): Anthropic {
-  return opts.client ?? new Anthropic();
+function resolveLlm(opts: LlmOptions): LlmClient {
+  const llm = opts.llm ?? createLlmClient();
+  if (!llm) throw new Error('No LLM configured: set LLM_PROVIDER (anthropic, claude-code, openai, openrouter, ...) or an API key such as ANTHROPIC_API_KEY / OPENAI_API_KEY');
+  return llm;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -140,37 +138,26 @@ export function plannerPrompt(ctx: PlannerContext): string {
   return lines.join('\n');
 }
 
-export class ClaudePlanner implements Planner {
-  readonly name = 'claude';
-  private readonly client: Anthropic;
-  private readonly model: string;
+export class LlmPlanner implements Planner {
+  readonly name: string;
+  private readonly llm: LlmClient;
   private readonly effort: 'low' | 'medium' | 'high';
 
-  constructor(opts: ClaudeOptions = {}) {
-    this.client = makeClient(opts);
-    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+  constructor(opts: LlmOptions = {}) {
+    this.llm = resolveLlm(opts);
     this.effort = opts.effort ?? 'medium';
+    this.name = `llm:${this.llm.name}`;
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
-    const response = await this.client.beta.messages.parse({
-      model: this.model,
-      max_tokens: 16000,
-      betas: [FALLBACK_BETA],
-      fallbacks: 'default',
-      system: [{ type: 'text', text: PLANNER_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      output_config: { effort: this.effort, format: betaZodOutputFormat(PlanSchema) },
-      messages: [{ role: 'user', content: plannerPrompt(ctx) }],
-    });
-    if (response.stop_reason === 'refusal') {
-      return { kind: 'impossible', reason: `planner request declined (${response.stop_details?.category ?? 'no category'})` };
-    }
-    if (!response.parsed_output) {
-      throw new Error(`planner returned no parseable plan (stop_reason ${response.stop_reason})`);
-    }
-    return planToStep(response.parsed_output);
+    const res = await this.llm.structured({ system: PLANNER_SYSTEM, user: plannerPrompt(ctx), schema: PlanSchema, schemaName: 'plan', effort: this.effort });
+    if (res.kind === 'refusal') return { kind: 'impossible', reason: `planner request declined: ${res.reason}` };
+    return planToStep(res.value);
   }
 }
+
+/** @deprecated name kept for existing callers; the planner works with any configured LLM. */
+export const ClaudePlanner = LlmPlanner;
 
 // ---------------------------------------------------------------------------------------------
 // Escalator
@@ -208,33 +195,26 @@ export function escalationPrompt(req: EscalationRequest): string {
   return lines.filter((l) => l !== undefined).join('\n');
 }
 
-export class ClaudeEscalator implements Escalator {
-  private readonly client: Anthropic;
-  private readonly model: string;
+export class LlmEscalator implements Escalator {
+  private readonly llm: LlmClient;
   private readonly effort: 'low' | 'medium' | 'high';
 
-  constructor(opts: ClaudeOptions = {}) {
-    this.client = makeClient(opts);
-    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+  constructor(opts: LlmOptions = {}) {
+    this.llm = resolveLlm(opts);
     // Low effort: this sits on the tick path and only has to pick from a short list.
     this.effort = opts.effort ?? 'low';
   }
 
   async choose(req: EscalationRequest): Promise<EscalationResponse | null> {
-    const response = await this.client.beta.messages.parse({
-      model: this.model,
-      max_tokens: 4000,
-      betas: [FALLBACK_BETA],
-      fallbacks: 'default',
-      system: [{ type: 'text', text: ESCALATOR_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      output_config: { effort: this.effort, format: betaZodOutputFormat(EscalationSchema) },
-      messages: [{ role: 'user', content: escalationPrompt(req) }],
-    });
-    if (response.stop_reason === 'refusal' || !response.parsed_output) return null;
-    const out = response.parsed_output;
+    const res = await this.llm.structured({ system: ESCALATOR_SYSTEM, user: escalationPrompt(req), schema: EscalationSchema, schemaName: 'escalation', effort: this.effort, maxTokens: 4000 });
+    if (res.kind === 'refusal') return null;
+    const out = res.value;
     return { op: out.op, optionId: out.option_id ?? undefined, note: out.note };
   }
 }
+
+/** @deprecated see LlmEscalator. */
+export const ClaudeEscalator = LlmEscalator;
 
 /** For logs and the CLI: one line describing a planned sub-goal. */
 export function describeSubGoal(sg: PlannedSubGoal): string {
@@ -254,38 +234,23 @@ const RESCUE_SYSTEM = `${PLANNER_SYSTEM}
 
 You are being called as a rescue: a scripted planner normally drives this agent, and it just gave up or got stuck. Propose ONE sub-goal that gets past the specific problem (go around an obstacle, use a different target or place, fetch a missing item, close or answer an interface), after which the scripted planner resumes. Do not re-plan the whole goal. Answer "impossible" only when no sub-goal can help without a human.`;
 
-/** Asks Claude for one sub-goal that gets past what the scripted planner could not handle. */
-export class ClaudeRescuer implements Rescuer {
+/** Asks the configured LLM for one sub-goal that gets past what the scripted planner could not handle. */
+export class LlmRescuer implements Rescuer {
   readonly name: string;
-  private readonly client: Anthropic;
-  private readonly model: string;
+  private readonly llm: LlmClient;
 
-  constructor(opts: ClaudeOptions = {}) {
-    this.client = makeClient(opts);
-    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
-    this.name = `claude:${this.model}`;
+  constructor(opts: LlmOptions = {}) {
+    this.llm = resolveLlm(opts);
+    this.name = this.llm.name;
   }
 
   async rescue(ctx: PlannerContext, req: RescueRequest): Promise<PlanStep> {
-    const prompt = [
-      plannerPrompt(ctx),
-      '',
-      `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`,
-      'Propose one sub-goal that gets past this.',
-    ].join('\n');
-    const response = await this.client.beta.messages.parse({
-      model: this.model,
-      max_tokens: 16000,
-      betas: [FALLBACK_BETA],
-      fallbacks: 'default',
-      system: [{ type: 'text', text: RESCUE_SYSTEM, cache_control: { type: 'ephemeral' } }],
-      output_config: { effort: 'medium', format: betaZodOutputFormat(PlanSchema) },
-      messages: [{ role: 'user', content: prompt }],
-    });
-    if (response.stop_reason === 'refusal') {
-      return { kind: 'impossible', reason: `rescue request declined (${response.stop_details?.category ?? 'no category'})` };
-    }
-    if (!response.parsed_output) throw new Error(`rescue returned no parseable plan (stop_reason ${response.stop_reason})`);
-    return planToStep(response.parsed_output);
+    const user = [plannerPrompt(ctx), '', `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`, 'Propose one sub-goal that gets past this.'].join('\n');
+    const res = await this.llm.structured({ system: RESCUE_SYSTEM, user, schema: PlanSchema, schemaName: 'plan', effort: 'medium' });
+    if (res.kind === 'refusal') return { kind: 'impossible', reason: `rescue request declined: ${res.reason}` };
+    return planToStep(res.value);
   }
 }
+
+/** @deprecated see LlmRescuer. */
+export const ClaudeRescuer = LlmRescuer;

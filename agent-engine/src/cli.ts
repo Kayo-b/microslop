@@ -23,7 +23,8 @@ import { GameIntentEngine } from './engine/GameIntentEngine.ts';
 import { JsonlStepLogger } from './engine/log.ts';
 import { buildDecisionState, relevantSkillsFor } from './engine/state.ts';
 import { KnowledgeBase } from './kb/KnowledgeBase.ts';
-import { ClaudeEscalator, ClaudePlanner, ClaudeRescuer, describeSubGoal } from './llm/claude.ts';
+import { describeSubGoal, LlmEscalator, LlmPlanner, LlmRescuer } from './llm/claude.ts';
+import { createLlmClient, type LlmClient } from './llm/providers.ts';
 import { JsonlRescueLog, RescuingPlanner } from './llm/rescue.ts';
 import { BankMemory, buildProfile, level, readAccount, unmet } from './strategy/account.ts';
 import { MONEY, QUESTS, TRAINING } from './strategy/catalog.ts';
@@ -66,6 +67,8 @@ const { values, positionals } = parseArgs({
     escalate: { type: 'boolean', default: false },
     rescue: { type: 'boolean', default: false },
     strategy: { type: 'string' },
+    llm: { type: 'string' },
+    'llm-model': { type: 'string' },
     skill: { type: 'string' },
     level: { type: 'string' },
     quest: { type: 'string' },
@@ -101,8 +104,11 @@ function help(): void {
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
 
 Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE
-       --rescue   let Claude propose a sub-goal when a scripted planner gives up or gets stuck
-                  (needs ANTHROPIC_API_KEY; rescues logged to data/rescues.jsonl)`);
+       --rescue   let an LLM propose a sub-goal when a scripted planner gives up or gets stuck
+                  (rescues logged to data/rescues.jsonl)
+       --llm P    LLM backend: anthropic | claude-code | openai | openrouter | groq | together |
+                  gemini | deepseek | mistral | xai | ollama | lmstudio (or LLM_PROVIDER; default:
+                  the provider whose API key is set)   --llm-model M   model for that backend`);
 }
 
 async function inspect(): Promise<void> {
@@ -148,7 +154,13 @@ function strategyGoal(kind: string): StrategyGoal {
   throw new Error(`unknown strategy "${kind}" (level | money | quest)`);
 }
 
-const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY);
+/** The LLM backend chosen by --llm/--llm-model or the environment; null when none is configured. */
+let llmClient: LlmClient | null | undefined;
+function llm(): LlmClient | null {
+  if (llmClient === undefined) llmClient = createLlmClient({ provider: values.llm, model: values['llm-model'] });
+  return llmClient;
+}
+const hasLlm = () => llm() !== null;
 
 /** Dry run: the account profile and what each strategy would do next. Never acts. */
 async function strategy(): Promise<void> {
@@ -162,7 +174,7 @@ async function strategy(): Promise<void> {
   console.log(`Account: ${account.members ? 'members' : 'free-to-play'}, ${account.questPoints} quest points, combat ${p.combatLevel}, melee bracket ${level(p, 'Melee')}`);
   console.log(`Quests finished: ${finished.join(', ') || 'none'}`);
   console.log(`Bank: ${p.bankKnown ? `${bank.items.size} stacks (seen ${bank.seenAt})` : 'not seen yet (open it once so item requirements can be checked)'}`);
-  console.log(`LLM: ${hasClaude() ? 'available' : 'no ANTHROPIC_API_KEY: llm and quest phases are skipped'}`);
+  console.log(`LLM: ${hasLlm() ? llm()!.name : 'none configured (--llm or LLM_PROVIDER / an API key): llm and quest phases are skipped'}`);
   for (const kind of values.strategy ? [values.strategy] : ['level', 'money', 'quest']) {
     const choice = choosePhase(strategyGoal(kind), p, new Set());
     const text = !choice ? 'nothing fits' : 'done' in choice ? `done: ${choice.done}` : `${choice.phase.text} [${choice.phase.exec.kind}] - ${choice.why}`;
@@ -247,30 +259,31 @@ async function run(): Promise<void> {
     planner = new StrategyPlanner(g, {
       account: backend,
       kb,
-      llmPlanner: () => (hasClaude() ? new ClaudePlanner() : null),
-      questPlanner: (q) => (hasClaude() ? new QuestPlanner(q, backend, new ClaudePlanner()) : null),
+      llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
+      questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
       onPhase: (phase, why) => console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`),
     });
     goal = `strategy ${values.strategy}${values.skill ? ` ${values.skill}` : ''}${values.level ? ` to ${values.level}` : ''}${values.quest ? ` ${values.quest}` : ''}`;
   } else if (values.goal) {
-    planner = new ClaudePlanner();
+    if (!hasLlm()) throw new Error('--goal needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
+    planner = new LlmPlanner({ llm: llm()! });
     goal = values.goal;
   } else {
     throw new Error('run needs --task PRESET, --subgoal TEXT or --goal TEXT');
   }
 
   if (values.rescue) {
-    if (!process.env.ANTHROPIC_API_KEY) throw new Error('--rescue needs ANTHROPIC_API_KEY (add it to the repo-root .env)');
+    if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();
-    planner = new RescuingPlanner(planner, new ClaudeRescuer(), log);
-    console.log(`[agent] LLM rescue on; rescues logged to ${log.file}`);
+    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: llm()! }), log);
+    console.log(`[agent] LLM rescue on (${llm()!.name}); rescues logged to ${log.file}`);
   }
   const logger = new JsonlStepLogger(values['log-dir']);
   const engine = new GameIntentEngine({
     backend,
     decisionEngine: createDecisionEngine(values.engine),
     kb,
-    escalator: values.escalate ? new ClaudeEscalator() : null,
+    escalator: values.escalate ? new LlmEscalator({ llm: llm() ?? undefined }) : null,
     logger,
     runId: logger.runId,
     minConfidence: values['min-confidence'] ? Number(values['min-confidence']) : undefined,
