@@ -38,8 +38,10 @@ const lc = (s: string) => s.toLowerCase();
 
 export function matchesAny(name: string, hints: string[] | undefined): boolean {
   if (!hints || hints.length === 0) return false;
+  // One direction only: "Dead tree" matches hint "Tree", but "Rocks" (a depleted rock) must not
+  // match hint "Iron rocks".
   const n = lc(name);
-  return hints.some((h) => n.includes(lc(h)) || lc(h).includes(n));
+  return hints.some((h) => n.includes(lc(h)));
 }
 
 function isKept(name: string, keep: string[] | undefined): boolean {

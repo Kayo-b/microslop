@@ -271,3 +271,10 @@ test('transient game states (region loading) wait instead of blocking as a logou
     await server.close();
   }
 });
+
+test('hint matching is one-directional: depleted "Rocks" is not an "Iron rocks" target', async () => {
+  const { matchesAny } = await import('../src/engine/candidates.ts');
+  assert.equal(matchesAny('Rocks', ['Iron rocks']), false);
+  assert.equal(matchesAny('Iron rocks', ['Iron rocks']), true);
+  assert.equal(matchesAny('Dead tree', ['Tree']), true);
+});
