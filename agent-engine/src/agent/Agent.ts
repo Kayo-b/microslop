@@ -50,6 +50,12 @@ export class Agent {
     this.stopRequested = true;
   }
 
+  private async flee(from: WorldPoint | undefined): Promise<void> {
+    const bank = from && this.o.kb ? this.o.kb.nearestBanks(from, 1, false)[0] : undefined;
+    if (!bank) return;
+    await this.o.backend.act({ op: 'walk', to: bank.point, distance: 3, label: `flee to ${bank.name}` }).catch(() => undefined);
+  }
+
   async run(goal: string): Promise<AgentOutcome> {
     const { backend, engine, planner } = this.o;
     const sleep = this.o.sleep ?? defaultSleep;
@@ -107,6 +113,11 @@ export class Agent {
               report = { subgoal: sg.text, result: 'done', reason: result.reason, steps: n, trail: trail(engine) };
               break;
             case 'blocked':
+              if (result.reason.startsWith('halt:')) {
+                // Low HP and no food: the character keeps fighting on auto-retaliate after the
+                // agent stops, so walk to the nearest bank first.
+                await this.flee(result.snapshot?.player?.position);
+              }
               if (result.reason === 'logged_out' || result.reason.startsWith('halt:')) {
                 this.o.onEvent?.({ type: 'report', report: { subgoal: sg.text, result: 'blocked', reason: result.reason, steps: n, trail: trail(engine) } });
                 return finish('halted', result.reason);
