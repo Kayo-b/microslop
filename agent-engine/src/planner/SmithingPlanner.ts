@@ -222,7 +222,7 @@ export class SmithingPlanner implements Planner {
 
     // 6. Go and use the nearest bank (any bank works; the knowledge base knows where they are).
     const pos = s.player?.position;
-    const nearest = pos && ctx.kb ? ctx.kb.nearestBanks(pos, 1, true).find((b) => b.kind === 'bank') : undefined;
+    const nearest = pos && ctx.kb ? ctx.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
     const bank = nearest ? { name: nearest.name, point: nearest.point } : { name: 'Lumbridge Top bank', point: PLACES.bank };
     return sg(`go to the ${bank.name} and open the bank`, ['Bank booth', 'Banker', 'Bank chest'], ['Bank', 'Use'], { bankOpen: true }, {
       destination: bank,
