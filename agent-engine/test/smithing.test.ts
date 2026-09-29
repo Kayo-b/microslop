@@ -51,3 +51,12 @@ test('smithing planner: wears upgrades, mines when the bank is short of copper',
   const done = withSmithing(18);
   assert.equal((await next(new SmithingPlanner(), done)).kind, 'complete');
 });
+
+test('smithing planner banks a cluttered inventory before a mining trip', async () => {
+  const p = new SmithingPlanner();
+  const bank = withSmithing(7);
+  bank.bank = { open: true, items: [{ slot: 0, id: 438, name: 'Tin ore', quantity: 200 }] };
+  await next(p, bank);
+  const cluttered = withSmithing(7, [item(0, 2347, 'Hammer'), item(1, 1265, 'Bronze pickaxe'), ...Array.from({ length: 11 }, (_, i) => item(2 + i, 1205, 'Bronze dagger'))]);
+  assert.match(text(await next(p, cluttered)), /bank/);
+});

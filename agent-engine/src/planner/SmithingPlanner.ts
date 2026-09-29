@@ -143,7 +143,10 @@ export class SmithingPlanner implements Planner {
     // 5. Out of materials. Mine when the bank (as last seen) cannot supply a batch of copper.
     const bankCopper = this.bank?.get('Copper ore') ?? 0;
     const needMining = this.bank !== null && bankCopper < BATCH && copper < BATCH;
-    if (needMining && s.inventory.freeSlots > 0 && held(s, 'pickaxe') + s.equipment.filter((e) => lc(e.name).includes('pickaxe')).length > 0) {
+    const hasPickaxe = held(s, 'pickaxe') + s.equipment.filter((e) => lc(e.name).includes('pickaxe')).length > 0;
+    // Bank the smithed junk first: a trip with a half-full inventory wastes the walk.
+    const roomy = s.inventory.freeSlots >= 20 || copper > 0;
+    if (needMining && roomy && s.inventory.freeSlots > 0 && hasPickaxe) {
       return sg('mine copper ore at the Lumbridge Swamp mine until the inventory is full', ['Copper rocks'], ['Mine'], { inventoryFull: true }, {
         destination: { name: 'Lumbridge Swamp mine', point: PLACES.mine },
         maxSteps: 500,

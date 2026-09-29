@@ -232,3 +232,10 @@ test('smithing candidates queue no more than the sub-goal still needs', () => {
   assert.deepEqual(pick(7), { op: 'production_select', option: 'Bronze sword', amount: 5 });
   assert.deepEqual(pick(20), { op: 'production_select', option: 'Bronze sword', amount: 10 });
 });
+
+test('an exact sub-goal destination is the only destination offered', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const kb = { findPlaces: () => [], nearestObjects: () => [{ name: 'Bank booth', kind: 'object', point: { x: 3250, y: 3170, plane: 0 }, members: false }], nearestSpawns: () => [], nearestBanks: () => [] } as never;
+  const dests = buildDestinations(snapshot(), kb, { text: 'bank', targets: ['Bank booth'], destination: { name: 'Lumbridge Top bank', point: { x: 3209, y: 3220, plane: 2 } } }, 5);
+  assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Lumbridge Top bank']);
+});

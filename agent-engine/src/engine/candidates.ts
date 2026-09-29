@@ -398,7 +398,12 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     out.push({ id: `dest:${out.length}`, label: `${label} (${distance} tiles${floor})`, to, distance });
   };
 
-  if (goal.destination?.point) push(goal.destination.name ?? 'Sub-goal destination', goal.destination.point);
+  if (goal.destination?.point) {
+    // An exact destination from the planner is authoritative: offering "nearest X" alternatives
+    // let the classifier walk to a spurious placement instead of the bank it was sent to.
+    push(goal.destination.name ?? 'Sub-goal destination', goal.destination.point);
+    return out;
+  }
   if (goal.destination?.name && !goal.destination.point) {
     for (const p of kb.findPlaces(goal.destination.name, me, 2)) push(p.name, p.point);
   }
