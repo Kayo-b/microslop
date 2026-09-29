@@ -1,5 +1,5 @@
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
-import type { Snapshot, SubGoal, WorldPoint } from '../types.ts';
+import type { GameAction, Snapshot, SubGoal, WorldPoint } from '../types.ts';
 import type { DoneCondition } from './conditions.ts';
 
 /** A sub-goal plus its declarative completion condition (kept for logging / LLM context). */
@@ -30,7 +30,9 @@ export type PlanStep =
   | { kind: 'complete'; reason: string }
   | { kind: 'impossible'; reason: string }
   /** Do nothing until `until` holds (or `maxSeconds` pass), e.g. resting for HP to regenerate. */
-  | { kind: 'wait'; reason: string; until: DoneCondition; maxSeconds: number };
+  | { kind: 'wait'; reason: string; until: DoneCondition; maxSeconds: number }
+  /** Send one action directly (settings with no world target, e.g. setting autocast). */
+  | { kind: 'act'; action: GameAction; reason: string };
 
 /** Long-horizon layer: decides the next sub-goal whenever the previous one ends. */
 export interface Planner {

@@ -12,6 +12,9 @@ import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
+import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
+import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
@@ -48,10 +51,16 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 @Slf4j
 public class ActHandler extends AgentHandler {
 
+	/** Combat tab style buttons, left to right, top to bottom. */
+	@SuppressWarnings("deprecation")
+	private static final WidgetInfo[] COMBAT_STYLES = {
+		WidgetInfo.COMBAT_STYLE_ONE, WidgetInfo.COMBAT_STYLE_TWO, WidgetInfo.COMBAT_STYLE_THREE, WidgetInfo.COMBAT_STYLE_FOUR
+	};
+
 	static final Set<String> OPS = new HashSet<>(Arrays.asList(
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
-			"drop", "toggle_run", "shop_buy", "shop_close"));
+			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close"));
 
 	private final Client client;
 
@@ -176,6 +185,21 @@ public class ActHandler extends AgentHandler {
 			}
 			case "toggle_run":
 				return Rs2Player.toggleRunEnergy(Boolean.TRUE.equals(body.get("enabled"))) ? Result.ok() : Result.fail("toggle_failed");
+			case "attack_style": {
+				int index = requireInt(body, "index");
+				if (index < 0 || index >= COMBAT_STYLES.length) throw new IllegalArgumentException("index must be 0-3");
+				return Rs2Combat.setAttackStyle(COMBAT_STYLES[index]) ? Result.ok() : Result.fail("style_not_available");
+			}
+			case "autocast": {
+				Rs2CombatSpells spell;
+				try {
+					spell = Rs2CombatSpells.valueOf(requireString(body, "spell"));
+				} catch (IllegalArgumentException e) {
+					throw new IllegalArgumentException("Unknown combat spell: " + body.get("spell"));
+				}
+				// Needs a staff that can autocast, the magic level and the runes.
+				return Rs2Combat.setAutoCastSpell(spell, Boolean.TRUE.equals(body.get("defensive"))) ? Result.ok() : Result.fail("cannot_autocast");
+			}
 			default:
 				throw new IllegalArgumentException("Unknown op: " + op);
 		}

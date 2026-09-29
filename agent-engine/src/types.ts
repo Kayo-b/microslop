@@ -24,6 +24,10 @@ export interface PlayerState {
   /** 0-100. */
   runEnergy: number;
   runEnabled: boolean;
+  /** Selected combat tab style button, 0-3 (varp 43). */
+  attackStyle?: number;
+  /** Modern-spellbook spell set to autocast (e.g. WIND_STRIKE), or null. */
+  autocast?: string | null;
   /** 0-100. */
   specialAttack: number;
   animation: number;
@@ -54,6 +58,8 @@ export interface EquipmentItem {
   slot: string;
   id: number;
   name: string;
+  /** Stack size (arrows/runes in the ammo slot); 1 for other items. */
+  quantity?: number;
 }
 
 export interface SnapshotNpc {
@@ -196,6 +202,10 @@ export type GameAction =
   | { op: 'shop_buy'; itemId: number; amount: 1 | 5 | 10 | 50 }
   | { op: 'shop_close' }
   | { op: 'toggle_run'; enabled: boolean }
+  /** Combat tab style button 0-3 (e.g. bows: 0 accurate, 1 rapid, 2 longrange). */
+  | { op: 'attack_style'; index: number }
+  /** Autocast a combat spell (needs a staff): WIND_STRIKE, WATER_STRIKE, EARTH_STRIKE, FIRE_STRIKE, ... */
+  | { op: 'autocast'; spell: string; defensive?: boolean }
   | { op: 'wait'; ticks: number }
   | { op: 'done' };
 

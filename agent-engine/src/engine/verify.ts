@@ -22,6 +22,7 @@ export type Change =
   | 'bank'
   | 'walk'
   | 'run'
+  | 'combat_style'
   | 'xp'
   | 'shop';
 
@@ -53,6 +54,7 @@ export function diff(a: Snapshot, b: Snapshot): Change[] {
     if ((pa.interacting?.index ?? null) !== (pb.interacting?.index ?? null) || (pa.interacting?.name ?? null) !== (pb.interacting?.name ?? null)) out.push('interacting');
     if (pa.hp.current !== pb.hp.current) out.push('hp');
     if (pa.runEnabled !== pb.runEnabled) out.push('run');
+    if (pa.attackStyle !== pb.attackStyle || pa.autocast !== pb.autocast) out.push('combat_style');
   }
   if (invKey(a) !== invKey(b)) out.push('inventory');
   if (eqKey(a) !== eqKey(b)) out.push('equipment');
@@ -109,6 +111,9 @@ export function expectedChanges(action: GameAction): Change[] {
       return ['inventory'];
     case 'toggle_run':
       return ['run'];
+    case 'attack_style':
+    case 'autocast':
+      return ['combat_style'];
     case 'shop_buy':
       return ['inventory'];
     case 'shop_close':

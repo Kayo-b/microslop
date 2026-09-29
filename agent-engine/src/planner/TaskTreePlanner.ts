@@ -9,7 +9,8 @@ import type { Snapshot, WorldPoint } from '../types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { FOOD_HEAL, foodSupply } from '../kb/resources.ts';
 import { compile, type DoneCondition } from './conditions.ts';
-import { upgradesFrom, weakSlots } from './gear.ts';
+import { type CombatStyle, upgradesFrom, weakSlots } from './gear.ts';
+import { nextKitStep, planKit } from './kit.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
 export interface GatherTask {
@@ -67,6 +68,8 @@ export interface CombatTask {
   foodBatch?: number;
   /** Also loot any of our drops worth at least this (gp, ground value). Coins are always looted. Default 25. */
   lootValue?: number;
+  /** Combat style; ranged and magic buy, carry and wear their kit (bow + arrows, staff + runes). Default melee. */
+  style?: CombatStyle;
 }
 
 /** What the combat planner has seen of the bank, and helpers it needs from the world. */
@@ -76,6 +79,8 @@ export interface CombatContext {
   bankFood?: Map<string, number> | null;
   /** Item names last seen in the bank; null until the bank has been opened. */
   bankItems?: string[] | null;
+  /** Bank counts last seen (name -> quantity); null until the bank has been opened. */
+  bankCounts?: Map<string, number> | null;
 }
 
 export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
@@ -83,6 +88,8 @@ export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
   'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength', area: { name: 'Lumbridge cow field', point: { x: 3257, y: 3265, plane: 0 } } },
   'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength', area: { name: 'Lumbridge goblins', point: { x: 3245, y: 3240, plane: 0 } } },
   'kill-barbarians': { activity: 'kill barbarians and bury their bones', monsters: ['Barbarian'], loot: ['Bones'], keep: [], skill: 'Strength', maxLevel: 10, buryAt: 5, minFood: 5, area: { name: 'Barbarian Village', point: { x: 3079, y: 3419, plane: 0 } } },
+  'range-cows': { activity: 'train Ranged on cows with a bow, picking up arrows', monsters: ['Cow', 'Cow calf'], loot: ['Bronze arrow', 'Iron arrow'], keep: [], skill: 'Ranged', style: 'ranged', area: { name: 'Lumbridge cow field', point: { x: 3257, y: 3265, plane: 0 } } },
+  'mage-chickens': { activity: 'train Magic on chickens with Wind Strike autocast', monsters: ['Chicken'], loot: [], keep: [], skill: 'Magic', style: 'magic', area: { name: 'Lumbridge chicken farm', point: { x: 3232, y: 3295, plane: 0 } } },
   'kill-guards': { activity: 'kill Varrock guards and collect coins', monsters: ['Guard'], loot: ['Coins'], keep: [], skill: 'Strength', minFood: 10, area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } } },
 };
 
@@ -151,15 +158,25 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
   const hpFrac = hp && hp.max > 0 ? hp.current / hp.max : 1;
   const food = foodSupply(s.inventory.items);
   const minFood = task.minFood ?? 0;
+  const style = task.style ?? 'melee';
   const invNames = s.inventory.items.map((i) => i.name);
-  const invUpgrades = upgradesFrom(s, invNames);
-  const keep = [...task.keep, ...foodKeep, ...invUpgrades.map((u) => u.name)];
+  const invUpgrades = upgradesFrom(s, invNames, style);
+  const kitNames = style === 'melee' ? [] : planKit(style, s, { bank: cc.bankCounts ?? null }).need.map((n) => n.name);
+  const keep = [...task.keep, ...foodKeep, ...invUpgrades.map((u) => u.name), ...kitNames];
+  const pos = s.player?.position;
+  const nearestBank = pos && cc.kb ? cc.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
+  const kitStep = () =>
+    style === 'melee' ? null : nextKitStep(style, s, { bank: cc.bankCounts ?? null }, nearestBank ? { name: nearestBank.name, point: nearestBank.point } : undefined);
+
+  if (s.shop.open) return kitStep() ?? { kind: 'subgoal', subgoal: goal('close the shop', [], ['Close'], { shopOpen: false }, 5, keep) };
 
   if (s.bank.open) {
     const loot = [...new Set(s.inventory.items.map((i) => i.name))].filter((n) => !keep.some((k) => n.toLowerCase().includes(k.toLowerCase())) && !/coins/i.test(n));
     if (loot.length) return { kind: 'subgoal', subgoal: goal(`deposit the ${loot.join(', ')}`, loot, ['Deposit'], { lacksItems: loot }, 20, keep) };
+    const kit = kitStep();
+    if (kit) return kit;
     // Better weapon/armour in the bank than what is worn or carried: take it out to wield.
-    const fetch = upgradesFrom(s, [...invNames, ...s.bank.items.map((b) => b.name)]).filter((u) => !invNames.includes(u.name));
+    const fetch = upgradesFrom(s, [...invNames, ...s.bank.items.map((b) => b.name)], style).filter((u) => !invNames.includes(u.name) && !kitNames.includes(u.name));
     if (fetch.length) {
       const want = fetch.map((u) => ({ name: u.name, count: 1 }));
       return {
@@ -179,6 +196,11 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
     return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };
   }
 
+  if (!s.player?.inCombat) {
+    const kit = kitStep();
+    if (kit) return kit;
+  }
+
   // Never fight with a tool in hand: wield the best carried weapon/armour first.
   const wield = invUpgrades[0];
   if (wield && !s.player?.inCombat) {
@@ -192,14 +214,15 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
   }
 
   // Gear upgrades known to be banked, or weak/empty slots and the bank not checked yet.
-  const gearTrip = cc.bankItems ? upgradesFrom(s, cc.bankItems).length > 0 : weakSlots(s).length > 0;
+  const weak = weakSlots(s, style).filter((slot) => style === 'melee' || (slot !== 'weapon' && slot !== 'ammo'));
+  const gearTrip = cc.bankItems ? upgradesFrom(s, cc.bankItems, style).length > 0 : weak.length > 0;
   const needFood = food.count < minFood;
   if (needFood || gearTrip) {
     const bankHasFood = cc.bankFood === null || cc.bankFood === undefined ? true : [...cc.bankFood.values()].some((n) => n > 0);
     const pos = s.player?.position;
     const bank = pos && cc.kb ? cc.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
     if (((needFood && bankHasFood) || gearTrip) && bank) {
-      const why = [needFood && bankHasFood ? 'restock food' : '', gearTrip ? `get better gear (${weakSlots(s).join(', ') || 'upgrades'})` : ''].filter(Boolean).join(' and ');
+      const why = [needFood && bankHasFood ? 'restock food' : '', gearTrip ? `get better gear (${weak.join(', ') || 'upgrades'})` : ''].filter(Boolean).join(' and ');
       return {
         kind: 'subgoal',
         subgoal: { ...goal(`${why} at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS },
@@ -283,6 +306,7 @@ export class TaskTreePlanner implements Planner {
   private readonly task: Task;
   private bankFood: Map<string, number> | null = null;
   private bankItems: string[] | null = null;
+  private bankCounts: Map<string, number> | null = null;
 
   constructor(task: GatherTask | Task, name = 'task-tree') {
     this.task = 'kind' in task ? task : { kind: 'gather', ...task };
@@ -305,10 +329,11 @@ export class TaskTreePlanner implements Planner {
     }
     if (ctx.snapshot.bank.open) {
       this.bankItems = ctx.snapshot.bank.items.map((b) => b.name);
+      this.bankCounts = new Map(ctx.snapshot.bank.items.map((b) => [b.name, b.quantity]));
       this.bankFood = new Map(ctx.snapshot.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).map((b) => [b.name, b.quantity]));
     }
     return this.task.kind === 'combat'
-      ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood, bankItems: this.bankItems })
+      ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood, bankItems: this.bankItems, bankCounts: this.bankCounts })
       : nextGatherStep(this.task, ctx.snapshot);
   }
 }

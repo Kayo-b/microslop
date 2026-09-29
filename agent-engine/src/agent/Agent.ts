@@ -123,6 +123,18 @@ export class Agent {
           continue;
         }
 
+        if (plan.kind === 'act') {
+          // Reported like a one-step sub-goal, so the planner's give-up rules see repeated failures.
+          const res = await backend.act(plan.action).catch((e) => ({ success: false, reason: e instanceof Error ? e.message : String(e) }));
+          await sleep(waitMs * 2);
+          const report: SubGoalReport = { subgoal: plan.reason, result: res.success ? 'done' : 'blocked', reason: res.success ? 'action sent' : `failed: ${res.reason ?? 'unknown'}`, steps: 1, trail: [] };
+          reports.push(report);
+          this.o.onEvent?.({ type: 'report', report });
+          blockedInARow = report.result === 'done' ? 0 : blockedInARow + 1;
+          if (blockedInARow >= (this.o.maxBlockedInARow ?? 4)) return finish('impossible', `${blockedInARow} sub-goals in a row failed; last: ${report.reason}`);
+          continue;
+        }
+
         const sg = plan.subgoal;
         subgoals++;
         this.o.onEvent?.({ type: 'subgoal', subgoal: sg });

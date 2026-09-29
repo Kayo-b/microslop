@@ -43,7 +43,7 @@ export interface StrategyDeps {
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
 /** Skills the "level the account" strategy rotates through (lowest first). */
-const ROTATION = ['Melee', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'];
+const ROTATION = ['Melee', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'];
 
 /** Picks the next phase for a goal; null when nothing fits (or the goal is reached). */
 export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): { phase: Phase; why: string } | { done: string } | null {
@@ -174,7 +174,7 @@ export class StrategyPlanner implements Planner {
       const cur = this.current;
       // The phase's planner only sees its own history, not the reports of earlier phases.
       const step = await cur.planner.next({ ...ctx, goal: cur.phase.text, reports: ctx.reports.slice(cur.reportsAt) });
-      if (step.kind === 'subgoal' || step.kind === 'wait') return step;
+      if (step.kind === 'subgoal' || step.kind === 'wait' || step.kind === 'act') return step;
       if (step.kind === 'impossible') {
         this.skip.add(cur.phase.id);
         this.deps.onPhase?.(cur.phase, `gave up: ${step.reason}`);

@@ -1,12 +1,14 @@
 /**
- * Melee gear ranking for the pre-combat equipment check. Gear is scored by metal tier and item
+ * Gear ranking for the pre-combat equipment check, per combat style (melee metal gear; bows and
+ * arrows for ranged; staves for magic). Gear is scored by metal tier and item
  * type; an item is only a candidate when the player meets its Attack (weapons) or Defence (armour)
  * requirement. Tools that happen to be wieldable (axes, pickaxes) count as a weapon of score 0, so
  * any real weapon replaces them.
  */
 import type { Snapshot } from '../types.ts';
 
-export type GearSlot = 'weapon' | 'shield' | 'head' | 'body' | 'legs';
+export type GearSlot = 'weapon' | 'shield' | 'head' | 'body' | 'legs' | 'ammo';
+export type CombatStyle = 'melee' | 'ranged' | 'magic';
 
 /** Metal prefix -> [tier, level requirement]. */
 const TIERS: [RegExp, number, number][] = [
@@ -40,6 +42,24 @@ const TYPES: [RegExp, GearSlot, number][] = [
 
 const TOOL = /(^|\s)(axe|pickaxe)$/i;
 
+/** Bows by name: [score, Ranged level]. All are two-handed. */
+const BOWS: Record<string, [number, number]> = {
+  Shortbow: [10, 1], Longbow: [9, 1],
+  'Oak shortbow': [20, 5], 'Oak longbow': [19, 5],
+  'Willow shortbow': [30, 20], 'Willow longbow': [29, 20],
+  'Maple shortbow': [40, 30], 'Maple longbow': [39, 30],
+  'Yew shortbow': [50, 40], 'Yew longbow': [49, 40],
+};
+/** Arrows by name: [score, Ranged level of the weakest bow that fires them]. */
+const ARROWS: Record<string, [number, number]> = {
+  'Bronze arrow': [10, 1], 'Iron arrow': [20, 1], 'Steel arrow': [30, 5], 'Mithril arrow': [40, 20], 'Adamant arrow': [50, 30], 'Rune arrow': [60, 40],
+};
+/** Staves that can autocast: [score, Magic level]. */
+const STAVES: Record<string, [number, number]> = {
+  Staff: [10, 1], 'Magic staff': [12, 1],
+  'Staff of air': [20, 1], 'Staff of water': [20, 1], 'Staff of earth': [20, 1], 'Staff of fire': [20, 1],
+};
+
 export interface GearInfo {
   slot: GearSlot;
   score: number;
@@ -47,7 +67,17 @@ export interface GearInfo {
   req: number;
 }
 
-export function classifyGear(name: string): GearInfo | null {
+export function classifyGear(name: string, style: CombatStyle = 'melee'): GearInfo | null {
+  if (style !== 'melee') {
+    const table = style === 'ranged' ? BOWS : STAVES;
+    if (table[name]) return { slot: 'weapon', score: table[name]![0], req: table[name]![1] };
+    if (style === 'ranged' && ARROWS[name]) return { slot: 'ammo', score: ARROWS[name]![0], req: ARROWS[name]![1] };
+    const melee = classifyGear(name, 'melee');
+    // Any other weapon is no weapon for this style; bows are two-handed, so shields are left alone.
+    if (melee?.slot === 'weapon') return { slot: 'weapon', score: 0, req: 1 };
+    if (melee?.slot === 'shield' && style === 'ranged') return null;
+    return melee;
+  }
   if (TOOL.test(name)) return { slot: 'weapon', score: 0, req: 1 };
   const tier = TIERS.find(([re]) => re.test(name));
   const type = TYPES.find(([re]) => re.test(name));
@@ -55,21 +85,29 @@ export function classifyGear(name: string): GearInfo | null {
   return { slot: type[1], score: tier[1] * 10 + type[2], req: tier[2] };
 }
 
-export const GEAR_SLOTS: GearSlot[] = ['weapon', 'shield', 'head', 'body', 'legs'];
+export const GEAR_SLOTS: GearSlot[] = ['weapon', 'shield', 'head', 'body', 'legs', 'ammo'];
+
+function slotsFor(style: CombatStyle): GearSlot[] {
+  if (style === 'ranged') return ['weapon', 'ammo', 'head', 'body', 'legs'];
+  return ['weapon', 'shield', 'head', 'body', 'legs'];
+}
+
+const LEVEL_SKILL: Record<CombatStyle, string> = { melee: 'Attack', ranged: 'Ranged', magic: 'Magic' };
 
 function level(s: Snapshot, skill: string): number {
   return s.skills.find((k) => k.name === skill)?.level ?? 1;
 }
 
-function usable(s: Snapshot, info: GearInfo): boolean {
-  return info.req <= level(s, info.slot === 'weapon' ? 'Attack' : 'Defence');
+function usable(s: Snapshot, info: GearInfo, style: CombatStyle): boolean {
+  const armour = info.slot !== 'weapon' && info.slot !== 'ammo';
+  return info.req <= level(s, armour ? 'Defence' : LEVEL_SKILL[style]);
 }
 
 /** Score of what is worn in each slot (-1 when empty or unrecognised). */
-export function wornScores(s: Snapshot): Record<GearSlot, number> {
-  const out = { weapon: -1, shield: -1, head: -1, body: -1, legs: -1 } as Record<GearSlot, number>;
+export function wornScores(s: Snapshot, style: CombatStyle = 'melee'): Record<GearSlot, number> {
+  const out = { weapon: -1, shield: -1, head: -1, body: -1, legs: -1, ammo: -1 } as Record<GearSlot, number>;
   for (const e of s.equipment) {
-    const g = classifyGear(e.name);
+    const g = classifyGear(e.name, style);
     if (g) out[g.slot] = Math.max(out[g.slot], g.score);
   }
   return out;
@@ -82,20 +120,26 @@ export interface GearUpgrade {
 }
 
 /** The best usable item per slot among `names` that beats what is worn. */
-export function upgradesFrom(s: Snapshot, names: Iterable<string>): GearUpgrade[] {
-  const worn = wornScores(s);
+export function upgradesFrom(s: Snapshot, names: Iterable<string>, style: CombatStyle = 'melee'): GearUpgrade[] {
+  const worn = wornScores(s, style);
   const best = new Map<GearSlot, GearUpgrade>();
   for (const name of names) {
-    const g = classifyGear(name);
-    if (!g || g.score === 0 || !usable(s, g) || g.score <= worn[g.slot]) continue;
+    const g = classifyGear(name, style);
+    if (!g || g.score === 0 || !usable(s, g, style) || g.score <= worn[g.slot]) continue;
     const cur = best.get(g.slot);
     if (!cur || g.score > cur.score) best.set(g.slot, { slot: g.slot, name, score: g.score });
   }
-  return GEAR_SLOTS.flatMap((slot) => (best.has(slot) ? [best.get(slot)!] : []));
+  return slotsFor(style).flatMap((slot) => (best.has(slot) ? [best.get(slot)!] : []));
 }
 
 /** Slots with nothing useful worn: an empty armour slot, or no real weapon (a tool counts as none). */
-export function weakSlots(s: Snapshot): GearSlot[] {
-  const worn = wornScores(s);
-  return GEAR_SLOTS.filter((slot) => worn[slot] <= 0);
+export function weakSlots(s: Snapshot, style: CombatStyle = 'melee'): GearSlot[] {
+  const worn = wornScores(s, style);
+  return slotsFor(style).filter((slot) => worn[slot] <= 0);
 }
+
+/** Cheapest shop weapon/ammo per style, used when the account owns none. */
+export const STARTER_KIT: Record<Exclude<CombatStyle, 'melee'>, { weapon: string; ammo?: string }> = {
+  ranged: { weapon: 'Shortbow', ammo: 'Bronze arrow' },
+  magic: { weapon: 'Staff' },
+};

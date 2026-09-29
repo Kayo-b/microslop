@@ -173,6 +173,17 @@ public class SnapshotHandler extends AgentHandler {
 		p.put("runEnergy", client.getEnergy() / 100);
 		// Varp 173 = run toggle, 300 = special attack energy (x10).
 		p.put("runEnabled", client.getVarpValue(173) == 1);
+		// Combat tab: selected style button (varp 43, 0-3) and the modern autocast spell, if any.
+		p.put("attackStyle", client.getVarpValue(43));
+		int autocast = client.getVarbitValue(net.runelite.api.gameval.VarbitID.AUTOCAST_SPELL);
+		String autocastName = null;
+		for (net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells spell : net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells.values()) {
+			if (autocast != 0 && spell.getVarbitValue() == autocast) {
+				autocastName = spell.name();
+				break;
+			}
+		}
+		p.put("autocast", autocastName);
 		p.put("specialAttack", client.getVarpValue(300) / 10);
 		p.put("animation", local.getAnimation());
 		p.put("animating", local.getAnimation() != -1);
@@ -348,6 +359,7 @@ public class SnapshotHandler extends AgentHandler {
 			m.put("slot", slotNames.getOrDefault(item.getSlot(), String.valueOf(item.getSlot())));
 			m.put("id", item.getId());
 			m.put("name", item.getName());
+			m.put("quantity", item.getQuantity());
 			out.add(m);
 		}
 		return out;

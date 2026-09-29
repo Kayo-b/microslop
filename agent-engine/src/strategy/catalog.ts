@@ -64,6 +64,10 @@ export const TRAINING: TrainingMethod[] = [
   { skill: 'Melee', from: 60, to: 99, members: false, name: 'ogresses at Corsair Cove', exec: { kind: 'llm', goal: 'train melee on Ogress Warriors in the Corsair Cove dungeon, banking at the Corsair Cove bank' }, req: { quests: ['The Corsair Curse'] } },
   { skill: 'Melee', from: 20, to: 70, members: true, name: 'sand crabs (Hosidius coast)', exec: { kind: 'combat', monster: 'Sand crab', area: { name: 'Hosidius sand crabs', point: { x: 1760, y: 3470, plane: 0 } } }, notes: 'AFK; high HP, 1 max hit' },
 
+  // Ranged and magic: no quests needed; kits are bought in Varrock (Lowe's, Zaff's, Aubury's).
+  { skill: 'Ranged', from: 1, to: 30, members: false, name: 'cows at Lumbridge with a shortbow', exec: { kind: 'preset', preset: 'range-cows' }, notes: 'buys a shortbow and bronze arrows at Lowe\'s; picks arrows back up' },
+  { skill: 'Magic', from: 1, to: 13, members: false, name: 'chickens with Wind Strike autocast', exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
+
   // Gathering.
   { skill: 'Fishing', from: 1, to: 20, members: false, name: 'net shrimps and anchovies at Draynor', exec: { kind: 'preset', preset: 'fish-shrimp', bank: true }, req: { items: ['Small fishing net'] } },
   { skill: 'Fishing', from: 20, to: 40, members: false, name: 'fly fish trout and salmon at Barbarian Village', exec: { kind: 'preset', preset: 'fish-trout', bank: true }, req: { items: ['Fly fishing rod', 'Feather'] } },
