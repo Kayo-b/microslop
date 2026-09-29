@@ -25,7 +25,7 @@ test('candidates: one per (target, action), exact targets, sub-goal hints ranked
   });
   const net = candidates.find((c) => c.id === 'npc:1530#Small Net');
   assert.deepEqual(net?.gameAction, { op: 'interact', target: { kind: 'npc', index: 1530, id: 1530 }, action: 'Small Net' });
-  assert.ok(candidates.some((c) => c.id === 'inv:0#Drop'));
+  assert.ok(!candidates.some((c) => c.id === 'inv:0#Drop'), 'Drop is offered only for items the sub-goal names');
 });
 
 test('candidates: identical targets collapse to the nearest few and unreachable ones are dropped', () => {
@@ -340,4 +340,12 @@ test('reflexes: a random event NPC targeting us is dismissed; one talking to som
   assert.equal(checkReflexes(snapshot({ npcs: [{ ...genie, interactingWithPlayer: false }] })), null);
   const ids = buildCandidates(snapshot({ npcs: [genie] }), null, { text: 'look around' }).candidates.map((c) => c.id);
   assert.ok(!ids.some((id) => id.startsWith('npc:9')), 'random events are never offered to the classifier');
+});
+
+test('candidates: a pickup never offers Drop; a drop sub-goal does', () => {
+  const s = snapshot({ inventory: { freeSlots: 26, items: [item(0, 1323, 'Iron scimitar', { actions: ['Wield', 'Drop'] }), item(1, 995, 'Coins', { quantity: 16, actions: ['Drop'] })] } });
+  const pickup = buildCandidates(s, null, { text: 'pick up arrows', targets: ['Bronze arrow'], actions: ['Take'] }).candidates.map((c) => c.id);
+  assert.ok(!pickup.some((id) => id.startsWith('inv:')), pickup.join(', '));
+  const drop = buildCandidates(s, null, { text: 'drop the scimitar', targets: ['Iron scimitar'], actions: ['Drop'] }).candidates.map((c) => c.id);
+  assert.ok(drop.includes('inv:0#Drop') && !drop.includes('inv:0#Wield'));
 });

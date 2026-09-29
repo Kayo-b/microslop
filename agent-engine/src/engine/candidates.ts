@@ -176,7 +176,11 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     });
   }
 
-  out.push(...inventoryCandidates(s, goal.keep).filter((c) => !EQUIP_ACTIONS.has(lc(c.action)) || allowsEquip(goal)));
+  out.push(
+    ...inventoryCandidates(s, goal.keep).filter(
+      (c) => inventoryActionAllowed(c.action, goal) && (c.action !== 'Drop' || (!!goal.targets?.length && matchesAny(c.name, goal.targets))),
+    ),
+  );
   out.push(...equipmentCandidates(s, goal));
 
   const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
@@ -266,9 +270,18 @@ function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
 
 const EQUIP_ACTIONS = new Set(['wield', 'wear', 'equip']);
 
-/** Gear changes are the planner's call (gear/kit checks); a fight or pickup never swaps weapons. */
-function allowsEquip(goal: SubGoal): boolean {
-  return !goal.actions?.length || goal.actions.some((a) => EQUIP_ACTIONS.has(lc(a)));
+/**
+ * A sub-goal that lists its actions gets only those inventory actions ("Use Tinderbox" matches
+ * "Use" or the full text): a fight or a pickup must never drop, wield or bury things. Sub-goals
+ * with no action list (free-form LLM goals) see every inventory action.
+ */
+function inventoryActionAllowed(action: string, goal: SubGoal): boolean {
+  if (!goal.actions?.length) return true;
+  const a = lc(action);
+  return goal.actions.some((g) => {
+    const x = lc(g);
+    return a === x || (x === 'use' && a.startsWith('use ')) || (EQUIP_ACTIONS.has(x) && EQUIP_ACTIONS.has(a));
+  });
 }
 
 function equipmentCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
