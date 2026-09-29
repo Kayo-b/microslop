@@ -72,3 +72,9 @@ test('kit: an empty quiver ends the fight and the next step re-equips the carrie
   const next = nextCombatStep(COMBAT_PRESETS['range-cows']!, s, { bankItems: [], bankCounts: new Map() });
   assert.ok(next.kind === 'subgoal' && /wield the Bronze arrow/.test(next.subgoal.text), JSON.stringify(next));
 });
+
+test('kit: out of arrows with no coins anywhere stops instead of looping', () => {
+  const s = char({ equipment: [{ slot: 'WEAPON', id: 841, name: 'Shortbow' }] });
+  const step = nextKitStep('ranged', s, { bank: new Map() }, bank);
+  assert.ok(step?.kind === 'impossible' && /out of arrows/.test(step.reason), JSON.stringify(step));
+});

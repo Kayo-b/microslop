@@ -196,6 +196,13 @@ export function nextKitStep(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, k
   if (style === 'magic' && kit.spell && s.player && s.player.autocast !== kit.spell) {
     return { kind: 'act', action: { op: 'autocast', spell: kit.spell }, reason: `autocast ${kit.spell.toLowerCase().replace('_', ' ')}` };
   }
+  // Nothing left to wear, fetch or buy, and nothing to attack with: stop instead of looping.
+  if (outOfSupplies(style, s) && kc.bank === null && bank) {
+    return sub(`check the ${bank.name} for coins or ${style === 'ranged' ? 'arrows' : 'runes'}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep, { destination: bank });
+  }
+  if (outOfSupplies(style, s)) {
+    return { kind: 'impossible', reason: `out of ${style === 'ranged' ? 'arrows' : 'runes'} and no coins to restock (${invCoins} carried${kc.bank ? `, ${kc.bank.get('Coins') ?? 0} banked` : ', bank not checked'})` };
+  }
   return null;
 }
 
