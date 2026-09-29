@@ -10,7 +10,7 @@ import { item, snapshot } from './support/fixtures.ts';
 
 const tmp = process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, 'tmp') : '/tmp';
 const skills = (levels: Record<string, number>) =>
-  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
+  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
 
 function state(levels: Record<string, number>, extra: Partial<Snapshot> = {}): Snapshot {
   const s = snapshot(extra);
@@ -30,7 +30,7 @@ function bankWith(items: string[]): BankMemory {
 }
 
 test('strategy level: rotates to the lowest trainable skill; a named skill uses its bracket', () => {
-  const s = state({ Attack: 32, Strength: 33, Defence: 24, Hitpoints: 31, Fishing: 20, Cooking: 21, Woodcutting: 8, Mining: 30, Smithing: 23, Firemaking: 9 });
+  const s = state({ Attack: 32, Strength: 33, Defence: 24, Hitpoints: 31, Ranged: 20, Magic: 20, Fishing: 20, Cooking: 21, Woodcutting: 8, Mining: 30, Smithing: 23, Firemaking: 9 });
   const p = buildProfile(account(), s, bankWith(['Tinderbox']));
   const any = choosePhase({ kind: 'level' }, p, new Set());
   assert.ok(any && 'phase' in any && /Woodcutting/.test(any.phase.text) && any.phase.until?.level === 15, JSON.stringify(any));
