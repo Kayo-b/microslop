@@ -309,3 +309,12 @@ test('a target that fails twice is withheld for the rest of the sub-goal', async
     await server.close();
   }
 });
+
+test('candidates: an NPC already attacking us is the only attack option', () => {
+  const s = snapshot({
+    npcs: [goblin({ index: 1, distance: 1 }), goblin({ index: 2, distance: 4, interactingWithPlayer: true })],
+  });
+  const goal: SubGoal = { text: 'attack a goblin', targets: ['Goblin'], actions: ['Attack'] };
+  const ids = buildCandidates(s, null, goal).candidates.filter((c) => c.id.endsWith('#Attack')).map((c) => c.id);
+  assert.deepEqual(ids, ['npc:2#Attack']);
+});

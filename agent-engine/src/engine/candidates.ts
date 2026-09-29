@@ -85,6 +85,10 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     return true;
   };
 
+  // Something already fighting us: finish it before picking a new fight. Eating drops the
+  // player's target, and attacking a fresh NPC then leaves two hitting us.
+  const attackers = new Set(s.npcs.filter((n) => n.interactingWithPlayer && !(n.healthScale > 0 && n.healthRatio === 0)).map((n) => n.index));
+
   for (const npc of [...s.npcs].sort((a, b) => a.distance - b.distance)) {
     if (!npc.reachable && !opts.includeUnreachable) continue;
     // A killed NPC lingers for a few ticks during its death animation with an empty health bar;
@@ -92,6 +96,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     if (npc.healthScale > 0 && npc.healthRatio === 0) continue;
     for (const action of npc.actions) {
       if (lc(action) === 'attack' && npc.interactingWithOther && !npc.interactingWithPlayer) continue;
+      if (lc(action) === 'attack' && attackers.size > 0 && !attackers.has(npc.index)) continue;
       if (lc(action) === 'attack' && goal.maxTargetLevel !== undefined && npc.combatLevel > goal.maxTargetLevel) continue;
       if (!admit(`npc|${npc.name}|${action}`)) continue;
       const hint = kb ? npcHint(kb, ctx, npc.name, npc.id, action) : { text: '', unmet: [] };
