@@ -367,8 +367,9 @@ function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[]
         out.push({ id: `bank:withdraw${n}:${b.id}`, kind: 'bank_item', name: b.name, action: `Withdraw-${n}`, label: `Withdraw ${n} ${b.name} (bank has ${b.quantity}${needText})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: n } });
       }
     }
-    // "All" only when it cannot overshoot the wanted count (or no count was given).
-    if (need === null || b.quantity <= need) {
+    // "All" only when it cannot overshoot the wanted count (or no count was given). Wanting more
+    // than an inventory holds means the item stacks (coins, runes), where overshooting is free.
+    if (need === null || b.quantity <= need || need > 28) {
       out.push({ id: `bank:withdrawAll:${b.id}`, kind: 'bank_item', name: b.name, action: 'Withdraw-All', label: `Withdraw all ${b.name} (bank has ${b.quantity}${needText})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: 'all' } });
     }
   }

@@ -5,7 +5,7 @@
  * The gathering template covers the classic loop: gather until full -> bank (or drop) -> repeat,
  * optionally until a skill level is reached.
  */
-import type { Snapshot } from '../types.ts';
+import type { Snapshot, WorldPoint } from '../types.ts';
 import { compile, type DoneCondition } from './conditions.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
@@ -48,12 +48,15 @@ export interface CombatTask {
   /** Skill to watch for --until-level (e.g. Strength). */
   skill: string;
   untilLevel?: number;
+  /** Where the monsters are; walked to when none is in view. */
+  area?: { name: string; point: WorldPoint };
 }
 
 export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
-  'kill-chickens': { activity: 'kill chickens and collect feathers', monsters: ['Chicken'], loot: ['Feather'], keep: [], skill: 'Strength' },
-  'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength' },
-  'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength' },
+  'kill-chickens': { activity: 'kill chickens and collect feathers', monsters: ['Chicken'], loot: ['Feather'], keep: [], skill: 'Strength', area: { name: 'Lumbridge chicken farm', point: { x: 3232, y: 3295, plane: 0 } } },
+  'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength', area: { name: 'Lumbridge cow field', point: { x: 3257, y: 3265, plane: 0 } } },
+  'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength', area: { name: 'Lumbridge goblins', point: { x: 3245, y: 3240, plane: 0 } } },
+  'kill-guards': { activity: 'kill Varrock guards and collect coins', monsters: ['Guard'], loot: ['Coins'], keep: ['Shrimps'], skill: 'Strength', area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } } },
 };
 
 /** How many of an item (by name substring) the inventory holds, counting stack sizes. */
@@ -80,6 +83,13 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
     };
   }
   if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };
+  const inView = s.npcs.some((n) => task.monsters.some((m) => n.name.toLowerCase() === m.toLowerCase()) && n.reachable);
+  if (!inView && task.area) {
+    return {
+      kind: 'subgoal',
+      subgoal: { ...goal(`walk to the ${task.area.name}`, task.monsters, ['Attack'], { near: { ...task.area.point, radius: 6 } }, 300, task.keep), destination: task.area },
+    };
+  }
   return {
     kind: 'subgoal',
     subgoal: goal(`attack a ${task.monsters.join(' or ')}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 60, task.keep),
