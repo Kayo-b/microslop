@@ -152,9 +152,13 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     }
   }
 
+  // A sub-goal that lists its actions only picks things up when "Take" is one of them, and then
+  // only what it names: a fight or an arrow pickup must not wander off to grab bones and beef.
+  const takes = !goal.actions?.length || goal.actions.some((a) => lc(a) === 'take');
   for (const item of [...s.groundItems].sort((a, b) => a.distance - b.distance)) {
     if (!item.reachable && !opts.includeUnreachable) continue;
     if (!item.lootable) continue;
+    if (!takes || (goal.actions?.length && goal.targets?.length && !matchesAny(item.name, goal.targets))) continue;
     if (!admit(`ground|${item.name}`)) continue;
     const p = item.position;
     out.push({
@@ -168,7 +172,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     });
   }
 
-  out.push(...inventoryCandidates(s, goal.keep));
+  out.push(...inventoryCandidates(s, goal.keep).filter((c) => !EQUIP_ACTIONS.has(lc(c.action)) || allowsEquip(goal)));
   out.push(...equipmentCandidates(s, goal));
 
   const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
@@ -256,8 +260,16 @@ function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
   return out;
 }
 
+const EQUIP_ACTIONS = new Set(['wield', 'wear', 'equip']);
+
+/** Gear changes are the planner's call (gear/kit checks); a fight or pickup never swaps weapons. */
+function allowsEquip(goal: SubGoal): boolean {
+  return !goal.actions?.length || goal.actions.some((a) => EQUIP_ACTIONS.has(lc(a)));
+}
+
 function equipmentCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
-  // Unequipping is rarely useful; only offer it when the sub-goal names the item.
+  // Unequipping is rarely useful; only offer it when the sub-goal asks to remove that item.
+  if (goal.actions?.length && !goal.actions.some((a) => lc(a) === 'remove')) return [];
   return s.equipment
     .filter((e) => matchesAny(e.name, goal.targets))
     .map((e) => ({

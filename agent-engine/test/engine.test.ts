@@ -318,3 +318,17 @@ test('candidates: an NPC already attacking us is the only attack option', () => 
   const ids = buildCandidates(s, null, goal).candidates.filter((c) => c.id.endsWith('#Attack')).map((c) => c.id);
   assert.deepEqual(ids, ['npc:2#Attack']);
 });
+
+test('candidates: fights and pickups never swap gear or grab unnamed loot', () => {
+  const ground = (id: number, name: string) => ({ id, name, quantity: 1, position: { x: 3250, y: 3260, plane: 0 }, distance: 1, reachable: true, lootable: true, geValue: 1, stackable: false });
+  const s = snapshot({
+    npcs: [goblin({ name: 'Cow', distance: 3 })],
+    inventory: { freeSlots: 26, items: [item(0, 1323, 'Iron scimitar', { actions: ['Wield', 'Drop'] })] },
+    equipment: [{ slot: 'AMMO', id: 882, name: 'Bronze arrow', quantity: 100 }],
+    groundItems: [ground(526, 'Bones'), ground(882, 'Bronze arrow')] as never,
+  });
+  const attack = buildCandidates(s, null, { text: 'attack a cow', targets: ['Cow'], actions: ['Attack'] }).candidates.map((c) => c.id);
+  assert.ok(!attack.some((id) => /Wield|ground:|Remove/.test(id)), attack.join(', '));
+  const pickup = buildCandidates(s, null, { text: 'pick up arrows', targets: ['Bronze arrow'], actions: ['Take'] }).candidates.map((c) => c.id);
+  assert.ok(pickup.includes('ground:882@3250,3260,0#Take') && !pickup.some((id) => /ground:526|Remove|Wield/.test(id)), pickup.join(', '));
+});
