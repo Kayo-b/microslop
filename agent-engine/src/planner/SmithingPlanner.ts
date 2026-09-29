@@ -35,7 +35,7 @@ export interface Metal {
   /** One-bar item smithed for XP when no upgrade is due. */
   filler: string;
   /** Where to smith: the rusted anvil by the Lumbridge furnace accepts bronze only. */
-  anvil: { name: string; point: WorldPoint; targets: string[] };
+  anvil: { name: string; point: WorldPoint; targets: string[]; avoid?: string[] };
   gear: GearTier[];
 }
 
@@ -68,7 +68,7 @@ export const IRON: Metal = {
   mineRocks: 'Iron rocks',
   mine: { name: 'Al Kharid mine', point: { x: 3296, y: 3311, plane: 0 } },
   filler: 'Iron dagger',
-  anvil: { name: 'Varrock west anvils', point: { x: 3189, y: 3423, plane: 0 }, targets: ['Anvil'] },
+  anvil: { name: 'Varrock west anvils', point: { x: 3189, y: 3423, plane: 0 }, targets: ['Anvil'], avoid: ['Rusted anvil'] },
   gear: [
     { item: 'Iron scimitar', level: 20, bars: 2, slot: 'WEAPON' },
     { item: 'Iron full helm', level: 22, bars: 2, slot: 'HEAD' },
@@ -193,6 +193,7 @@ export class SmithingPlanner implements Planner {
       return sg(`smith a ${item} at the ${metal.anvil.name}`, [...metal.anvil.targets, item], ['Smith'], { hasItem: { name: item, count } }, {
         destination: { name: metal.anvil.name, point: metal.anvil.point },
         want: [{ name: item, count }],
+        avoid: metal.anvil.avoid,
         maxSteps: 200,
       });
     }

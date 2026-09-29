@@ -249,3 +249,9 @@ test('action-less objects such as a fire become use-item-on targets', () => {
   assert.deepEqual(c?.gameAction, { op: 'use_item_on', itemSlot: 0, target: { kind: 'object', id: 26185, x: 3230, y: 3232, plane: 0 } });
   assert.equal(c?.label, 'Use Raw shrimps on the Fire - 1 tiles');
 });
+
+test('avoided names are never offered, so a look-alike does not stop travel', () => {
+  const s = snapshot({ objects: [tree({ id: 40725, name: 'Rusted anvil', actions: ['Smith'] })] });
+  const { candidates } = buildCandidates(s, null, { text: 'smith', targets: ['Anvil'], avoid: ['Rusted anvil'] });
+  assert.ok(!candidates.some((c) => c.name === 'Rusted anvil'));
+});

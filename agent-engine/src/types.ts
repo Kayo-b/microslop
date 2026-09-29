@@ -260,6 +260,8 @@ export interface SubGoal {
   keep?: string[];
   /** Target inventory counts; withdraw/buy options show what is still missing and never overshoot. */
   want?: { name: string; count: number }[];
+  /** Entity names never to offer (exact, case-insensitive), e.g. the bronze-only "Rusted anvil". */
+  avoid?: string[];
   /** Quantity to make per production pick (anvil grid only). Default: all. */
   makeAmount?: 1 | 5 | 10;
   /** Deterministic completion check; when absent the decision engine's `done` answer decides. */

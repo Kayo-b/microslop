@@ -164,7 +164,9 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
   out.push(...equipmentCandidates(s, goal));
 
   const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
-  return { candidates: rank(out, goal, maxCandidates), destinations };
+  const avoid = new Set((goal.avoid ?? []).map(lc));
+  const allowed = avoid.size ? out.filter((c) => !avoid.has(lc(c.name))) : out;
+  return { candidates: rank(allowed, goal, maxCandidates), destinations };
 }
 
 function npcHint(kb: KnowledgeBase, ctx: PlayerContext, name: string, id: number, action: string): { text: string; unmet: string[] } {
