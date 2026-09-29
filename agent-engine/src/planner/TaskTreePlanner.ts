@@ -27,11 +27,13 @@ export interface GatherTask {
   bank: boolean;
   /** Stop once the skill reaches this level. */
   untilLevel?: number;
+  /** Where the resource is; walked to when no target is in view. */
+  area?: { name: string; point: WorldPoint };
 }
 
 export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = {
-  'fish-shrimp': { activity: 'catch shrimp with a small fishing net', targets: ['Fishing spot'], action: 'Small Net', product: 'Raw', skill: 'Fishing', keep: ['Small fishing net'] },
-  'fish-trout': { activity: 'fly fish for trout and salmon', targets: ['Rod Fishing spot'], action: 'Lure', product: 'Raw', skill: 'Fishing', keep: ['Fly fishing rod', 'Feather'] },
+  'fish-shrimp': { activity: 'catch shrimp with a small fishing net', targets: ['Fishing spot'], action: 'Small Net', product: 'Raw', skill: 'Fishing', keep: ['Small fishing net'], area: { name: 'Draynor Village fishing spots', point: { x: 3087, y: 3228, plane: 0 } } },
+  'fish-trout': { activity: 'fly fish for trout and salmon', targets: ['Rod Fishing spot'], action: 'Lure', product: 'Raw', skill: 'Fishing', keep: ['Fly fishing rod', 'Feather'], area: { name: 'Barbarian Village fishing spots', point: { x: 3104, y: 3430, plane: 0 } } },
   'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'] },
   'chop-oaks': { activity: 'chop oak trees for oak logs', targets: ['Oak tree'], action: 'Chop down', product: 'Oak logs', skill: 'Woodcutting', keep: ['axe'] },
   'chop-willows': { activity: 'chop willow trees for willow logs', targets: ['Willow tree'], action: 'Chop down', product: 'Willow logs', skill: 'Woodcutting', keep: ['axe'] },
@@ -223,9 +225,16 @@ export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
     };
   }
 
+  const inView = s.npcs.some((n) => task.targets.includes(n.name) && n.actions.includes(task.action)) || s.objects.some((o) => task.targets.includes(o.name));
+  if (!inView && task.area) {
+    return {
+      kind: 'subgoal',
+      subgoal: { ...goal(`walk to the ${task.area.name}`, task.targets, [task.action], { near: { ...task.area.point, radius: 8 } }, 400, task.keep), destination: task.area },
+    };
+  }
   return {
     kind: 'subgoal',
-    subgoal: goal(`${task.activity}: use "${task.action}" on the ${task.targets.join(' or ')}`, task.targets, [task.action], { inventoryFull: true }, 400, task.keep),
+    subgoal: goal(`${task.activity}: use "${task.action}" on the ${task.targets.join(' or ')}`, task.targets, [task.action], { inventoryFull: true }, 1200, task.keep),
   };
 }
 
