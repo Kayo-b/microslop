@@ -292,6 +292,11 @@ async function run(): Promise<void> {
     agent.stop();
     backend.act({ op: 'walk_cancel' }).catch(() => {});
   });
+  // kill / service stop: a walk started by the agent keeps going in the client otherwise.
+  process.on('SIGTERM', () => {
+    agent.stop();
+    void backend.act({ op: 'walk_cancel' }).catch(() => {}).finally(() => process.exit(143));
+  });
 
   console.log(`[agent] goal: ${goal} | planner: ${planner.name} | log: ${logger.file}`);
   const outcome = await agent.run(goal);
