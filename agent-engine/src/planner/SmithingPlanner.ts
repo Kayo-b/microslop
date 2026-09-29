@@ -311,7 +311,8 @@ export class SmithingPlanner implements Planner {
       const mine = route?.mine ?? metal.mine;
       return sg(`mine ${lc(metal.mineOre)} at the ${mine.name} until the inventory is full`, [metal.mineRocks], ['Mine'], { inventoryFull: true }, {
         destination: mine,
-        maxSteps: 600,
+        // Steps include every busy tick; a contested iron mine with a bronze pickaxe needs ~800.
+        maxSteps: 1500,
       });
     }
 
