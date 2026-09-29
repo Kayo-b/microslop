@@ -34,6 +34,8 @@ export interface Metal {
   mine: { name: string; point: WorldPoint };
   /** One-bar item smithed for XP when no upgrade is due. */
   filler: string;
+  /** Where to smith: the rusted anvil by the Lumbridge furnace accepts bronze only. */
+  anvil: { name: string; point: WorldPoint; targets: string[] };
   gear: GearTier[];
 }
 
@@ -46,6 +48,7 @@ export const BRONZE: Metal = {
   mineRocks: 'Copper rocks',
   mine: { name: 'Lumbridge Swamp mine', point: { x: 3229, y: 3146, plane: 0 } },
   filler: 'Bronze dagger',
+  anvil: { name: 'Lumbridge furnace rusted anvil', point: { x: 3226, y: 3255, plane: 0 }, targets: ['Rusted anvil', 'Anvil'] },
   gear: [
     { item: 'Bronze scimitar', level: 5, bars: 2, slot: 'WEAPON' },
     { item: 'Bronze full helm', level: 7, bars: 2, slot: 'HEAD' },
@@ -65,6 +68,7 @@ export const IRON: Metal = {
   mineRocks: 'Iron rocks',
   mine: { name: 'Al Kharid mine', point: { x: 3296, y: 3311, plane: 0 } },
   filler: 'Iron dagger',
+  anvil: { name: 'Varrock west anvils', point: { x: 3189, y: 3423, plane: 0 }, targets: ['Anvil'] },
   gear: [
     { item: 'Iron scimitar', level: 20, bars: 2, slot: 'WEAPON' },
     { item: 'Iron full helm', level: 22, bars: 2, slot: 'HEAD' },
@@ -186,10 +190,10 @@ export class SmithingPlanner implements Planner {
       const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
       const item = target?.item ?? metal.filler;
       const count = held(s, item) + 1;
-      return sg(`smith a ${item} at the anvil`, ['Rusted anvil', 'Anvil', item], ['Smith'], { hasItem: { name: item, count } }, {
-        destination: { name: 'Lumbridge furnace', point: PLACES.furnace },
+      return sg(`smith a ${item} at the ${metal.anvil.name}`, [...metal.anvil.targets, item], ['Smith'], { hasItem: { name: item, count } }, {
+        destination: { name: metal.anvil.name, point: metal.anvil.point },
         want: [{ name: item, count }],
-        maxSteps: 60,
+        maxSteps: 200,
       });
     }
 

@@ -102,3 +102,14 @@ test('smithing planner switches to iron at Smithing 15: mine iron, smelt, smith 
   const mine = await next(p, withSmithing(20));
   assert.match(text(mine), new RegExp(`mine iron ore at the ${IRON.mine.name}`));
 });
+
+test('iron is smithed at a real anvil, bronze at the rusted one', async () => {
+  const p = new SmithingPlanner();
+  const iron = withSmithing(20, [item(0, 2347, 'Hammer'), item(1, 2351, 'Iron bar')]);
+  iron.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  const step = await next(p, iron);
+  assert.ok(step.kind === 'subgoal' && step.subgoal.destination?.point?.x === 3189, 'Varrock west anvils');
+  assert.ok(step.kind === 'subgoal' && !step.subgoal.targets?.includes('Rusted anvil'));
+  const bronze = await next(new SmithingPlanner(), withSmithing(4, [item(0, 2347, 'Hammer'), item(1, 2349, 'Bronze bar')]));
+  assert.ok(bronze.kind === 'subgoal' && bronze.subgoal.targets?.includes('Rusted anvil'));
+});
