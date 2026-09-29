@@ -185,7 +185,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
   );
   out.push(...equipmentCandidates(s, goal));
 
-  const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
+  const destinations = goal.noTravel ? [] : kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
   const avoid = new Set((goal.avoid ?? []).map(lc));
   const avoidAt = goal.avoidAt ?? [];
   const at = (c: Candidate): WorldPoint | null => {

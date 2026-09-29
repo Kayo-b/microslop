@@ -96,7 +96,10 @@ export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
 /** How many of an item (by name substring) the inventory holds, counting stack sizes. */
 function held(s: Snapshot, name: string): number {
   const n = name.toLowerCase();
-  return s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+  const inv = s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+  // Matches the hasItem condition: ammo picked up joins the quiver stack.
+  const ammo = s.equipment.filter((e) => e.slot === 'AMMO' && e.name.toLowerCase().includes(n)).reduce((sum, e) => sum + (e.quantity ?? 1), 0);
+  return inv + ammo;
 }
 
 export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext = {}): PlanStep {
@@ -123,7 +126,7 @@ export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext 
     const what = /^coins$/i.test(lootHere.name) ? `${lootHere.quantity} coins` : `the ${lootHere.name}`;
     return {
       kind: 'subgoal',
-      subgoal: goal(`pick up ${what} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + (/^coins$/i.test(lootHere.name) ? lootHere.quantity : 1) } }, 30, task.keep),
+      subgoal: { ...goal(`pick up ${what} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + (/^coins$/i.test(lootHere.name) ? lootHere.quantity : 1) } }, 30, task.keep), noTravel: true },
     };
   }
   if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };
@@ -142,6 +145,7 @@ export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext 
     subgoal: {
       ...goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { lootNear: { names: task.loot, minValue: task.lootValue ?? 25, radius: 6 } }, 250, task.keep),
       maxTargetLevel: task.maxLevel,
+      noTravel: true,
     },
   };
 }

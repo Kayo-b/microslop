@@ -349,3 +349,10 @@ test('candidates: a pickup never offers Drop; a drop sub-goal does', () => {
   const drop = buildCandidates(s, null, { text: 'drop the scimitar', targets: ['Iron scimitar'], actions: ['Drop'] }).candidates.map((c) => c.id);
   assert.ok(drop.includes('inv:0#Drop') && !drop.includes('inv:0#Wield'));
 });
+
+test('conditions: picked-up ammo joining the quiver counts as carried', async () => {
+  const { evaluate } = await import('../src/planner/conditions.ts');
+  const s = snapshot({ equipment: [{ slot: 'AMMO', id: 882, name: 'Bronze arrow', quantity: 97 }] });
+  assert.ok(evaluate({ hasItem: { name: 'Bronze arrow', count: 93 } }, s));
+  assert.ok(!evaluate({ hasItem: { name: 'Bronze arrow', count: 98 } }, s));
+});

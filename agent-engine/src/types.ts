@@ -266,6 +266,8 @@ export interface SubGoal {
   targets?: string[];
   actions?: string[];
   destination?: { name?: string; point?: WorldPoint };
+  /** Everything needed is right here (a drop to pick up, a monster in view): offer no walk destinations. */
+  noTravel?: boolean;
   /** Items that must never be dropped or deposited (tools, bait). Case-insensitive substrings. */
   keep?: string[];
   /** Target inventory counts; withdraw/buy options show what is still missing and never overshoot. */

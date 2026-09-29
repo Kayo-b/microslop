@@ -34,9 +34,12 @@ export interface DoneCondition {
   groundItemNear?: { name: string; radius?: number };
 }
 
+/** Carried count; picked-up ammo goes straight into a matching quiver stack, so that counts too. */
 const count = (s: Snapshot, name: string) => {
   const n = name.toLowerCase();
-  return s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+  const inv = s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+  const ammo = s.equipment.filter((e) => e.slot === 'AMMO' && e.name.toLowerCase().includes(n)).reduce((sum, e) => sum + (e.quantity ?? 1), 0);
+  return inv + ammo;
 };
 
 /** All specified clauses must hold. An empty condition never completes (the model decides). */
