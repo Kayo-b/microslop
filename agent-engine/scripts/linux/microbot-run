@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Runs Microbot from source (this checkout's branch) logged into the Jagex account whose
+# session Bolt created. The session is read from ~/.config/microbot-jx/session.env (mode 600).
+# Refresh it by launching RuneLite once from Bolt and re-running: microbot-run --capture
+set -euo pipefail
+SESSION_FILE="$HOME/.config/microbot-jx/session.env"
+if [[ "${1:-}" == "--capture" ]]; then
+  pid="$(pgrep -f 'net.runelite.client.RuneLite' | head -1 || true)"
+  [[ -n "$pid" ]] || { echo "Start RuneLite from Bolt first, then run --capture." >&2; exit 1; }
+  umask 077
+  tr '\0' '\n' < "/proc/$pid/environ" | grep -E '^JX_(SESSION_ID|CHARACTER_ID|DISPLAY_NAME)=' \
+    | sed 's/^/export /; s/=\(.*\)$/="\1"/' > "$SESSION_FILE"
+  echo "Saved Jagex session to $SESSION_FILE. Close that RuneLite window, then run microbot-run."
+  exit 0
+fi
+[[ -f "$SESSION_FILE" ]] || { echo "No saved session; see: microbot-run --capture" >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$SESSION_FILE"
+J17="$(mise where java@temurin-17)"
+cd "${MICROBOT_DIR:-$HOME/projects/Microbot}"
+JAVA_HOME="$J17" exec ./gradlew :client:run --console=plain -Dorg.gradle.java.installations.paths="$J17"

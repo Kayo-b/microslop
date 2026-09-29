@@ -69,6 +69,9 @@ Secrets go in the repo-root `.env` (gitignored):
 
 ## First live run
 
+For the full Linux + Jagex account setup (Bolt, session capture, `microbot-run`) and a
+troubleshooting table, see **[docs/RUNNING.md](docs/RUNNING.md)**.
+
 1. Build and start the client (`./gradlew :client:assemble` or run from your IDE), log in, and
    enable the **Agent Server** plugin.
 2. Look before acting. This takes one snapshot, prints what the engine would show the model, and
