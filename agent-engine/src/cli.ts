@@ -51,6 +51,7 @@ const { values, positionals } = parseArgs({
     'done-shop-open': { type: 'boolean', default: false },
     'make-amount': { type: 'string' },
     'done-equipped': { type: 'string' },
+    'done-object-near': { type: 'string' },
     targets: { type: 'string' },
     bank: { type: 'boolean', default: false },
     'until-level': { type: 'string' },
@@ -159,6 +160,7 @@ async function run(): Promise<void> {
     if (values['done-bank-closed']) doneWhen.bankOpen = false;
     if (values['done-shop-open']) doneWhen.shopOpen = true;
     if (values['done-equipped']) doneWhen.equipped = list(values['done-equipped']);
+    if (values['done-object-near']) doneWhen.objectNear = { name: values['done-object-near'], radius: 2 };
     const point = (v?: string) => {
       if (!v) return undefined;
       const [x, y, plane] = v.split(',').map(Number);

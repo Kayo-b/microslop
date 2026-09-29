@@ -24,6 +24,8 @@ export interface DoneCondition {
   near?: { x: number; y: number; plane: number; radius?: number };
   skillLevel?: { skill: string; level: number };
   dialogueOpen?: boolean;
+  /** An object with this name is within `radius` tiles (a lit fire, an open door...). */
+  objectNear?: { name: string; radius?: number };
   /** One of our (lootable) items of this name lies on the ground within `radius` tiles. */
   groundItemNear?: { name: string; radius?: number };
 }
@@ -48,6 +50,11 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
     clauses.push(cond.equipped.every((n) => worn.some((w) => w.includes(n.toLowerCase()))));
   }
   if (cond.dialogueOpen !== undefined) clauses.push(s.dialogue.inDialogue === cond.dialogueOpen);
+  if (cond.objectNear) {
+    const n = cond.objectNear.name.toLowerCase();
+    const r = cond.objectNear.radius ?? 3;
+    clauses.push(s.objects.some((o) => o.distance <= r && o.name.toLowerCase() === n));
+  }
   if (cond.groundItemNear) {
     const n = cond.groundItemNear.name.toLowerCase();
     const r = cond.groundItemNear.radius ?? 6;
@@ -84,5 +91,6 @@ export function describe(cond: DoneCondition | undefined): string {
   if (cond.near) parts.push(`within ${cond.near.radius ?? 3} of (${cond.near.x}, ${cond.near.y}, ${cond.near.plane})`);
   if (cond.skillLevel) parts.push(`${cond.skillLevel.skill} >= ${cond.skillLevel.level}`);
   if (cond.groundItemNear) parts.push(`${cond.groundItemNear.name} on the ground nearby`);
+  if (cond.objectNear) parts.push(`${cond.objectNear.name} within ${cond.objectNear.radius ?? 3} tiles`);
   return parts.join(' and ') || 'model decides';
 }

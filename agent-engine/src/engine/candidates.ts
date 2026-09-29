@@ -107,6 +107,26 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
 
   for (const obj of [...s.objects].sort((a, b) => a.distance - b.distance)) {
     if (!obj.reachable && !opts.includeUnreachable) continue;
+    // Action-less objects (a fire) are only useful as "use item on" targets.
+    if (obj.actions.length === 0) {
+      const p = obj.position;
+      const seenItem = new Set<string>();
+      for (const it of s.inventory.items) {
+        if (seenItem.has(it.name) || !(matchesAny(it.name, goal.targets) || /^raw /i.test(it.name))) continue;
+        seenItem.add(it.name);
+        if (!admit(`use|${it.name}|${obj.name}`)) continue;
+        out.push({
+          id: `use:${it.slot}>obj:${obj.id}@${p.x},${p.y},${p.plane}`,
+          kind: 'object',
+          name: obj.name,
+          action: `Use ${it.name}`,
+          label: `Use ${it.name} on the ${obj.name} - ${obj.distance} tiles`,
+          gameAction: { op: 'use_item_on', itemSlot: it.slot, target: { kind: 'object', id: obj.id, x: p.x, y: p.y, plane: p.plane } },
+          distance: obj.distance,
+        });
+      }
+      continue;
+    }
     for (const action of obj.actions) {
       if (!admit(`obj|${obj.name}|${action}`)) continue;
       const hint = kb ? objectHint(kb, ctx, obj.name, action) : { text: '', unmet: [] };

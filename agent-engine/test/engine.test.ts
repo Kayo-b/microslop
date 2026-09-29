@@ -239,3 +239,13 @@ test('an exact sub-goal destination is the only destination offered', async () =
   const dests = buildDestinations(snapshot(), kb, { text: 'bank', targets: ['Bank booth'], destination: { name: 'Lumbridge Top bank', point: { x: 3209, y: 3220, plane: 2 } } }, 5);
   assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Lumbridge Top bank']);
 });
+
+test('action-less objects such as a fire become use-item-on targets', () => {
+  const s = snapshot({
+    inventory: { freeSlots: 26, items: [item(0, 317, 'Raw shrimps'), item(1, 590, 'Tinderbox')] },
+    objects: [{ id: 26185, name: 'Fire', type: 'GAME', actions: [], position: { x: 3230, y: 3232, plane: 0 }, distance: 1, reachable: true, pathDistance: 1 }],
+  });
+  const c = buildCandidates(s, null, { text: 'cook shrimps on the fire', targets: ['Fire'] }).candidates.find((x) => x.name === 'Fire');
+  assert.deepEqual(c?.gameAction, { op: 'use_item_on', itemSlot: 0, target: { kind: 'object', id: 26185, x: 3230, y: 3232, plane: 0 } });
+  assert.equal(c?.label, 'Use Raw shrimps on the Fire - 1 tiles');
+});

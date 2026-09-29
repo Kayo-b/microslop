@@ -57,6 +57,8 @@ public class SnapshotHandler extends AgentHandler {
 	private static final int DEFAULT_RADIUS = 15;
 	private static final int MAX_RADIUS = 30;
 
+	private static final java.util.Set<String> USE_ON_OBJECTS = new java.util.HashSet<>(java.util.Arrays.asList("fire"));
+
 	private final Client client;
 
 	public SnapshotHandler(Gson gson, Client client) {
@@ -254,7 +256,12 @@ public class SnapshotHandler extends AgentHandler {
 			}
 		}
 		List<String> actions = actions(comp.getActions());
-		if (actions.isEmpty() || comp.getName() == null || "null".equalsIgnoreCase(comp.getName())) {
+		if (comp.getName() == null || "null".equalsIgnoreCase(comp.getName())) {
+			return null;
+		}
+		// Objects without menu actions are scenery, except ones you "use" items on: a fire has no
+		// options, you cook by using raw food on it.
+		if (actions.isEmpty() && !USE_ON_OBJECTS.contains(comp.getName().toLowerCase())) {
 			return null;
 		}
 		WorldPoint loc = model.getWorldLocation();
