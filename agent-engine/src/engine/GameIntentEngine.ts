@@ -91,6 +91,10 @@ export class GameIntentEngine {
   private stepNo = 0;
   private lastActTick = -1;
   private loggedOutSince: number | null = null;
+  /** Last tick the player was seen animating (skilling batches pause between items). */
+  private lastAnimTick = -1;
+  /** Ticks of animation gap still treated as "busy" (make-all batches pause 1-3 ticks per item). */
+  private static readonly ANIM_GRACE_TICKS = 4;
   /** NPC the last successful Attack targeted, so the approach is not abandoned mid-way. */
   private attackTarget: { index: number; tick: number } | null = null;
   /** Ticks to keep pursuing an attacked NPC before re-deciding. Chickens and goblins wander. */
@@ -259,7 +263,13 @@ export class GameIntentEngine {
     const p = s.player!;
     if (s.walk.active) return 'walking';
     if (s.dialogue.inDialogue || s.production.open || s.bank.open || s.shop.open) return null;
-    if (p.animating) return 'animating';
+    if (p.animating) {
+      this.lastAnimTick = s.tick;
+      return 'animating';
+    }
+    // A make-all batch (smelting, cooking) pauses between items; re-clicking the station in that
+    // gap restarts the batch, which stalled iron smelting for 250 steps.
+    if (this.lastAnimTick >= 0 && s.tick - this.lastAnimTick < GameIntentEngine.ANIM_GRACE_TICKS) return 'between batch items';
     if (p.moving) return 'moving';
     if (p.inCombat && p.interacting?.type === 'npc') return 'in combat';
     // Give a just-dispatched interaction a tick to start before re-deciding.

@@ -216,7 +216,20 @@ export class SmithingPlanner implements Planner {
     const bars = held(s, metal.bar);
     const hasHammer = held(s, 'Hammer') > 0;
 
-    // 3. Smith while carrying bars and a hammer.
+    // 3. Smelt ores into bars first (smithing first bounced between anvil and furnace) at the nearest furnace (Al Kharid's when banking there: walking to
+    // Lumbridge from Al Kharid means the toll gate).
+    if (metal.ores.every((o) => held(s, o) > 0)) {
+      const scarcest = [...metal.ores].sort((a, b) => held(s, a) - held(s, b))[0]!;
+      const here = s.player?.position;
+      const near = here && ctx.kb ? ctx.kb.nearestObjects('Furnace', here, { action: 'Smelt', radius: 200, limit: 1 })[0] : undefined;
+      const furnace = route?.furnace ?? (near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace });
+      return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
+        destination: furnace,
+        maxSteps: 250,
+      });
+    }
+
+    // 4. Smith while carrying bars and a hammer.
     if (bars > 0 && hasHammer) {
       const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
       const item = target?.item ?? metal.filler;
@@ -227,19 +240,6 @@ export class SmithingPlanner implements Planner {
         want: [{ name: item, count }],
         avoid: metal.anvil.avoid,
         maxSteps: 200,
-      });
-    }
-
-    // 4. Smelt ores into bars at the nearest furnace (Al Kharid's when banking there: walking to
-    // Lumbridge from Al Kharid means the toll gate).
-    if (metal.ores.every((o) => held(s, o) > 0)) {
-      const scarcest = [...metal.ores].sort((a, b) => held(s, a) - held(s, b))[0]!;
-      const here = s.player?.position;
-      const near = here && ctx.kb ? ctx.kb.nearestObjects('Furnace', here, { action: 'Smelt', radius: 200, limit: 1 })[0] : undefined;
-      const furnace = route?.furnace ?? (near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace });
-      return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
-        destination: furnace,
-        maxSteps: 250,
       });
     }
 
