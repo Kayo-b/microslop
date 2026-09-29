@@ -72,7 +72,12 @@ export class Agent {
 
       while (!this.stopRequested) {
         if (subgoals >= (this.o.maxSubGoals ?? 200)) return finish('stopped', 'sub-goal limit reached');
-        const snapshot = await backend.snapshot();
+        let snapshot = await backend.snapshot();
+        // Ride out region loads and reconnects before deciding the player really logged out.
+        for (let waited = 0; !snapshot.loggedIn && waited < 60_000; waited += 2000) {
+          await sleep(2000);
+          snapshot = await backend.snapshot();
+        }
         if (!snapshot.loggedIn) return finish('halted', 'player is logged out');
 
         const plan = await planner.next({ goal, snapshot, kb: this.o.kb ?? null, reports });

@@ -255,3 +255,19 @@ test('avoided names are never offered, so a look-alike does not stop travel', ()
   const { candidates } = buildCandidates(s, null, { text: 'smith', targets: ['Anvil'], avoid: ['Rusted anvil'] });
   assert.ok(!candidates.some((c) => c.name === 'Rusted anvil'));
 });
+
+test('transient game states (region loading) wait instead of blocking as a logout', async () => {
+  const game = new FakeGame();
+  game.state.loggedIn = false;
+  game.state.gameState = 'LOADING';
+  const server = await startFakeServer(game, 'tok');
+  const engine = new GameIntentEngine({ backend: new MicrobotBackend({ port: server.port, token: 'tok' }), decisionEngine: new ScriptedDecisionEngine(), verify: noSleep, logoutGraceMs: 0 });
+  try {
+    const r = await engine.step({ text: 'fish' });
+    assert.equal(r.kind, 'waiting');
+    game.state.gameState = 'LOGIN_SCREEN';
+    assert.deepEqual((await engine.step({ text: 'fish' })).kind, 'blocked');
+  } finally {
+    await server.close();
+  }
+});

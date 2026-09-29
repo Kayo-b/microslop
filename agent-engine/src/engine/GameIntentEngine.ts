@@ -60,6 +60,8 @@ export interface GameIntentEngineOptions {
   maxBusyWaits?: number;
   /** Retries for a failed decision-engine call (timeouts, 5xx) before blocking. Default 2. */
   decisionRetries?: number;
+  /** How long a non-transient logged-out state may last before the sub-goal is blocked. Default 60 s. */
+  logoutGraceMs?: number;
 }
 
 export type StepResult =
@@ -67,6 +69,9 @@ export type StepResult =
   | { kind: 'waiting'; reason: string; snapshot: Snapshot }
   | { kind: 'done'; reason: string; snapshot: Snapshot }
   | { kind: 'blocked'; reason: string; snapshot?: Snapshot };
+
+/** Game states that pass by themselves; never treat them as a logout. */
+const TRANSIENT_STATES = new Set(['LOADING', 'HOPPING', 'CONNECTION_LOST', 'LOGGING_IN']);
 
 const OP_DESCRIPTIONS: Record<Op, string> = {
   interact: 'Do one of the listed actions now (on something nearby, in the inventory, or in the open interface)',
@@ -85,6 +90,7 @@ export class GameIntentEngine {
   private busyWaits = 0;
   private stepNo = 0;
   private lastActTick = -1;
+  private loggedOutSince: number | null = null;
   /** NPC the last successful Attack targeted, so the approach is not abandoned mid-way. */
   private attackTarget: { index: number; tick: number } | null = null;
   /** Ticks to keep pursuing an attacked NPC before re-deciding. Chickens and goblins wander. */
@@ -98,6 +104,7 @@ export class GameIntentEngine {
       maxFailures: 3,
       maxBusyWaits: 40,
       decisionRetries: 2,
+      logoutGraceMs: 60_000,
       ...options,
     };
     this.runId = options.runId ?? new Date().toISOString();
@@ -119,7 +126,16 @@ export class GameIntentEngine {
     }
     const started = Date.now();
     const snap = await this.o.backend.snapshot();
-    if (!snap.loggedIn || !snap.player) return { kind: 'blocked', reason: 'logged_out', snapshot: snap };
+    if (!snap.loggedIn || !snap.player) {
+      // Region loads (LOADING), world hops and reconnects flip loggedIn off for a moment; only a
+      // sustained logout ends the sub-goal.
+      if (this.loggedOutSince === null) this.loggedOutSince = Date.now();
+      if (TRANSIENT_STATES.has(snap.gameState) || Date.now() - this.loggedOutSince < this.o.logoutGraceMs) {
+        return { kind: 'waiting', reason: `not in game (${snap.gameState})`, snapshot: snap };
+      }
+      return { kind: 'blocked', reason: 'logged_out', snapshot: snap };
+    }
+    this.loggedOutSince = null;
 
     if (goal.isDone?.(snap)) return { kind: 'done', reason: 'completion check passed', snapshot: snap };
 
