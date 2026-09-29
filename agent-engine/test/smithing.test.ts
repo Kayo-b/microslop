@@ -113,3 +113,24 @@ test('iron is smithed at a real anvil, bronze at the rusted one', async () => {
   const bronze = await next(new SmithingPlanner(), withSmithing(4, [item(0, 2347, 'Hammer'), item(1, 2349, 'Bronze bar')]));
   assert.ok(bronze.kind === 'subgoal' && bronze.subgoal.targets?.includes('Rusted anvil'));
 });
+
+test('an unreachable anvil is retired and the loop re-planned without it', async () => {
+  const p = new SmithingPlanner();
+  const good = { x: 3188, y: 3421, plane: 0 };
+  const bad = { x: 3246, y: 3404, plane: 0 };
+  const kb = {
+    nearestObjects: (name: string) =>
+      name === 'Anvil'
+        ? [{ name: 'Anvil', kind: 'object', point: bad, members: false }, { name: 'Anvil', kind: 'object', point: good, members: false }]
+        : [{ name, kind: 'object', point: { x: 3285, y: 3368, plane: 0 }, members: false }, { name, kind: 'object', point: { x: 3286, y: 3368, plane: 0 }, members: false }, { name, kind: 'object', point: { x: 3287, y: 3369, plane: 0 }, members: false }],
+    nearestBanks: () => [{ name: 'Varrock East bank', kind: 'bank', point: { x: 3253, y: 3422, plane: 0 }, members: false }],
+  } as never;
+  const bars = withSmithing(20, [item(0, 2347, 'Hammer'), item(1, 2351, 'Iron bar')]);
+  bars.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  const ctx = (reports: never[]) => ({ goal: 'g', snapshot: bars, kb, reports, pathCost: async (a: { x: number }, b: { x: number }) => Math.abs(a.x - b.x) });
+  const first = await p.next(ctx([]) as never);
+  assert.ok(first.kind === 'subgoal' && first.subgoal.destination?.point?.x === bad.x, 'straight-line cheapest anvil first');
+  const blocked = { subgoal: first.kind === 'subgoal' ? first.subgoal.text : '', result: 'blocked', reason: "stuck: 3 failed actions in a row (last: Anvil: Smith - 1 tiles -> failed: I can't reach that!)", steps: 5, trail: [] };
+  const second = await p.next(ctx([blocked] as never) as never);
+  assert.ok(second.kind === 'subgoal' && second.subgoal.destination?.point?.x === good.x, 're-planned to the reachable anvil');
+});

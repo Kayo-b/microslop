@@ -142,6 +142,20 @@ export class SmithingPlanner implements Planner {
   /** Cheapest mine -> furnace -> anvil -> bank cycle per metal, chosen once from real path costs. */
   private routes = new Map<string, { mine: Site; furnace: Site; anvil: Site; bank: Site; cost: number }>();
   private costs: CostTable | null = null;
+  /** Sites proven unusable ("I can't reach that!"), as "x,y,plane"; excluded when re-planning. */
+  private readonly unusable = new Set<string>();
+
+  /** A blocked sub-goal that could not reach its site retires that site and forces a re-plan. */
+  private learnFromReports(ctx: PlannerContext, metal: Metal): void {
+    const last = ctx.reports.at(-1);
+    const route = this.routes.get(metal.name);
+    if (!last || !route || last.result === 'done' || !/can't reach|cannot reach/i.test(last.reason)) return;
+    const stage = /smith/i.test(last.subgoal) ? route.anvil : /smelt/i.test(last.subgoal) ? route.furnace : /mine/i.test(last.subgoal) ? route.mine : /bank/i.test(last.subgoal) ? route.bank : null;
+    if (!stage) return;
+    this.unusable.add(`${stage.point.x},${stage.point.y},${stage.point.plane}`);
+    this.routes.delete(metal.name);
+    console.log(`[smith-progression] ${stage.name} @${stage.point.x},${stage.point.y} is unreachable; re-planning the loop without it`);
+  }
 
   /**
    * Picks the metal's sites as the cheapest walking cycle. Bronze keeps the Lumbridge sites (its
@@ -153,12 +167,13 @@ export class SmithingPlanner implements Planner {
     const pos = ctx.snapshot.player?.position;
     if (metal.name === 'Bronze' || !ctx.kb || !pos) return null;
     this.costs ??= new CostTable(ctx.pathCost);
+    const usable = (sites: Site[]) => sites.filter((x) => !this.unusable.has(`${x.point.x},${x.point.y},${x.point.plane}`));
     const stages = [
-      candidateSites(ctx.kb, pos, { object: metal.mineRocks, action: 'Mine', min: 3 }),
-      candidateSites(ctx.kb, pos, { object: 'Furnace', action: 'Smelt' }, 3),
-      candidateSites(ctx.kb, pos, { object: 'Anvil', action: 'Smith' }, 3),
-      candidateSites(ctx.kb, pos, { bank: true }, 3),
-    ];
+      usable(candidateSites(ctx.kb, pos, { object: metal.mineRocks, action: 'Mine', min: 3 }, 6)),
+      usable(candidateSites(ctx.kb, pos, { object: 'Furnace', action: 'Smelt' }, 4)),
+      usable(candidateSites(ctx.kb, pos, { object: 'Anvil', action: 'Smith' }, 4)),
+      usable(candidateSites(ctx.kb, pos, { bank: true }, 4)),
+    ].map((x) => x.slice(0, 3));
     const best = await cheapestLoop(stages, this.costs);
     if (!best) return null;
     const [mine, furnace, anvil, bank] = best.sites as [Site, Site, Site, Site];
@@ -181,6 +196,9 @@ export class SmithingPlanner implements Planner {
   async next(ctx: PlannerContext): Promise<PlanStep> {
     const s = ctx.snapshot;
     if (s.bank.open) this.bank = new Map(s.bank.items.map((i) => [i.name, i.quantity]));
+
+    // Learn before the give-up check: an unreachable site is replaced, not retried.
+    this.learnFromReports(ctx, this.metal(level(s, 'Smithing')));
 
     const last = ctx.reports.slice(-3);
     if (last.length === 3 && last.every((r) => r.result !== 'done' && r.subgoal === last[0]!.subgoal)) {
