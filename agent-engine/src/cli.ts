@@ -27,6 +27,7 @@ import { ClaudeEscalator, ClaudePlanner, describeSubGoal } from './llm/claude.ts
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
+import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -131,7 +132,10 @@ async function run(): Promise<void> {
   const backend = new MicrobotBackend();
   let planner: Planner;
   let goal: string;
-  if (values.task === 'smith-progression') {
+  if (values.task && COOK_PRESETS[values.task]) {
+    planner = new CookingPlanner(COOK_PRESETS[values.task]!, values.task);
+    goal = `${values.task} on fires until the bank has none left`;
+  } else if (values.task === 'smith-progression') {
     const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
     planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
     goal = `smithing progression to level ${values['until-level'] ?? 33}${metal ? ` (${metal})` : ''}`;
@@ -253,6 +257,7 @@ try {
   if (values.help || command === 'help') help();
   else if (command === 'presets') {
     console.log(Object.entries({ ...PRESETS, ...COMBAT_PRESETS }).map(([k, v]) => `${k.padEnd(18)} ${v.activity}`).join('\n'));
+    for (const [k, v] of Object.entries(COOK_PRESETS)) console.log(`${k.padEnd(18)} cook ${v.raw.toLowerCase()} on fires (chop, light, cook, bank)`);
     console.log(`${'smith-progression'.padEnd(18)} mine, smelt and smith bronze then iron gear around Lumbridge, equipping upgrades (--metal, --until-level)`);
   }
   else if (command === 'inspect') await inspect();

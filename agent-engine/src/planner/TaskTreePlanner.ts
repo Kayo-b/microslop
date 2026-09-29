@@ -176,7 +176,7 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
     if (bankHasFood && bank) {
       return {
         kind: 'subgoal',
-        subgoal: { ...goal(`restock food at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point } },
+        subgoal: { ...goal(`restock food at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS },
       };
     }
     // No food to be had: never start a fight weak; let HP regenerate (1 HP/min) first.
@@ -187,7 +187,9 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
   return null;
 }
 
-const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker', 'Bank'];
+const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker'];
+/** Look-alikes that are not banks: a poll booth ("Use") opens the poll menu, a deposit box only deposits. */
+export const NOT_BANKS = ['Poll booth', 'Bank Deposit Box', 'Bank deposit box', 'Deposit Box'];
 
 function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
   return { text, targets, actions, doneWhen, isDone: compile(doneWhen), maxSteps, keep };
@@ -216,7 +218,7 @@ export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
     if (task.bank) {
       return {
         kind: 'subgoal',
-        subgoal: goal('go to the nearest bank and open it', BANK_TARGETS, ['Bank', 'Use'], { bankOpen: true }, 80, task.keep),
+        subgoal: { ...goal('go to the nearest bank and open it', BANK_TARGETS, ['Bank'], { bankOpen: true }, 300, task.keep), avoid: NOT_BANKS },
       };
     }
     return {

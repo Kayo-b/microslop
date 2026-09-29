@@ -322,6 +322,7 @@ export class SmithingPlanner implements Planner {
     const nearest = pos && ctx.kb ? ctx.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
     const bank = route?.bank ?? (nearest ? { name: nearest.name, point: nearest.point } : { name: 'Lumbridge Top bank', point: PLACES.bank });
     return sg(`go to the ${bank.name} and open the bank`, ['Bank booth', 'Banker', 'Bank chest'], ['Bank', 'Use'], { bankOpen: true }, {
+      avoid: ['Poll booth', 'Bank Deposit Box', 'Bank deposit box', 'Deposit Box'],
       destination: bank,
       maxSteps: 200,
     });
