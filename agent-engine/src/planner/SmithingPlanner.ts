@@ -198,11 +198,15 @@ export class SmithingPlanner implements Planner {
       });
     }
 
-    // 4. Smelt ores into bars.
+    // 4. Smelt ores into bars at the nearest furnace (Al Kharid's when banking there: walking to
+    // Lumbridge from Al Kharid means the toll gate).
     if (metal.ores.every((o) => held(s, o) > 0)) {
       const scarcest = [...metal.ores].sort((a, b) => held(s, a) - held(s, b))[0]!;
+      const here = s.player?.position;
+      const near = here && ctx.kb ? ctx.kb.nearestObjects('Furnace', here, { action: 'Smelt', radius: 200, limit: 1 })[0] : undefined;
+      const furnace = near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace };
       return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
-        destination: { name: 'Lumbridge furnace', point: PLACES.furnace },
+        destination: furnace,
         maxSteps: 250,
       });
     }
