@@ -60,3 +60,14 @@ test('smithing planner banks a cluttered inventory before a mining trip', async 
   const cluttered = withSmithing(7, [item(0, 2347, 'Hammer'), item(1, 1265, 'Bronze pickaxe'), ...Array.from({ length: 11 }, (_, i) => item(2 + i, 1205, 'Bronze dagger'))]);
   assert.match(text(await next(p, cluttered)), /bank/);
 });
+
+test('smithing planner does not finish at the target level while an unlocked upgrade can still be made', async () => {
+  const s = withSmithing(18, [item(0, 2347, 'Hammer'), ...Array.from({ length: 12 }, (_, i) => item(1 + i, 2349, 'Bronze bar'))]);
+  s.equipment = [
+    { slot: 'HEAD', id: 1155, name: 'Bronze full helm' },
+    { slot: 'BODY', id: 1103, name: 'Bronze chainbody' },
+    { slot: 'SHIELD', id: 1189, name: 'Bronze kiteshield' },
+    { slot: 'LEGS', id: 1075, name: 'Bronze platelegs' },
+  ];
+  assert.match(text(await next(new SmithingPlanner(), s)), /Bronze platebody/);
+});

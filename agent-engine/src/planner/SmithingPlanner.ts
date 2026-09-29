@@ -97,8 +97,13 @@ export class SmithingPlanner implements Planner {
     }
 
     const smithing = level(s, 'Smithing');
-    if (smithing >= this.untilLevel && !s.inventory.items.some((i) => BRONZE_GEAR.some((g) => g.item === i.name))) {
-      return { kind: 'complete', reason: `Smithing ${smithing} reached` };
+    // Done at the target level only once every unlocked upgrade is made and worn; otherwise the
+    // run stopped at 18 holding 12 bars and no platebody.
+    const pendingUpgrade = BRONZE_GEAR.some(
+      (g) => g.level <= smithing && isUpgrade(s, g.item, g.slot) && (held(s, g.item) > 0 || held(s, 'Bronze bar') >= g.bars),
+    );
+    if (smithing >= this.untilLevel && !pendingUpgrade) {
+      return { kind: 'complete', reason: `Smithing ${smithing} reached and all unlocked upgrades worn` };
     }
 
     // 1. Wear any upgrade we are carrying.
