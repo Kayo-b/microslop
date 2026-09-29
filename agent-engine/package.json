@@ -19,7 +19,8 @@
     "dataset:export": "node --disable-warning=ExperimentalWarning src/dataset/export.ts",
     "dataset:reverse": "node --disable-warning=ExperimentalWarning src/dataset/reverse.ts",
     "dataset:synth": "node --disable-warning=ExperimentalWarning src/dataset/synth.ts",
-    "dataset:build": "node --disable-warning=ExperimentalWarning src/dataset/build.ts"
+    "dataset:build": "node --disable-warning=ExperimentalWarning src/dataset/build.ts",
+    "campaign": "node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/campaign/runner.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
