@@ -164,7 +164,8 @@ export class SmithingPlanner implements Planner {
     const [mine, furnace, anvil, bank] = best.sites as [Site, Site, Site, Site];
     const chosen = { mine, furnace, anvil, bank, cost: best.cost };
     this.routes.set(metal.name, chosen);
-    console.log(`[smith-progression] ${metal.name} loop: ${mine.name} -> ${furnace.name} -> ${anvil.name} -> ${bank.name} (${best.cost} tiles per cycle)`);
+    const at = (x: Site) => `${x.name} @${x.point.x},${x.point.y}`;
+    console.log(`[smith-progression] ${metal.name} loop: ${at(mine)} -> ${at(furnace)} -> ${at(anvil)} -> ${at(bank)} (${best.cost} tiles per cycle)`);
     return chosen;
   }
 
