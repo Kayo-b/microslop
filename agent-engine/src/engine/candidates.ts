@@ -96,8 +96,9 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     if (npc.healthScale > 0 && npc.healthRatio === 0) continue;
     for (const action of npc.actions) {
       if (lc(action) === 'attack' && npc.interactingWithOther && !npc.interactingWithPlayer) continue;
-      // A sub-goal that lists its actions starts fights only when "Attack" is one of them.
-      if (lc(action) === 'attack' && goal.actions?.length && !goal.actions.some((x) => lc(x) === 'attack')) continue;
+      // A sub-goal that lists its actions gets only those world actions: no side trips to talk to
+      // passers-by or start fights while picking up arrows.
+      if (!worldActionAllowed(action, goal)) continue;
       // Random-event NPCs are dismissed by a reflex, never engaged.
       if (lc(action) === 'dismiss' || npc.actions.some((x) => lc(x) === 'dismiss') && npc.interactingWithPlayer) continue;
       if (lc(action) === 'attack' && attackers.size > 0 && !attackers.has(npc.index)) continue;
@@ -140,6 +141,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
       continue;
     }
     for (const action of obj.actions) {
+      if (!worldActionAllowed(action, goal)) continue;
       if (!admit(`obj|${obj.name}|${action}`)) continue;
       const hint = kb ? objectHint(kb, ctx, obj.name, action) : { text: '', unmet: [] };
       const p = obj.position;
@@ -269,6 +271,15 @@ function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
 }
 
 const EQUIP_ACTIONS = new Set(['wield', 'wear', 'equip']);
+
+const norm = (a: string) => lc(a).replace(/[-\s]+/g, ' ').trim();
+
+/** NPC/object actions a sub-goal allows: all when it lists none, else those it lists ("Talk-to" = "Talk to"). */
+function worldActionAllowed(action: string, goal: SubGoal): boolean {
+  if (!goal.actions?.length) return true;
+  const a = norm(action);
+  return goal.actions.some((g) => norm(g) === a || (norm(g) === 'use' && a.startsWith('use')));
+}
 
 /**
  * A sub-goal that lists its actions gets only those inventory actions ("Use Tinderbox" matches

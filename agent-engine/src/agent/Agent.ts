@@ -142,6 +142,7 @@ export class Agent {
         let report: SubGoalReport | null = null;
         const maxSteps = sg.maxSteps ?? 100;
         let n = 0;
+        let waits = 0;
         const watchdog = new ProgressWatchdog(this.o.watchdog);
         let trips = 0;
         while (!report && !this.stopRequested) {
@@ -150,7 +151,9 @@ export class Agent {
             break;
           }
           const result = await engine.step(sg);
-          n++;
+          // Waiting out an action in progress (walking, a fight ending, a skilling batch) does not
+          // use up the sub-goal's step budget; the watchdog ends waits that never finish.
+          if (result.kind !== 'waiting' || ++waits % 4 === 0) n++;
           steps++;
           this.o.onEvent?.({ type: 'step', result });
           const stuck = result.kind === 'blocked' ? null : watchdog.observe(result);
