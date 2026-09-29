@@ -52,6 +52,7 @@ const { values, positionals } = parseArgs({
     'make-amount': { type: 'string' },
     'done-equipped': { type: 'string' },
     'done-object-near': { type: 'string' },
+    metal: { type: 'string' },
     targets: { type: 'string' },
     bank: { type: 'boolean', default: false },
     'until-level': { type: 'string' },
@@ -131,8 +132,9 @@ async function run(): Promise<void> {
   let planner: Planner;
   let goal: string;
   if (values.task === 'smith-progression') {
-    planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined });
-    goal = `smithing progression to level ${values['until-level'] ?? 18}`;
+    const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
+    planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
+    goal = `smithing progression to level ${values['until-level'] ?? 33}${metal ? ` (${metal})` : ''}`;
   } else if (values.task) {
     planner = TaskTreePlanner.fromPreset(values.task, { bank: values.bank, untilLevel: values['until-level'] ? Number(values['until-level']) : undefined });
     goal = `${values.task}${values.bank ? ' (banking)' : ' (dropping)'}${values['until-level'] ? ` until level ${values['until-level']}` : ''}`;
@@ -248,7 +250,7 @@ try {
   if (values.help || command === 'help') help();
   else if (command === 'presets') {
     console.log(Object.entries({ ...PRESETS, ...COMBAT_PRESETS }).map(([k, v]) => `${k.padEnd(18)} ${v.activity}`).join('\n'));
-    console.log(`${'smith-progression'.padEnd(18)} mine, smelt and smith bronze gear around Lumbridge, equipping upgrades`);
+    console.log(`${'smith-progression'.padEnd(18)} mine, smelt and smith bronze then iron gear around Lumbridge, equipping upgrades (--metal, --until-level)`);
   }
   else if (command === 'inspect') await inspect();
   else if (command === 'run') await run();

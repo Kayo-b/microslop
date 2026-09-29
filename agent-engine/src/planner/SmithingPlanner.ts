@@ -1,12 +1,13 @@
 /**
  * Long-horizon plan: gear up through Smithing around Lumbridge.
  *
- *   mine copper (swamp mine) -> bank -> withdraw 13 copper + 13 tin + hammer -> smelt at the
- *   Lumbridge furnace -> smith at the rusted anvil beside it -> equip upgrades -> repeat
+ *   mine ore -> bank -> withdraw a batch + hammer -> smelt at the Lumbridge furnace -> smith at
+ *   the rusted anvil beside it -> equip upgrades -> repeat
  *
- * Each call looks at the snapshot and returns one concrete sub-goal; the per-tick engine and its
- * classifier do the clicking. Bank contents are only visible while the bank is open, so the planner
- * remembers what it last saw there.
+ * Bronze (copper + tin, Lumbridge Swamp mine) until Smithing 15, then iron (Al Kharid mine,
+ * reached from the north without the toll gate). Each call looks at the snapshot and returns one
+ * concrete sub-goal; the per-tick engine and its classifier do the clicking. Bank contents are only
+ * visible while the bank is open, so the planner remembers what it last saw there.
  */
 import type { Snapshot, WorldPoint } from '../types.ts';
 import { compile, type DoneCondition } from './conditions.ts';
@@ -20,25 +21,76 @@ interface GearTier {
   slot: string;
 }
 
-/** Bronze armour worth making, in unlock order. Weapons are handled separately (scimitar). */
-export const BRONZE_GEAR: GearTier[] = [
-  { item: 'Bronze full helm', level: 7, bars: 2, slot: 'HEAD' },
-  { item: 'Bronze chainbody', level: 11, bars: 3, slot: 'BODY' },
-  { item: 'Bronze kiteshield', level: 12, bars: 3, slot: 'SHIELD' },
-  { item: 'Bronze platelegs', level: 16, bars: 3, slot: 'LEGS' },
-  { item: 'Bronze platebody', level: 18, bars: 5, slot: 'BODY' },
-];
+export interface Metal {
+  name: 'Bronze' | 'Iron';
+  bar: string;
+  /** Ores consumed per bar. */
+  ores: string[];
+  /** Ore sets per trip: bronze 13 copper + 13 tin, iron 26 ore (+ hammer + pickaxe = 28). */
+  batch: number;
+  /** Ore mined when the bank runs short (tin is plentiful for bronze). */
+  mineOre: string;
+  mineRocks: string;
+  mine: { name: string; point: WorldPoint };
+  /** One-bar item smithed for XP when no upgrade is due. */
+  filler: string;
+  gear: GearTier[];
+}
 
-/** Better-to-worse ordering inside a slot, for "is this an upgrade?". */
-const RANK = ['Bronze platebody', 'Bronze chainbody', 'Bronze full helm', 'Bronze med helm', 'Bronze kiteshield', 'Bronze sq shield', 'Bronze platelegs'];
+export const BRONZE: Metal = {
+  name: 'Bronze',
+  bar: 'Bronze bar',
+  ores: ['Copper ore', 'Tin ore'],
+  batch: 13,
+  mineOre: 'Copper ore',
+  mineRocks: 'Copper rocks',
+  mine: { name: 'Lumbridge Swamp mine', point: { x: 3229, y: 3146, plane: 0 } },
+  filler: 'Bronze dagger',
+  gear: [
+    { item: 'Bronze scimitar', level: 5, bars: 2, slot: 'WEAPON' },
+    { item: 'Bronze full helm', level: 7, bars: 2, slot: 'HEAD' },
+    { item: 'Bronze chainbody', level: 11, bars: 3, slot: 'BODY' },
+    { item: 'Bronze kiteshield', level: 12, bars: 3, slot: 'SHIELD' },
+    { item: 'Bronze platelegs', level: 16, bars: 3, slot: 'LEGS' },
+    { item: 'Bronze platebody', level: 18, bars: 5, slot: 'BODY' },
+  ],
+};
+
+export const IRON: Metal = {
+  name: 'Iron',
+  bar: 'Iron bar',
+  ores: ['Iron ore'],
+  batch: 26,
+  mineOre: 'Iron ore',
+  mineRocks: 'Iron rocks',
+  mine: { name: 'Al Kharid mine', point: { x: 3296, y: 3311, plane: 0 } },
+  filler: 'Iron dagger',
+  gear: [
+    { item: 'Iron scimitar', level: 20, bars: 2, slot: 'WEAPON' },
+    { item: 'Iron full helm', level: 22, bars: 2, slot: 'HEAD' },
+    { item: 'Iron chainbody', level: 26, bars: 3, slot: 'BODY' },
+    { item: 'Iron kiteshield', level: 27, bars: 3, slot: 'SHIELD' },
+    { item: 'Iron platelegs', level: 31, bars: 3, slot: 'LEGS' },
+    { item: 'Iron platebody', level: 33, bars: 5, slot: 'BODY' },
+  ],
+};
+
+/** Iron smelting needs Smithing 15. */
+const IRON_LEVEL = 15;
+
+/** Best-first ordering per slot, for "is this an upgrade?". Unlisted items never count as upgrades. */
+const RANK: Record<string, string[]> = {
+  WEAPON: ['Iron scimitar', 'Bronze scimitar'],
+  HEAD: ['Iron full helm', 'Bronze full helm', 'Iron med helm', 'Bronze med helm'],
+  BODY: ['Iron platebody', 'Bronze platebody', 'Iron chainbody', 'Bronze chainbody'],
+  SHIELD: ['Iron kiteshield', 'Bronze kiteshield', 'Iron sq shield', 'Bronze sq shield'],
+  LEGS: ['Iron platelegs', 'Bronze platelegs'],
+};
 
 export const PLACES = {
   bank: { x: 3209, y: 3220, plane: 2 } as WorldPoint, // Lumbridge castle top floor
   furnace: { x: 3226, y: 3255, plane: 0 } as WorldPoint, // Lumbridge furnace; rusted anvil beside it
-  mine: { x: 3229, y: 3146, plane: 0 } as WorldPoint, // Lumbridge Swamp east mine (copper + tin)
 };
-
-const BATCH = 13; // 13 copper + 13 tin + hammer + pickaxe = 28 slots
 
 const lc = (s: string) => s.toLowerCase();
 
@@ -51,17 +103,14 @@ function level(s: Snapshot, skill: string): number {
   return s.skills.find((k) => k.name === skill)?.level ?? 1;
 }
 
-function wornIn(s: Snapshot, slot: string): string | undefined {
-  return s.equipment.find((e) => e.slot === slot)?.name;
-}
-
-/** True when `item` beats whatever is in its slot (by the RANK list; anything beats nothing). */
-function isUpgrade(s: Snapshot, item: string, slot: string): boolean {
-  const current = wornIn(s, slot);
-  if (!current) return true;
-  const a = RANK.indexOf(item);
-  const b = RANK.indexOf(current);
+/** True when `item` beats whatever is worn in `slot` (anything ranked beats an empty or unranked slot). */
+export function isUpgrade(s: Snapshot, item: string, slot: string): boolean {
+  const order = RANK[slot] ?? [];
+  const a = order.indexOf(item);
   if (a < 0) return false;
+  const current = s.equipment.find((e) => e.slot === slot)?.name;
+  if (!current) return true;
+  const b = order.indexOf(current);
   return b < 0 || a < b;
 }
 
@@ -73,18 +122,26 @@ function sg(text: string, targets: string[], actions: string[], doneWhen: DoneCo
 }
 
 export interface SmithingPlannerOptions {
-  /** Stop when Smithing reaches this level. Default 18 (bronze platebody). */
+  /** Stop when Smithing reaches this level (and unlocked upgrades are worn). Default 33 (iron platebody). */
   untilLevel?: number;
+  /** Force a metal instead of choosing by level. */
+  metal?: 'bronze' | 'iron';
 }
 
 export class SmithingPlanner implements Planner {
   readonly name = 'smith-progression';
   private readonly untilLevel: number;
+  private readonly forced?: Metal;
   /** Last seen bank counts (item name -> quantity); null until the bank has been opened once. */
   private bank: Map<string, number> | null = null;
 
   constructor(opts: SmithingPlannerOptions = {}) {
-    this.untilLevel = opts.untilLevel ?? 18;
+    this.untilLevel = opts.untilLevel ?? 33;
+    this.forced = opts.metal === 'bronze' ? BRONZE : opts.metal === 'iron' ? IRON : undefined;
+  }
+
+  private metal(smithing: number): Metal {
+    return this.forced ?? (smithing >= IRON_LEVEL ? IRON : BRONZE);
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
@@ -97,10 +154,12 @@ export class SmithingPlanner implements Planner {
     }
 
     const smithing = level(s, 'Smithing');
-    // Done at the target level only once every unlocked upgrade is made and worn; otherwise the
-    // run stopped at 18 holding 12 bars and no platebody.
-    const pendingUpgrade = BRONZE_GEAR.some(
-      (g) => g.level <= smithing && isUpgrade(s, g.item, g.slot) && (held(s, g.item) > 0 || held(s, 'Bronze bar') >= g.bars),
+    const metal = this.metal(smithing);
+    const allGear = [...BRONZE.gear, ...IRON.gear];
+
+    // Done at the target level only once every unlocked upgrade is made and worn.
+    const pendingUpgrade = metal.gear.some(
+      (g) => g.level <= smithing && isUpgrade(s, g.item, g.slot) && (held(s, g.item) > 0 || held(s, metal.bar) >= g.bars),
     );
     if (smithing >= this.untilLevel && !pendingUpgrade) {
       return { kind: 'complete', reason: `Smithing ${smithing} reached and all unlocked upgrades worn` };
@@ -108,27 +167,24 @@ export class SmithingPlanner implements Planner {
 
     // 1. Wear any upgrade we are carrying.
     const wearable = s.inventory.items.find((i) => {
-      const tier = BRONZE_GEAR.find((g) => g.item === i.name);
+      const tier = allGear.find((g) => g.item === i.name);
       return tier && isUpgrade(s, tier.item, tier.slot);
     });
     if (wearable && !s.bank.open) {
-      return sg(`wear the ${wearable.name}`, [wearable.name], ['Wear'], { equipped: [wearable.name] }, { maxSteps: 6 });
+      const verb = allGear.find((g) => g.item === wearable.name)?.slot === 'WEAPON' ? 'Wield' : 'Wear';
+      return sg(`${lc(verb)} the ${wearable.name}`, [wearable.name], [verb], { equipped: [wearable.name] }, { maxSteps: 6 });
     }
 
-    const bars = held(s, 'Bronze bar');
-    const copper = held(s, 'Copper ore');
-    const tin = held(s, 'Tin ore');
-    const hasHammer = held(s, 'Hammer') > 0;
-
     // 2. Bank screen: the planner decides what goes in and out.
-    if (s.bank.open) return this.atBank(s);
+    if (s.bank.open) return this.atBank(s, metal);
+
+    const bars = held(s, metal.bar);
+    const hasHammer = held(s, 'Hammer') > 0;
 
     // 3. Smith while carrying bars and a hammer.
     if (bars > 0 && hasHammer) {
-      const target = BRONZE_GEAR.find(
-        (g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0,
-      );
-      const item = target?.item ?? 'Bronze dagger';
+      const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
+      const item = target?.item ?? metal.filler;
       const count = held(s, item) + 1;
       return sg(`smith a ${item} at the anvil`, ['Rusted anvil', 'Anvil', item], ['Smith'], { hasItem: { name: item, count } }, {
         destination: { name: 'Lumbridge furnace', point: PLACES.furnace },
@@ -138,23 +194,24 @@ export class SmithingPlanner implements Planner {
     }
 
     // 4. Smelt ores into bars.
-    if (copper > 0 && tin > 0) {
-      return sg('smelt the copper and tin ore into bronze bars at the furnace', ['Furnace', 'Bronze bar'], ['Smelt', 'Make'], { lacksItem: copper <= tin ? 'Copper ore' : 'Tin ore' }, {
+    if (metal.ores.every((o) => held(s, o) > 0)) {
+      const scarcest = [...metal.ores].sort((a, b) => held(s, a) - held(s, b))[0]!;
+      return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
         destination: { name: 'Lumbridge furnace', point: PLACES.furnace },
-        maxSteps: 200,
+        maxSteps: 250,
       });
     }
 
-    // 5. Out of materials. Mine when the bank (as last seen) cannot supply a batch of copper.
-    const bankCopper = this.bank?.get('Copper ore') ?? 0;
-    const needMining = this.bank !== null && bankCopper < BATCH && copper < BATCH;
+    // 5. Out of materials. Mine when the bank (as last seen) cannot supply a batch.
+    const bankOre = this.bank?.get(metal.mineOre) ?? 0;
+    const needMining = this.bank !== null && bankOre < metal.batch && held(s, metal.mineOre) < metal.batch;
     const hasPickaxe = held(s, 'pickaxe') + s.equipment.filter((e) => lc(e.name).includes('pickaxe')).length > 0;
     // Bank the smithed junk first: a trip with a half-full inventory wastes the walk.
-    const roomy = s.inventory.freeSlots >= 20 || copper > 0;
+    const roomy = s.inventory.freeSlots >= 20 || held(s, metal.mineOre) > 0;
     if (needMining && roomy && s.inventory.freeSlots > 0 && hasPickaxe) {
-      return sg('mine copper ore at the Lumbridge Swamp mine until the inventory is full', ['Copper rocks'], ['Mine'], { inventoryFull: true }, {
-        destination: { name: 'Lumbridge Swamp mine', point: PLACES.mine },
-        maxSteps: 500,
+      return sg(`mine ${lc(metal.mineOre)} at the ${metal.mine.name} until the inventory is full`, [metal.mineRocks], ['Mine'], { inventoryFull: true }, {
+        destination: metal.mine,
+        maxSteps: 600,
       });
     }
 
@@ -165,27 +222,29 @@ export class SmithingPlanner implements Planner {
     });
   }
 
-  private atBank(s: Snapshot): PlanStep {
+  private atBank(s: Snapshot, metal: Metal): PlanStep {
+    const keepRe = new RegExp(`hammer|pickaxe|coins|${[...metal.ores, metal.bar].map((n) => lc(n)).join('|')}`, 'i');
     const junk = s.inventory.items
       .map((i) => i.name)
       .filter((n, idx, all) => all.indexOf(n) === idx)
-      .filter((n) => !/hammer|pickaxe|copper ore|tin ore|coins|bronze bar/i.test(n));
+      .filter((n) => !keepRe.test(n));
     if (junk.length > 0) {
       return sg(`deposit the ${junk.join(', ')}`, junk, ['Deposit'], { lacksItems: junk }, { maxSteps: 20 });
     }
-    const copperInBank = s.bank.items.find((i) => i.name === 'Copper ore')?.quantity ?? 0;
-    const tinInBank = s.bank.items.find((i) => i.name === 'Tin ore')?.quantity ?? 0;
-    const hasHammer = held(s, 'Hammer') > 0;
-    const want: { name: string; count: number }[] = [];
-    if (!hasHammer && s.bank.items.some((i) => i.name === 'Hammer')) want.push({ name: 'Hammer', count: 1 });
-    // Mined copper beyond one batch stays banked; a full batch needs both ores.
-    const batch = Math.min(BATCH, copperInBank + held(s, 'Copper ore'), tinInBank + held(s, 'Tin ore'));
-    if (batch > 0 && (held(s, 'Copper ore') < batch || held(s, 'Tin ore') < batch)) {
-      want.push({ name: 'Copper ore', count: batch }, { name: 'Tin ore', count: batch });
+    // Deposit mined ore beyond one batch (after a mining trip the inventory is full of it).
+    if (metal.ores.length > 1 && held(s, metal.mineOre) > metal.batch) {
+      return sg(`deposit all the ${lc(metal.mineOre)}`, [metal.mineOre], ['Deposit'], { lacksItem: metal.mineOre }, { maxSteps: 6 });
     }
-    // Deposit copper beyond the batch (after a mining trip the inventory is full of it).
-    if (held(s, 'Copper ore') > BATCH) {
-      return sg('deposit all the copper ore', ['Copper ore'], ['Deposit'], { lacksItem: 'Copper ore' }, { maxSteps: 6 });
+    const want: { name: string; count: number }[] = [];
+    if (held(s, 'Hammer') === 0 && s.bank.items.some((i) => i.name === 'Hammer')) want.push({ name: 'Hammer', count: 1 });
+    const wornPickaxe = s.equipment.some((e) => lc(e.name).includes('pickaxe'));
+    const bankPickaxe = s.bank.items.find((i) => lc(i.name).includes('pickaxe'));
+    if (!wornPickaxe && held(s, 'pickaxe') === 0 && bankPickaxe) want.push({ name: bankPickaxe.name, count: 1 });
+    // A batch is limited by the scarcest ore (bank + inventory).
+    const available = metal.ores.map((o) => (s.bank.items.find((i) => i.name === o)?.quantity ?? 0) + held(s, o));
+    const batch = Math.min(metal.batch, ...available);
+    if (batch > 0 && metal.ores.some((o) => held(s, o) < batch)) {
+      for (const o of metal.ores) want.push({ name: o, count: batch });
     }
     if (want.length > 0) {
       return sg(
@@ -193,7 +252,7 @@ export class SmithingPlanner implements Planner {
         want.map((w) => w.name),
         ['Withdraw'],
         { hasItems: want.map((w) => ({ name: w.name, count: w.count })) },
-        { want, maxSteps: 25 },
+        { want, maxSteps: 30 },
       );
     }
     return sg('close the bank', ['Bank'], ['Close'], { bankOpen: false }, { maxSteps: 5 });
