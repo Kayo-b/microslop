@@ -332,3 +332,12 @@ test('candidates: fights and pickups never swap gear or grab unnamed loot', () =
   const pickup = buildCandidates(s, null, { text: 'pick up arrows', targets: ['Bronze arrow'], actions: ['Take'] }).candidates.map((c) => c.id);
   assert.ok(pickup.includes('ground:882@3250,3260,0#Take') && !pickup.some((id) => /ground:526|Remove|Wield/.test(id)), pickup.join(', '));
 });
+
+test('reflexes: a random event NPC targeting us is dismissed; one talking to someone else is left alone', () => {
+  const genie = goblin({ index: 9, id: 326, name: 'Genie', actions: ['Talk-to', 'Dismiss'], interactingWithPlayer: true });
+  const r = checkReflexes(snapshot({ npcs: [genie] }));
+  assert.ok(r?.kind === 'act' && r.action.op === 'interact' && r.action.action === 'Dismiss' && /Genie/.test(r.reason));
+  assert.equal(checkReflexes(snapshot({ npcs: [{ ...genie, interactingWithPlayer: false }] })), null);
+  const ids = buildCandidates(snapshot({ npcs: [genie] }), null, { text: 'look around' }).candidates.map((c) => c.id);
+  assert.ok(!ids.some((id) => id.startsWith('npc:9')), 'random events are never offered to the classifier');
+});

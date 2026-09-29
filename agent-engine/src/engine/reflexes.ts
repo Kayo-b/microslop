@@ -48,6 +48,18 @@ export function checkReflexes(s: Snapshot, cfg: ReflexConfig = DEFAULT_REFLEXES)
     }
   }
 
+  // Random events (Genie, Drunken Dwarf, Rick Turpentine, Mysterious Old Man, ...) walk up, say
+  // the player's name and offer a "game" or a gift. Every one has a Dismiss option; declining is
+  // always safe, while ignoring or accepting some of them teleports the player away.
+  const randomEvent = s.npcs.find((n) => n.interactingWithPlayer && n.actions.some((a) => a.toLowerCase() === 'dismiss'));
+  if (randomEvent) {
+    return {
+      kind: 'act',
+      reason: `dismiss random event ${randomEvent.name}`,
+      action: { op: 'interact', target: { kind: 'npc', index: randomEvent.index, id: randomEvent.id }, action: 'Dismiss' },
+    };
+  }
+
   if (s.walk.active && !p.runEnabled && p.runEnergy >= cfg.runAbove) {
     return { kind: 'act', reason: 'enable run while walking', action: { op: 'toggle_run', enabled: true } };
   }

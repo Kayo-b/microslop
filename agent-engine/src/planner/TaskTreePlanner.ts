@@ -123,7 +123,7 @@ export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext 
     const what = /^coins$/i.test(lootHere.name) ? `${lootHere.quantity} coins` : `the ${lootHere.name}`;
     return {
       kind: 'subgoal',
-      subgoal: goal(`pick up ${what} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + (/^coins$/i.test(lootHere.name) ? lootHere.quantity : 1) } }, 12, task.keep),
+      subgoal: goal(`pick up ${what} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + (/^coins$/i.test(lootHere.name) ? lootHere.quantity : 1) } }, 30, task.keep),
     };
   }
   if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };

@@ -96,6 +96,10 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     if (npc.healthScale > 0 && npc.healthRatio === 0) continue;
     for (const action of npc.actions) {
       if (lc(action) === 'attack' && npc.interactingWithOther && !npc.interactingWithPlayer) continue;
+      // A sub-goal that lists its actions starts fights only when "Attack" is one of them.
+      if (lc(action) === 'attack' && goal.actions?.length && !goal.actions.some((x) => lc(x) === 'attack')) continue;
+      // Random-event NPCs are dismissed by a reflex, never engaged.
+      if (lc(action) === 'dismiss' || npc.actions.some((x) => lc(x) === 'dismiss') && npc.interactingWithPlayer) continue;
       if (lc(action) === 'attack' && attackers.size > 0 && !attackers.has(npc.index)) continue;
       if (lc(action) === 'attack' && goal.maxTargetLevel !== undefined && npc.combatLevel > goal.maxTargetLevel) continue;
       if (!admit(`npc|${npc.name}|${action}`)) continue;
