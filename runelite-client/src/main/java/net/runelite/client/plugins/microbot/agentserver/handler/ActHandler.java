@@ -13,6 +13,8 @@ import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
+import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
+import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
@@ -188,7 +190,14 @@ public class ActHandler extends AgentHandler {
 			case "attack_style": {
 				int index = requireInt(body, "index");
 				if (index < 0 || index >= COMBAT_STYLES.length) throw new IllegalArgumentException("index must be 0-3");
-				return Rs2Combat.setAttackStyle(COMBAT_STYLES[index]) ? Result.ok() : Result.fail("style_not_available");
+				if (client.getVarpValue(43) == index) return Result.ok();
+				// The style buttons only take clicks while the combat tab is showing.
+				Rs2Tab.switchTo(InterfaceTab.COMBAT);
+				if (!sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.COMBAT, 2_000)) return Result.fail("combat_tab_not_open");
+				boolean clicked = Rs2Combat.setAttackStyle(COMBAT_STYLES[index]);
+				boolean changed = clicked && sleepUntil(() -> client.getVarpValue(43) == index, 2_000);
+				Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+				return changed ? Result.ok() : Result.fail("style_not_available");
 			}
 			case "autocast": {
 				Rs2CombatSpells spell;

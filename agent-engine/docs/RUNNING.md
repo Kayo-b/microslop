@@ -67,6 +67,9 @@ npm run agent -- inspect --goal "chop trees" --targets Tree --decide   # decides
 `microbot-run` compiles the working tree, so Java changes (e.g. to `/snapshot`) only need a
 client restart. Stop the client with the window's close button, or
 `kill $(ps -eo pid,args | awk '/[j]ava .*net\.runelite\.client\.RuneLite/{print $1}')`.
+After a restart the client sits at the login screen; log in without touching the window with
+`curl -X POST -H "X-Agent-Token: $(cat ~/.runelite/.agent-token)" -H 'Content-Type: application/json' -d '{"wait":true,"world":316}' 127.0.0.1:8081/login`
+(use a free-to-play world for a free account).
 Avoid `pkill -f RuneLite` from a shell whose own command line contains that text: it kills the
 shell too.
 
