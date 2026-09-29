@@ -41,7 +41,9 @@ export function checkReflexes(s: Snapshot, cfg: ReflexConfig = DEFAULT_REFLEXES)
         action: { op: 'interact', target: { kind: 'inventory', slot: food.slot, id: food.id }, action: 'Eat' },
       };
     }
-    if (hpFraction < cfg.haltBelow) {
+    // Only a fight makes low HP without food an emergency; out of combat the planner decides
+    // (restock at a bank, or rest), and halting here would block even walking to that bank.
+    if (hpFraction < cfg.haltBelow && (p.inCombat || p.interacting?.type === 'npc')) {
       return { kind: 'halt', reason: `hp ${p.hp.current}/${p.hp.max} and no food` };
     }
   }

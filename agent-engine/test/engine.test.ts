@@ -71,6 +71,8 @@ test('reflexes: eat when low, halt with no food, dismiss level-ups', () => {
 
   const lowNoFood = snapshot();
   lowNoFood.player!.hp.current = 2;
+  assert.equal(checkReflexes(lowNoFood), null, 'out of combat the planner handles low HP (restock or rest)');
+  lowNoFood.player!.inCombat = true;
   assert.deepEqual(checkReflexes(lowNoFood), { kind: 'halt', reason: 'hp 2/10 and no food' });
 
   const lvl = snapshot({ dialogue: { inDialogue: true, hasContinue: true, hasOptions: false, text: "Congratulations, you've just advanced your Fishing level.", options: [] } });
