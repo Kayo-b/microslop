@@ -17,6 +17,7 @@ import type { Escalator, EscalationRequest, EscalationResponse } from '../engine
 import { foldInventory } from '../engine/state.ts';
 import { compile, describe, type DoneCondition } from '../planner/conditions.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from '../planner/types.ts';
+import type { RescueRequest, Rescuer } from './rescue.ts';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
@@ -244,3 +245,47 @@ export function describeSubGoal(sg: PlannedSubGoal): string {
   return parts.join(' | ');
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// Rescuer
+// ---------------------------------------------------------------------------------------------
+
+const RESCUE_SYSTEM = `${PLANNER_SYSTEM}
+
+You are being called as a rescue: a scripted planner normally drives this agent, and it just gave up or got stuck. Propose ONE sub-goal that gets past the specific problem (go around an obstacle, use a different target or place, fetch a missing item, close or answer an interface), after which the scripted planner resumes. Do not re-plan the whole goal. Answer "impossible" only when no sub-goal can help without a human.`;
+
+/** Asks Claude for one sub-goal that gets past what the scripted planner could not handle. */
+export class ClaudeRescuer implements Rescuer {
+  readonly name: string;
+  private readonly client: Anthropic;
+  private readonly model: string;
+
+  constructor(opts: ClaudeOptions = {}) {
+    this.client = makeClient(opts);
+    this.model = opts.model ?? process.env.CLAUDE_MODEL ?? DEFAULT_CLAUDE_MODEL;
+    this.name = `claude:${this.model}`;
+  }
+
+  async rescue(ctx: PlannerContext, req: RescueRequest): Promise<PlanStep> {
+    const prompt = [
+      plannerPrompt(ctx),
+      '',
+      `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`,
+      'Propose one sub-goal that gets past this.',
+    ].join('\n');
+    const response = await this.client.beta.messages.parse({
+      model: this.model,
+      max_tokens: 16000,
+      betas: [FALLBACK_BETA],
+      fallbacks: 'default',
+      system: [{ type: 'text', text: RESCUE_SYSTEM, cache_control: { type: 'ephemeral' } }],
+      output_config: { effort: 'medium', format: betaZodOutputFormat(PlanSchema) },
+      messages: [{ role: 'user', content: prompt }],
+    });
+    if (response.stop_reason === 'refusal') {
+      return { kind: 'impossible', reason: `rescue request declined (${response.stop_details?.category ?? 'no category'})` };
+    }
+    if (!response.parsed_output) throw new Error(`rescue returned no parseable plan (stop_reason ${response.stop_reason})`);
+    return planToStep(response.parsed_output);
+  }
+}

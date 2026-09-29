@@ -23,7 +23,8 @@ import { GameIntentEngine } from './engine/GameIntentEngine.ts';
 import { JsonlStepLogger } from './engine/log.ts';
 import { buildDecisionState, relevantSkillsFor } from './engine/state.ts';
 import { KnowledgeBase } from './kb/KnowledgeBase.ts';
-import { ClaudeEscalator, ClaudePlanner, describeSubGoal } from './llm/claude.ts';
+import { ClaudeEscalator, ClaudePlanner, ClaudeRescuer, describeSubGoal } from './llm/claude.ts';
+import { JsonlRescueLog, RescuingPlanner } from './llm/rescue.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
@@ -59,6 +60,7 @@ const { values, positionals } = parseArgs({
     'until-level': { type: 'string' },
     engine: { type: 'string' },
     escalate: { type: 'boolean', default: false },
+    rescue: { type: 'boolean', default: false },
     decide: { type: 'boolean', default: false },
     'min-confidence': { type: 'string' },
     'max-subgoals': { type: 'string' },
@@ -88,7 +90,9 @@ function help(): void {
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
 
-Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE`);
+Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE
+       --rescue   let Claude propose a sub-goal when a scripted planner gives up or gets stuck
+                  (needs ANTHROPIC_API_KEY; rescues logged to data/rescues.jsonl)`);
 }
 
 async function inspect(): Promise<void> {
@@ -195,6 +199,12 @@ async function run(): Promise<void> {
     throw new Error('run needs --task PRESET, --subgoal TEXT or --goal TEXT');
   }
 
+  if (values.rescue) {
+    if (!process.env.ANTHROPIC_API_KEY) throw new Error('--rescue needs ANTHROPIC_API_KEY (add it to the repo-root .env)');
+    const log = new JsonlRescueLog();
+    planner = new RescuingPlanner(planner, new ClaudeRescuer(), log);
+    console.log(`[agent] LLM rescue on; rescues logged to ${log.file}`);
+  }
   const logger = new JsonlStepLogger(values['log-dir']);
   const engine = new GameIntentEngine({
     backend,
