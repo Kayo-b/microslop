@@ -41,3 +41,13 @@ test('watchdog: waiting with no progress trips after the time window', () => {
   now = 1500;
   assert.match(w.observe(waiting)!.reason, /no progress for 2 s/);
 });
+
+test('watchdog: an alternating loop blames the targeted action, not the dialogue continue', () => {
+  const w = new ProgressWatchdog({ repeatLimit: 3 });
+  const s = snapshot();
+  const cont = { kind: 'acted', source: 'gate', action: { op: 'dialogue_continue' }, label: 'Continue', outcome: { success: true, effect: 'changed: dialogue', after: s } } as unknown as StepResult;
+  let v = null;
+  for (let i = 0; i < 3 && !v; i++) v = w.observe(cont) ?? w.observe(acted(s));
+  assert.match(v!.reason, /Continue/);
+  assert.deepEqual(v!.action, chop);
+});

@@ -71,6 +71,17 @@ export class ProgressWatchdog {
     if (p) this.anchors = [...this.anchors.slice(-5), p];
   }
 
+  /**
+   * The most repeated action that has a world/inventory target. A loop often alternates a
+   * targeted click with an untargeted one (chop a "tree" -> its NPC talks -> continue the
+   * dialogue); only the targeted one can be withheld.
+   */
+  private culprit(): GameAction | undefined {
+    return [...this.repeats.values()]
+      .filter((r) => r.action.op === 'interact' || r.action.op === 'use_item_on')
+      .sort((a, b) => b.n - a.n)[0]?.action;
+  }
+
   /** Feed every engine step; returns a verdict when the agent looks stuck. */
   observe(result: StepResult): StuckVerdict | null {
     const s = result.kind === 'acted' ? result.outcome.after : result.snapshot;
@@ -90,13 +101,12 @@ export class ProgressWatchdog {
       const key = result.label ?? result.action.op;
       const n = (this.repeats.get(key)?.n ?? 0) + 1;
       this.repeats.set(key, { n, action: result.action });
-      if (n >= this.repeatLimit) return { reason: `loop: "${key}" ${n} times without progress`, action: result.action };
+      if (n >= this.repeatLimit) return { reason: `loop: "${key}" ${n} times without progress`, action: this.culprit() };
     }
     const idle = this.now() - this.lastProgressAt;
     if (idle >= this.windowMs) {
       // Blame the most repeated targeted action, if any.
-      const top = [...this.repeats.values()].sort((a, b) => b.n - a.n)[0];
-      return { reason: `no progress for ${Math.round(idle / 1000)} s`, action: top?.action };
+      return { reason: `no progress for ${Math.round(idle / 1000)} s`, action: this.culprit() };
     }
     return null;
   }
