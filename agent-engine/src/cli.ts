@@ -245,6 +245,9 @@ function printEvent(e: AgentEvent): void {
     case 'report':
       console.log(`${t} ■ ${e.report.result}: ${e.report.reason} (${e.report.steps} steps)`);
       break;
+    case 'stuck':
+      console.log(`${t} ⚠ stuck (${e.reason}) -> ${e.recovery}`);
+      break;
     case 'wait':
       console.log(`${t} ⏸ ${e.reason}`);
       break;

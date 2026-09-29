@@ -7,13 +7,15 @@ import type { GameIntentEngine, StepResult } from '../engine/GameIntentEngine.ts
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { PlannedSubGoal, Planner, SubGoalReport } from '../planner/types.ts';
 import { evaluate } from '../planner/conditions.ts';
-import type { WorldPoint } from '../types.ts';
+import type { GameAction, WorldPoint } from '../types.ts';
+import { ProgressWatchdog, type WatchdogOptions } from './watchdog.ts';
 
 export type AgentEvent =
   | { type: 'wait'; reason: string }
   | { type: 'subgoal'; subgoal: PlannedSubGoal }
   | { type: 'step'; result: StepResult }
   | { type: 'report'; report: SubGoalReport }
+  | { type: 'stuck'; reason: string; recovery: string }
   | { type: 'finished'; outcome: AgentOutcome };
 
 export interface AgentOutcome {
@@ -34,6 +36,8 @@ export interface AgentOptions {
   maxBlockedInARow?: number;
   /** Pause between engine steps while waiting (ms). Default 600 (one game tick). */
   waitMs?: number;
+  /** Progress watchdog settings; see watchdog.ts. */
+  watchdog?: WatchdogOptions;
   onEvent?: (e: AgentEvent) => void;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -56,6 +60,21 @@ export class Agent {
     const bank = from && this.o.kb ? this.o.kb.nearestBanks(from, 1, false)[0] : undefined;
     if (!bank) return;
     await this.o.backend.act({ op: 'walk', to: bank.point, distance: 3, label: `flee to ${bank.name}` }).catch(() => undefined);
+  }
+
+  /**
+   * First recovery rung: withhold the looping target (e.g. a "tree" that is really an NPC gimmick)
+   * and clear anything that could be swallowing clicks. False when there is nothing to withhold,
+   * so the caller ends the sub-goal instead.
+   */
+  private async unstick(action: GameAction | undefined): Promise<boolean> {
+    const { backend, engine } = this.o;
+    const withheld = action ? engine.withhold(action) : false;
+    const s = await backend.snapshot().catch(() => null);
+    if (s?.walk.active) await backend.act({ op: 'walk_cancel' }).catch(() => undefined);
+    if (s?.bank.open) await backend.act({ op: 'bank_close' }).catch(() => undefined);
+    if (s?.shop.open) await backend.act({ op: 'shop_close' }).catch(() => undefined);
+    return withheld;
   }
 
   async run(goal: string): Promise<AgentOutcome> {
@@ -111,6 +130,8 @@ export class Agent {
         let report: SubGoalReport | null = null;
         const maxSteps = sg.maxSteps ?? 100;
         let n = 0;
+        const watchdog = new ProgressWatchdog(this.o.watchdog);
+        let trips = 0;
         while (!report && !this.stopRequested) {
           if (n >= maxSteps) {
             report = { subgoal: sg.text, result: 'max_steps', reason: `no completion after ${n} steps`, steps: n, trail: trail(engine) };
@@ -120,6 +141,18 @@ export class Agent {
           n++;
           steps++;
           this.o.onEvent?.({ type: 'step', result });
+          const stuck = result.kind === 'blocked' ? null : watchdog.observe(result);
+          if (stuck) {
+            trips++;
+            if (trips >= 2 || !(await this.unstick(stuck.action))) {
+              this.o.onEvent?.({ type: 'stuck', reason: stuck.reason, recovery: 'end sub-goal' });
+              report = { subgoal: sg.text, result: 'blocked', reason: `stuck: ${stuck.reason}`, steps: n, trail: trail(engine) };
+              break;
+            }
+            this.o.onEvent?.({ type: 'stuck', reason: stuck.reason, recovery: 'withheld target, cleared UI' });
+            watchdog.reset();
+            continue;
+          }
           switch (result.kind) {
             case 'done':
               report = { subgoal: sg.text, result: 'done', reason: result.reason, steps: n, trail: trail(engine) };

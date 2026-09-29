@@ -117,6 +117,14 @@ export class GameIntentEngine {
   }
 
   /** History of the current sub-goal (action -> outcome), newest last. */
+  /** Withhold the target of `action` for the rest of the current sub-goal (e.g. the watchdog saw it loop). */
+  withhold(action: GameAction): boolean {
+    const tk = targetKey(action);
+    if (!tk) return false;
+    this.targetFailures.set(tk, 2);
+    return true;
+  }
+
   get recentHistory(): readonly HistoryEntry[] {
     return this.history;
   }

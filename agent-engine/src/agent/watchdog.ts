@@ -1,0 +1,103 @@
+/**
+ * Progress watchdog: catches loops where every action "succeeds" but nothing moves forward
+ * (re-clicking a banker behind a counter, pacing between two tiles, a menu that never closes,
+ * waiting on an animation that never ends).
+ *
+ * Progress = any XP gained, the inventory contents changing, the player moving more than
+ * `moveTiles` from where progress was last seen, or a sub-goal completing. The watchdog trips when
+ * there has been no progress for `windowMs`, or when the same action repeats `repeatLimit` times
+ * since the last progress.
+ */
+import type { StepResult } from '../engine/GameIntentEngine.ts';
+import type { GameAction, Snapshot, WorldPoint } from '../types.ts';
+
+export interface WatchdogOptions {
+  /** Longest stretch without progress before tripping. Default 180 s. */
+  windowMs?: number;
+  /** Same action this many times without progress trips it. Default 6. */
+  repeatLimit?: number;
+  /** Moving this far from the last progress point counts as progress. Default 3 tiles. */
+  moveTiles?: number;
+  now?: () => number;
+}
+
+export interface StuckVerdict {
+  reason: string;
+  /** The action that kept repeating, when the trip was a loop. */
+  action?: GameAction;
+}
+
+function inventoryKey(s: Snapshot): string {
+  const counts = new Map<string, number>();
+  for (const i of s.inventory.items) counts.set(i.name, (counts.get(i.name) ?? 0) + i.quantity);
+  return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([n, c]) => `${n}:${c}`).join('|');
+}
+
+function totalXp(s: Snapshot): number {
+  return s.skills.reduce((sum, k) => sum + k.xp, 0);
+}
+
+export class ProgressWatchdog {
+  private readonly windowMs: number;
+  private readonly repeatLimit: number;
+  private readonly moveTiles: number;
+  private readonly now: () => number;
+  private lastProgressAt: number;
+  private xp = -1;
+  private inv = '';
+  /** Recent progress points; returning to one of them (pacing) is not progress. */
+  private anchors: WorldPoint[] = [];
+  private repeats = new Map<string, { n: number; action: GameAction }>();
+
+  constructor(opts: WatchdogOptions = {}) {
+    this.windowMs = opts.windowMs ?? 180_000;
+    this.repeatLimit = opts.repeatLimit ?? 6;
+    this.moveTiles = opts.moveTiles ?? 3;
+    this.now = opts.now ?? Date.now;
+    this.lastProgressAt = this.now();
+  }
+
+  /** Call when a sub-goal starts or completes: both are progress. */
+  reset(s?: Snapshot): void {
+    this.lastProgressAt = this.now();
+    this.repeats.clear();
+    if (s) this.baseline(s);
+  }
+
+  private baseline(s: Snapshot): void {
+    this.xp = totalXp(s);
+    this.inv = inventoryKey(s);
+    const p = s.player?.position;
+    if (p) this.anchors = [...this.anchors.slice(-5), p];
+  }
+
+  /** Feed every engine step; returns a verdict when the agent looks stuck. */
+  observe(result: StepResult): StuckVerdict | null {
+    const s = result.kind === 'acted' ? result.outcome.after : result.snapshot;
+    if (!s || !s.loggedIn) return null;
+    if (this.xp < 0) this.baseline(s);
+
+    const pos = s.player?.position;
+    const moved =
+      !!pos && this.anchors.length > 0 &&
+      this.anchors.every((a) => pos.plane !== a.plane || Math.max(Math.abs(pos.x - a.x), Math.abs(pos.y - a.y)) > this.moveTiles);
+    if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || result.kind === 'done') {
+      this.reset(s);
+      return null;
+    }
+
+    if (result.kind === 'acted') {
+      const key = result.label ?? result.action.op;
+      const n = (this.repeats.get(key)?.n ?? 0) + 1;
+      this.repeats.set(key, { n, action: result.action });
+      if (n >= this.repeatLimit) return { reason: `loop: "${key}" ${n} times without progress`, action: result.action };
+    }
+    const idle = this.now() - this.lastProgressAt;
+    if (idle >= this.windowMs) {
+      // Blame the most repeated targeted action, if any.
+      const top = [...this.repeats.values()].sort((a, b) => b.n - a.n)[0];
+      return { reason: `no progress for ${Math.round(idle / 1000)} s`, action: top?.action };
+    }
+    return null;
+  }
+}
