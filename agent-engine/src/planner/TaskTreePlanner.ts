@@ -18,6 +18,8 @@ export interface GatherTask {
   targets: string[];
   /** Menu action on the target ("Small Net", "Chop down"). */
   action: string;
+  /** Other names the same action has at some spots (Draynor's net spots say "Net"). */
+  altActions?: string[];
   /** What is gathered (inventory item name substring). */
   product: string;
   skill: string;
@@ -32,7 +34,7 @@ export interface GatherTask {
 }
 
 export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = {
-  'fish-shrimp': { activity: 'catch shrimp with a small fishing net', targets: ['Fishing spot'], action: 'Small Net', product: 'Raw', skill: 'Fishing', keep: ['Small fishing net'], area: { name: 'Draynor Village fishing spots', point: { x: 3087, y: 3228, plane: 0 } } },
+  'fish-shrimp': { activity: 'catch shrimp with a small fishing net', targets: ['Fishing spot'], action: 'Small Net', altActions: ['Net'], product: 'Raw', skill: 'Fishing', keep: ['Small fishing net'], area: { name: 'Draynor Village fishing spots', point: { x: 3087, y: 3228, plane: 0 } } },
   'fish-trout': { activity: 'fly fish for trout and salmon', targets: ['Rod Fishing spot'], action: 'Lure', product: 'Raw', skill: 'Fishing', keep: ['Fly fishing rod', 'Feather'], area: { name: 'Barbarian Village fishing spots', point: { x: 3104, y: 3430, plane: 0 } } },
   'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'] },
   'chop-oaks': { activity: 'chop oak trees for oak logs', targets: ['Oak tree'], action: 'Chop down', product: 'Oak logs', skill: 'Woodcutting', keep: ['axe'] },
@@ -227,16 +229,24 @@ export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
     };
   }
 
-  const inView = s.npcs.some((n) => task.targets.includes(n.name) && n.actions.includes(task.action)) || s.objects.some((o) => task.targets.includes(o.name));
+  const actions = [task.action, ...(task.altActions ?? [])];
+  const inView =
+    s.npcs.some((n) => task.targets.includes(n.name) && n.actions.some((a) => actions.includes(a))) ||
+    s.objects.some((o) => task.targets.includes(o.name) && o.actions.some((a) => actions.includes(a)));
   if (!inView && task.area) {
     return {
       kind: 'subgoal',
-      subgoal: { ...goal(`walk to the ${task.area.name}`, task.targets, [task.action], { near: { ...task.area.point, radius: 8 } }, 400, task.keep), destination: task.area },
+      subgoal: { ...goal(`walk to the ${task.area.name}`, task.targets, actions, { near: { ...task.area.point, radius: 8 } }, 400, task.keep), destination: task.area },
     };
   }
+  // The area stays the destination so that, if the spots drift out of view mid-trip, the engine
+  // travels back instead of clicking whatever is nearby (a Draynor poll booth, once).
   return {
     kind: 'subgoal',
-    subgoal: goal(`${task.activity}: use "${task.action}" on the ${task.targets.join(' or ')}`, task.targets, [task.action], { inventoryFull: true }, 1200, task.keep),
+    subgoal: {
+      ...goal(`${task.activity}: use "${task.action}" on the ${task.targets.join(' or ')}`, task.targets, actions, { inventoryFull: true }, 1200, task.keep),
+      destination: task.area,
+    },
   };
 }
 
