@@ -262,6 +262,8 @@ export interface SubGoal {
   want?: { name: string; count: number }[];
   /** Entity names never to offer (exact, case-insensitive), e.g. the bronze-only "Rusted anvil". */
   avoid?: string[];
+  /** Positions whose objects are never offered (known unreachable placements), within 1 tile. */
+  avoidAt?: WorldPoint[];
   /** Quantity to make per production pick (anvil grid only). Default: all. */
   makeAmount?: 1 | 5 | 10;
   /** Deterministic completion check; when absent the decision engine's `done` answer decides. */

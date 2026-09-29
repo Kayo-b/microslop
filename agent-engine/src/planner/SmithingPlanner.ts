@@ -9,6 +9,8 @@
  * concrete sub-goal; the per-tick engine and its classifier do the clicking. Bank contents are only
  * visible while the bank is open, so the planner remembers what it last saw there.
  */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import type { Snapshot, WorldPoint } from '../types.ts';
 import { compile, type DoneCondition } from './conditions.ts';
 import { candidateSites, cheapestLoop, CostTable, type Site } from './routes.ts';
@@ -131,6 +133,8 @@ export interface SmithingPlannerOptions {
   untilLevel?: number;
   /** Force a metal instead of choosing by level. */
   metal?: 'bronze' | 'iron';
+  /** File that remembers unreachable placements across runs. Null disables. Default data/unusable-sites.json. */
+  memoryFile?: string | null;
 }
 
 export class SmithingPlanner implements Planner {
@@ -145,16 +149,39 @@ export class SmithingPlanner implements Planner {
   /** Sites proven unusable ("I can't reach that!"), as "x,y,plane"; excluded when re-planning. */
   private readonly unusable = new Set<string>();
 
-  /** A blocked sub-goal that could not reach its site retires that site and forces a re-plan. */
+  /**
+   * A blocked sub-goal that could not reach its target retires the placements of that object type
+   * next to the player (the engine uses whichever matching object is in view, which is not
+   * necessarily the planned site) and forces a re-plan.
+   */
   private learnFromReports(ctx: PlannerContext, metal: Metal): void {
     const last = ctx.reports.at(-1);
-    const route = this.routes.get(metal.name);
-    if (!last || !route || last.result === 'done' || !/can't reach|cannot reach/i.test(last.reason)) return;
-    const stage = /smith/i.test(last.subgoal) ? route.anvil : /smelt/i.test(last.subgoal) ? route.furnace : /mine/i.test(last.subgoal) ? route.mine : /bank/i.test(last.subgoal) ? route.bank : null;
-    if (!stage) return;
-    this.unusable.add(`${stage.point.x},${stage.point.y},${stage.point.plane}`);
+    const pos = ctx.snapshot.player?.position;
+    if (!last || !pos || !ctx.kb || last.result === 'done' || !/can't reach|cannot reach/i.test(last.reason)) return;
+    const object = /smith/i.test(last.subgoal) ? 'Anvil' : /smelt/i.test(last.subgoal) ? 'Furnace' : /mine/i.test(last.subgoal) ? metal.mineRocks : null;
+    if (!object) return;
+    const culprits = ctx.kb.nearestObjects(object, pos, { radius: 5, limit: 10 });
+    if (culprits.length === 0) return;
+    for (const c of culprits) this.unusable.add(`${c.point.x},${c.point.y},${c.point.plane}`);
+    this.remember();
     this.routes.delete(metal.name);
-    console.log(`[smith-progression] ${stage.name} @${stage.point.x},${stage.point.y} is unreachable; re-planning the loop without it`);
+    console.log(`[smith-progression] ${object} near ${pos.x},${pos.y} is unreachable (${culprits.length} placements retired); re-planning the loop`);
+  }
+
+  private retiredPoints(): WorldPoint[] {
+    return [...this.unusable].map((k) => {
+      const [x, y, plane] = k.split(',').map(Number);
+      return { x: x!, y: y!, plane: plane! };
+    });
+  }
+
+  /** True when a site lies within 12 tiles of a retired placement. */
+  private isRetired(site: Site): boolean {
+    for (const key of this.unusable) {
+      const [x, y, plane] = key.split(',').map(Number);
+      if (plane === site.point.plane && Math.max(Math.abs(x! - site.point.x), Math.abs(y! - site.point.y)) <= 12) return true;
+    }
+    return false;
   }
 
   /**
@@ -167,7 +194,7 @@ export class SmithingPlanner implements Planner {
     const pos = ctx.snapshot.player?.position;
     if (metal.name === 'Bronze' || !ctx.kb || !pos) return null;
     this.costs ??= new CostTable(ctx.pathCost);
-    const usable = (sites: Site[]) => sites.filter((x) => !this.unusable.has(`${x.point.x},${x.point.y},${x.point.plane}`));
+    const usable = (sites: Site[]) => sites.filter((x) => !this.isRetired(x));
     const stages = [
       usable(candidateSites(ctx.kb, pos, { object: metal.mineRocks, action: 'Mine', min: 3 }, 6)),
       usable(candidateSites(ctx.kb, pos, { object: 'Furnace', action: 'Smelt' }, 4)),
@@ -184,9 +211,21 @@ export class SmithingPlanner implements Planner {
     return chosen;
   }
 
+  private readonly memoryFile: string | null;
+
   constructor(opts: SmithingPlannerOptions = {}) {
     this.untilLevel = opts.untilLevel ?? 33;
     this.forced = opts.metal === 'bronze' ? BRONZE : opts.metal === 'iron' ? IRON : undefined;
+    this.memoryFile = opts.memoryFile === undefined ? path.resolve('data/unusable-sites.json') : opts.memoryFile;
+    if (this.memoryFile && existsSync(this.memoryFile)) {
+      for (const k of JSON.parse(readFileSync(this.memoryFile, 'utf8')) as string[]) this.unusable.add(k);
+    }
+  }
+
+  private remember(): void {
+    if (!this.memoryFile) return;
+    mkdirSync(path.dirname(this.memoryFile), { recursive: true });
+    writeFileSync(this.memoryFile, JSON.stringify([...this.unusable], null, 1));
   }
 
   private metal(smithing: number): Metal {
@@ -257,6 +296,7 @@ export class SmithingPlanner implements Planner {
         destination: { name: anvil.name, point: anvil.point },
         want: [{ name: item, count }],
         avoid: metal.anvil.avoid,
+        avoidAt: this.retiredPoints(),
         maxSteps: 200,
       });
     }

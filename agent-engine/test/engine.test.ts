@@ -278,3 +278,9 @@ test('hint matching is one-directional: depleted "Rocks" is not an "Iron rocks" 
   assert.equal(matchesAny('Iron rocks', ['Iron rocks']), true);
   assert.equal(matchesAny('Dead tree', ['Tree']), true);
 });
+
+test('objects at avoided positions are never offered', () => {
+  const s = snapshot({ objects: [tree({ id: 2097, name: 'Anvil', actions: ['Smith'], position: { x: 3246, y: 3404, plane: 0 } }), tree({ id: 2097, name: 'Anvil', actions: ['Smith'], position: { x: 3188, y: 3421, plane: 0 }, distance: 9 })] });
+  const ids = buildCandidates(s, null, { text: 'smith', targets: ['Anvil'], avoidAt: [{ x: 3246, y: 3404, plane: 0 }] }).candidates.map((c) => c.id);
+  assert.deepEqual(ids.filter((i) => i.startsWith('obj:')), ['obj:2097@3188,3421,0#Smith']);
+});

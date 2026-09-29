@@ -14,7 +14,7 @@ function withSmithing(level: number, items = [item(0, 2347, 'Hammer'), item(1, 1
 }
 
 test('smithing planner: bank first, then withdraw a batch, smelt, smith the best unlocked upgrade', async () => {
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   assert.match(text(await next(p, withSmithing(7))), /bank and open/);
 
   const atBank = withSmithing(7);
@@ -35,7 +35,7 @@ test('smithing planner: bank first, then withdraw a batch, smelt, smith the best
 });
 
 test('smithing planner: wears upgrades, mines when the bank is short of copper', async () => {
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   const helm = withSmithing(7, [item(0, 2347, 'Hammer'), item(1, 1153, 'Bronze full helm')]);
   helm.equipment = [{ slot: 'HEAD', id: 1139, name: 'Bronze med helm' }];
   assert.match(text(await next(p, helm)), /wear the Bronze full helm/);
@@ -50,11 +50,11 @@ test('smithing planner: wears upgrades, mines when the bank is short of copper',
 
   const done = withSmithing(18);
   done.equipment = ['Bronze scimitar:WEAPON', 'Bronze full helm:HEAD', 'Bronze platebody:BODY', 'Bronze kiteshield:SHIELD', 'Bronze platelegs:LEGS'].map((x) => ({ slot: x.split(':')[1]!, id: 1, name: x.split(':')[0]! }));
-  assert.equal((await next(new SmithingPlanner({ metal: 'bronze', untilLevel: 18 }), done)).kind, 'complete');
+  assert.equal((await next(new SmithingPlanner({ metal: 'bronze', untilLevel: 18, memoryFile: null }), done)).kind, 'complete');
 });
 
 test('smithing planner banks a cluttered inventory before a mining trip', async () => {
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   const bank = withSmithing(7);
   bank.bank = { open: true, items: [{ slot: 0, id: 438, name: 'Tin ore', quantity: 200 }] };
   await next(p, bank);
@@ -71,12 +71,12 @@ test('smithing planner does not finish at the target level while an unlocked upg
     { slot: 'LEGS', id: 1075, name: 'Bronze platelegs' },
     { slot: 'WEAPON', id: 1321, name: 'Bronze scimitar' },
   ];
-  assert.match(text(await next(new SmithingPlanner({ metal: 'bronze', untilLevel: 18 }), s)), /Bronze platebody/);
+  assert.match(text(await next(new SmithingPlanner({ metal: 'bronze', untilLevel: 18, memoryFile: null }), s)), /Bronze platebody/);
 });
 
 test('smithing planner switches to iron at Smithing 15: mine iron, smelt, smith the iron scimitar at 20', async () => {
   const { IRON } = await import('../src/planner/SmithingPlanner.ts');
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   const bank = withSmithing(20);
   bank.bank = { open: true, items: [{ slot: 0, id: 440, name: 'Iron ore', quantity: 32 }, { slot: 1, id: 438, name: 'Tin ore', quantity: 200 }] };
   assert.match(text(await next(p, bank)), /withdraw 26 Iron ore/);
@@ -104,29 +104,32 @@ test('smithing planner switches to iron at Smithing 15: mine iron, smelt, smith 
 });
 
 test('iron is smithed at a real anvil, bronze at the rusted one', async () => {
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   const iron = withSmithing(20, [item(0, 2347, 'Hammer'), item(1, 2351, 'Iron bar')]);
   iron.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
   const step = await next(p, iron);
   assert.ok(step.kind === 'subgoal' && step.subgoal.destination?.point?.x === 3189, 'Varrock west anvils');
   assert.ok(step.kind === 'subgoal' && !step.subgoal.targets?.includes('Rusted anvil'));
-  const bronze = await next(new SmithingPlanner(), withSmithing(4, [item(0, 2347, 'Hammer'), item(1, 2349, 'Bronze bar')]));
+  const bronze = await next(new SmithingPlanner({ memoryFile: null }), withSmithing(4, [item(0, 2347, 'Hammer'), item(1, 2349, 'Bronze bar')]));
   assert.ok(bronze.kind === 'subgoal' && bronze.subgoal.targets?.includes('Rusted anvil'));
 });
 
 test('an unreachable anvil is retired and the loop re-planned without it', async () => {
-  const p = new SmithingPlanner();
+  const p = new SmithingPlanner({ memoryFile: null });
   const good = { x: 3188, y: 3421, plane: 0 };
   const bad = { x: 3246, y: 3404, plane: 0 };
   const kb = {
-    nearestObjects: (name: string) =>
+    nearestObjects: (name: string, _from: unknown, o: { radius?: number } = {}) =>
       name === 'Anvil'
-        ? [{ name: 'Anvil', kind: 'object', point: bad, members: false }, { name: 'Anvil', kind: 'object', point: good, members: false }]
+        ? o.radius === 5
+          ? [{ name: 'Anvil', kind: 'object', point: bad, members: false }]
+          : [{ name: 'Anvil', kind: 'object', point: bad, members: false }, { name: 'Anvil', kind: 'object', point: good, members: false }]
         : [{ name, kind: 'object', point: { x: 3285, y: 3368, plane: 0 }, members: false }, { name, kind: 'object', point: { x: 3286, y: 3368, plane: 0 }, members: false }, { name, kind: 'object', point: { x: 3287, y: 3369, plane: 0 }, members: false }],
     nearestBanks: () => [{ name: 'Varrock East bank', kind: 'bank', point: { x: 3253, y: 3422, plane: 0 }, members: false }],
   } as never;
   const bars = withSmithing(20, [item(0, 2347, 'Hammer'), item(1, 2351, 'Iron bar')]);
   bars.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  bars.player!.position = { x: 3247, y: 3405, plane: 0 }; // standing at the bad anvil when it fails
   const ctx = (reports: never[]) => ({ goal: 'g', snapshot: bars, kb, reports, pathCost: async (a: { x: number }, b: { x: number }) => Math.abs(a.x - b.x) });
   const first = await p.next(ctx([]) as never);
   assert.ok(first.kind === 'subgoal' && first.subgoal.destination?.point?.x === bad.x, 'straight-line cheapest anvil first');

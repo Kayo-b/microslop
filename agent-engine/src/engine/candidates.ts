@@ -167,7 +167,16 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
 
   const destinations = kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
   const avoid = new Set((goal.avoid ?? []).map(lc));
-  const allowed = avoid.size ? out.filter((c) => !avoid.has(lc(c.name))) : out;
+  const avoidAt = goal.avoidAt ?? [];
+  const at = (c: Candidate): WorldPoint | null => {
+    const t = c.gameAction.op === 'interact' || c.gameAction.op === 'use_item_on' ? c.gameAction.target : null;
+    return t && 'x' in t ? { x: t.x, y: t.y, plane: t.plane } : null;
+  };
+  const allowed = out.filter((c) => {
+    if (avoid.has(lc(c.name))) return false;
+    const p = at(c);
+    return !p || !avoidAt.some((a) => a.plane === p.plane && Math.abs(a.x - p.x) <= 1 && Math.abs(a.y - p.y) <= 1);
+  });
   return { candidates: rank(allowed, goal, maxCandidates), destinations };
 }
 
