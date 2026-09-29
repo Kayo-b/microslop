@@ -218,10 +218,10 @@ test('combat readiness: eat up, restock at a bank, rest when there is no food', 
   assert.ok(restock.kind === 'subgoal' && /restock food/.test(restock.subgoal.text));
 
   noFood.player!.hp.current = 10;
-  const rest = nextCombatStep(task, noFood, { kb, bankFood: new Map() });
+  const rest = nextCombatStep(task, noFood, { kb, bankFood: new Map(), bankItems: [] });
   assert.equal(rest.kind, 'wait', 'bank known to be empty of food and HP low: rest');
   noFood.player!.hp.current = 31;
-  assert.ok(nextCombatStep(task, noFood, { kb, bankFood: new Map() }).kind === 'subgoal', 'full HP and no food anywhere: fight carefully');
+  assert.ok(nextCombatStep(task, noFood, { kb, bankFood: new Map(), bankItems: [] }).kind === 'subgoal', 'full HP and no food anywhere: fight carefully');
 
   const bank = base();
   bank.inventory = { freeSlots: 26, items: [item(0, 526, 'Bones'), item(1, 1351, 'Bronze axe')] };
@@ -247,4 +247,43 @@ test('combat looting takes coins and valuable drops before the task loot', async
   s.groundItems = [g('Bones', 1, 1), { ...g('Rune scimitar', 15000, 2), lootable: false }];
   const third = nextCombatStep(task, s);
   assert.ok(third.kind === 'subgoal' && /Bones/.test(third.subgoal.text), "another player's drop is never taken");
+});
+
+test('combat gear check: wield carried upgrades, fetch banked ones, check the bank once when a slot is weak', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const { classifyGear } = await import('../src/planner/gear.ts');
+  const task = COMBAT_PRESETS['kill-barbarians']!;
+  const kb = { nearestBanks: () => [{ name: 'Edgeville bank', kind: 'bank', point: { x: 3094, y: 3491, plane: 0 }, members: false }] } as never;
+  const shrimps = Array.from({ length: 8 }, (_, i) => item(i + 2, 315, 'Shrimps', { actions: ['Eat', 'Drop'] }));
+  const worn = [
+    { slot: 'HEAD', id: 1153, name: 'Iron full helm' },
+    { slot: 'WEAPON', id: 1351, name: 'Bronze axe' },
+    { slot: 'BODY', id: 1115, name: 'Iron platebody' },
+    { slot: 'SHIELD', id: 1189, name: 'Bronze kiteshield' },
+    { slot: 'LEGS', id: 1067, name: 'Iron platelegs' },
+  ];
+  const s = snapshot({ equipment: worn, groundItems: [], inventory: { freeSlots: 18, items: [item(0, 1323, 'Iron scimitar', { actions: ['Wield', 'Drop'] }), ...shrimps] } });
+  s.player!.hp = { current: 31, max: 31 };
+  s.skills = [{ name: 'Attack', level: 32, boosted: 32, xp: 0 }, { name: 'Defence', level: 24, boosted: 24, xp: 0 }] as never;
+
+  assert.equal(classifyGear('Bronze axe')!.score, 0);
+  assert.equal(classifyGear('Rune scimitar')!.req, 40);
+
+  const wield = nextCombatStep(task, s, { kb, bankItems: [] });
+  assert.ok(wield.kind === 'subgoal' && /wield the Iron scimitar/.test(wield.subgoal.text) && wield.subgoal.doneWhen?.equipped?.[0] === 'Iron scimitar');
+
+  // Scimitar banked, bank not seen yet: an axe in hand is a weak weapon slot, so check the bank.
+  s.inventory = { freeSlots: 20, items: shrimps };
+  const trip = nextCombatStep(task, s, { kb, bankItems: null });
+  assert.ok(trip.kind === 'subgoal' && /better gear/.test(trip.subgoal.text) && trip.subgoal.doneWhen?.bankOpen);
+
+  // At the bank: withdraw the best usable upgrade, not the rune one (Attack 32 < 40).
+  s.bank = { open: true, items: [{ id: 1323, name: 'Iron scimitar', quantity: 1 }, { id: 1333, name: 'Rune scimitar', quantity: 1 }, { id: 315, name: 'Shrimps', quantity: 50 }] } as never;
+  const withdraw = nextCombatStep(task, s, { kb, bankItems: null });
+  assert.ok(withdraw.kind === 'subgoal' && withdraw.subgoal.want?.[0]?.name === 'Iron scimitar', JSON.stringify(withdraw));
+
+  // Bank known and holds nothing better: no gear trip, go fight.
+  s.bank = { open: false, items: [] } as never;
+  const fight = nextCombatStep(task, s, { kb, bankItems: ['Rune scimitar', 'Shrimps'] });
+  assert.ok(fight.kind === 'subgoal' && /attack|walk to the Barbarian/.test(fight.subgoal.text), JSON.stringify(fight));
 });

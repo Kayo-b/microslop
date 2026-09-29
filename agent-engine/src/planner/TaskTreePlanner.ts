@@ -9,6 +9,7 @@ import type { Snapshot, WorldPoint } from '../types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { FOOD_HEAL, foodSupply } from '../kb/resources.ts';
 import { compile, type DoneCondition } from './conditions.ts';
+import { upgradesFrom, weakSlots } from './gear.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
 export interface GatherTask {
@@ -73,6 +74,8 @@ export interface CombatContext {
   kb?: KnowledgeBase | null;
   /** Cooked food last seen in the bank (name -> count); null until the bank has been opened. */
   bankFood?: Map<string, number> | null;
+  /** Item names last seen in the bank; null until the bank has been opened. */
+  bankItems?: string[] | null;
 }
 
 export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
@@ -148,11 +151,22 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
   const hpFrac = hp && hp.max > 0 ? hp.current / hp.max : 1;
   const food = foodSupply(s.inventory.items);
   const minFood = task.minFood ?? 0;
-  const keep = [...task.keep, ...foodKeep];
+  const invNames = s.inventory.items.map((i) => i.name);
+  const invUpgrades = upgradesFrom(s, invNames);
+  const keep = [...task.keep, ...foodKeep, ...invUpgrades.map((u) => u.name)];
 
   if (s.bank.open) {
     const loot = [...new Set(s.inventory.items.map((i) => i.name))].filter((n) => !keep.some((k) => n.toLowerCase().includes(k.toLowerCase())) && !/coins/i.test(n));
     if (loot.length) return { kind: 'subgoal', subgoal: goal(`deposit the ${loot.join(', ')}`, loot, ['Deposit'], { lacksItems: loot }, 20, keep) };
+    // Better weapon/armour in the bank than what is worn or carried: take it out to wield.
+    const fetch = upgradesFrom(s, [...invNames, ...s.bank.items.map((b) => b.name)]).filter((u) => !invNames.includes(u.name));
+    if (fetch.length) {
+      const want = fetch.map((u) => ({ name: u.name, count: 1 }));
+      return {
+        kind: 'subgoal',
+        subgoal: { ...goal(`withdraw ${fetch.map((u) => u.name).join(', ')} to wear for combat`, fetch.map((u) => u.name), ['Withdraw'], { hasItems: want }, 20, [...keep, ...fetch.map((u) => u.name)]), want },
+      };
+    }
     const best = s.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).sort((a, b) => FOOD_HEAL[b.name]! - FOOD_HEAL[a.name]!)[0];
     const batch = task.foodBatch ?? 10;
     if (best && food.count < batch) {
@@ -165,22 +179,34 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
     return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };
   }
 
+  // Never fight with a tool in hand: wield the best carried weapon/armour first.
+  const wield = invUpgrades[0];
+  if (wield && !s.player?.inCombat) {
+    return { kind: 'subgoal', subgoal: goal(`wield the ${wield.name} (better ${wield.slot})`, [wield.name], ['Wield', 'Wear'], { equipped: [wield.name] }, 10, keep) };
+  }
+
   // Top up before engaging: the in-fight reflex only eats below 50%.
   if (hpFrac < 0.6 && food.count > 0 && !s.player?.inCombat) {
     const edible = s.inventory.items.find((i) => i.actions.some((a) => a.toLowerCase() === 'eat'))!;
     return { kind: 'subgoal', subgoal: goal(`eat the ${edible.name} to heal before fighting`, [edible.name], ['Eat'], { hpAtLeast: 0.8 }, 12, keep) };
   }
 
-  if (food.count < minFood) {
+  // Gear upgrades known to be banked, or weak/empty slots and the bank not checked yet.
+  const gearTrip = cc.bankItems ? upgradesFrom(s, cc.bankItems).length > 0 : weakSlots(s).length > 0;
+  const needFood = food.count < minFood;
+  if (needFood || gearTrip) {
     const bankHasFood = cc.bankFood === null || cc.bankFood === undefined ? true : [...cc.bankFood.values()].some((n) => n > 0);
     const pos = s.player?.position;
     const bank = pos && cc.kb ? cc.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
-    if (bankHasFood && bank) {
+    if (((needFood && bankHasFood) || gearTrip) && bank) {
+      const why = [needFood && bankHasFood ? 'restock food' : '', gearTrip ? `get better gear (${weakSlots(s).join(', ') || 'upgrades'})` : ''].filter(Boolean).join(' and ');
       return {
         kind: 'subgoal',
-        subgoal: { ...goal(`restock food at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS },
+        subgoal: { ...goal(`${why} at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS },
       };
     }
+  }
+  if (needFood) {
     // No food to be had: never start a fight weak; let HP regenerate (1 HP/min) first.
     if (hpFrac < 0.8) {
       return { kind: 'wait', reason: `no food; resting until HP >= 80% (now ${hp?.current}/${hp?.max})`, until: { hpAtLeast: 0.8 }, maxSeconds: 900 };
@@ -256,6 +282,7 @@ export class TaskTreePlanner implements Planner {
   readonly name: string;
   private readonly task: Task;
   private bankFood: Map<string, number> | null = null;
+  private bankItems: string[] | null = null;
 
   constructor(task: GatherTask | Task, name = 'task-tree') {
     this.task = 'kind' in task ? task : { kind: 'gather', ...task };
@@ -277,10 +304,11 @@ export class TaskTreePlanner implements Planner {
       return { kind: 'impossible', reason: `blocked 3 times on "${last[0]!.subgoal}": ${last[2]!.reason}` };
     }
     if (ctx.snapshot.bank.open) {
+      this.bankItems = ctx.snapshot.bank.items.map((b) => b.name);
       this.bankFood = new Map(ctx.snapshot.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).map((b) => [b.name, b.quantity]));
     }
     return this.task.kind === 'combat'
-      ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood })
+      ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood, bankItems: this.bankItems })
       : nextGatherStep(this.task, ctx.snapshot);
   }
 }
