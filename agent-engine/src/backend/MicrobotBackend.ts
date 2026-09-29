@@ -76,6 +76,23 @@ export class MicrobotBackend implements GameBackend {
     return r.reachable ? r.length : null;
   }
 
+  async varp(id: number): Promise<number> {
+    return ((await this.request('GET', `/varp?id=${id}`)) as { value: number }).value;
+  }
+
+  /** Every quest's state (NOT_STARTED / IN_PROGRESS / FINISHED), by Quest Helper display name. */
+  async questStates(): Promise<{ displayName: string; state: string }[]> {
+    return ((await this.request('GET', '/quest-helper/states')) as { quests: { displayName: string; state: string }[] }).quests;
+  }
+
+  async questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string }> {
+    return (await this.request('GET', '/quest-helper/status')) as { selected: boolean; questName?: string; completed?: boolean; stepText?: string };
+  }
+
+  async questHelperStart(name: string): Promise<void> {
+    await this.request('POST', '/quest-helper/start', { name });
+  }
+
   private async request(method: 'GET' | 'POST', route: string, body?: unknown, retried = false): Promise<unknown> {
     const token = await this.loadToken();
     let res: Response;

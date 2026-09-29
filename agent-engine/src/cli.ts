@@ -25,6 +25,10 @@ import { buildDecisionState, relevantSkillsFor } from './engine/state.ts';
 import { KnowledgeBase } from './kb/KnowledgeBase.ts';
 import { ClaudeEscalator, ClaudePlanner, ClaudeRescuer, describeSubGoal } from './llm/claude.ts';
 import { JsonlRescueLog, RescuingPlanner } from './llm/rescue.ts';
+import { BankMemory, buildProfile, level, readAccount, unmet } from './strategy/account.ts';
+import { MONEY, QUESTS, TRAINING } from './strategy/catalog.ts';
+import { QuestPlanner } from './strategy/QuestPlanner.ts';
+import { choosePhase, StrategyPlanner, type StrategyGoal } from './strategy/StrategyPlanner.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
@@ -61,6 +65,10 @@ const { values, positionals } = parseArgs({
     engine: { type: 'string' },
     escalate: { type: 'boolean', default: false },
     rescue: { type: 'boolean', default: false },
+    strategy: { type: 'string' },
+    skill: { type: 'string' },
+    level: { type: 'string' },
+    quest: { type: 'string' },
     decide: { type: 'boolean', default: false },
     'min-confidence': { type: 'string' },
     'max-subgoals': { type: 'string' },
@@ -86,6 +94,8 @@ function help(): void {
   npm run agent -- inspect [--decide] [--goal TEXT] [--targets A,B]
   npm run agent -- run --task PRESET [--bank] [--until-level N]
   npm run agent -- run --goal TEXT [--escalate]
+  npm run agent -- strategy [--strategy level|money|quest]      (dry run: account profile and next phase)
+  npm run agent -- run --strategy level [--skill S] [--level N] | money | quest [--quest NAME]
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
@@ -128,6 +138,46 @@ async function inspect(): Promise<void> {
     }
     console.log('\n(inspect never acts)');
   }
+  kb?.close();
+}
+
+function strategyGoal(kind: string): StrategyGoal {
+  if (kind === 'level') return { kind, skill: values.skill, level: values.level ? Number(values.level) : undefined };
+  if (kind === 'money') return { kind };
+  if (kind === 'quest') return { kind, quest: values.quest };
+  throw new Error(`unknown strategy "${kind}" (level | money | quest)`);
+}
+
+const hasClaude = () => Boolean(process.env.ANTHROPIC_API_KEY);
+
+/** Dry run: the account profile and what each strategy would do next. Never acts. */
+async function strategy(): Promise<void> {
+  const kb = openKb();
+  const backend = new MicrobotBackend();
+  const snap = await backend.snapshot();
+  const bank = new BankMemory();
+  const account = await readAccount(backend);
+  const p = buildProfile(account, snap, bank);
+  const finished = [...account.quests].filter(([, st]) => st === 'FINISHED').map(([q]) => q);
+  console.log(`Account: ${account.members ? 'members' : 'free-to-play'}, ${account.questPoints} quest points, combat ${p.combatLevel}, melee bracket ${level(p, 'Melee')}`);
+  console.log(`Quests finished: ${finished.join(', ') || 'none'}`);
+  console.log(`Bank: ${p.bankKnown ? `${bank.items.size} stacks (seen ${bank.seenAt})` : 'not seen yet (open it once so item requirements can be checked)'}`);
+  console.log(`LLM: ${hasClaude() ? 'available' : 'no ANTHROPIC_API_KEY: llm and quest phases are skipped'}`);
+  for (const kind of values.strategy ? [values.strategy] : ['level', 'money', 'quest']) {
+    const choice = choosePhase(strategyGoal(kind), p, new Set());
+    const text = !choice ? 'nothing fits' : 'done' in choice ? `done: ${choice.done}` : `${choice.phase.text} [${choice.phase.exec.kind}] - ${choice.why}`;
+    console.log(`\n${kind.toUpperCase()}: ${text}`);
+  }
+  const avail = (req: Parameters<typeof unmet>[0], members: boolean) => {
+    const miss = [...(members && !account.members ? ['membership'] : []), ...unmet(req, p)];
+    return miss.length ? `needs ${miss.join(', ')}` : 'ok';
+  };
+  console.log('\nTraining methods:');
+  for (const m of TRAINING) console.log(`  ${m.skill.padEnd(11)} ${String(m.from).padStart(2)}-${String(m.to).padEnd(2)} ${m.name.padEnd(52)} ${m.exec.kind.padEnd(6)} ${avail(m.req, m.members)}`);
+  console.log('\nMoney routes:');
+  for (const r of MONEY) console.log(`  ${r.name.padEnd(55)} ~${String(Math.round(r.gpHour / 1000)).padStart(3)}k/h ${r.exec.kind.padEnd(6)} ${avail(r.req, r.members)}`);
+  console.log('\nQuests (recommended order):');
+  for (const q of QUESTS) console.log(`  ${(account.quests.get(q.name) ?? '?').padEnd(12)} ${q.name.padEnd(26)} ${avail(q.req, q.members).padEnd(24)} ${q.reward}`);
   kb?.close();
 }
 
@@ -192,6 +242,16 @@ async function run(): Promise<void> {
       maxSteps: values['max-steps'] ? Number(values['max-steps']) : 60,
     });
     goal = values.subgoal;
+  } else if (values.strategy) {
+    const g = strategyGoal(values.strategy);
+    planner = new StrategyPlanner(g, {
+      account: backend,
+      kb,
+      llmPlanner: () => (hasClaude() ? new ClaudePlanner() : null),
+      questPlanner: (q) => (hasClaude() ? new QuestPlanner(q, backend, new ClaudePlanner()) : null),
+      onPhase: (phase, why) => console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`),
+    });
+    goal = `strategy ${values.strategy}${values.skill ? ` ${values.skill}` : ''}${values.level ? ` to ${values.level}` : ''}${values.quest ? ` ${values.quest}` : ''}`;
   } else if (values.goal) {
     planner = new ClaudePlanner();
     goal = values.goal;
@@ -274,6 +334,7 @@ try {
     console.log(`${'smith-progression'.padEnd(18)} mine, smelt and smith bronze then iron gear around Lumbridge, equipping upgrades (--metal, --until-level)`);
   }
   else if (command === 'inspect') await inspect();
+  else if (command === 'strategy') await strategy();
   else if (command === 'run') await run();
   else {
     help();
