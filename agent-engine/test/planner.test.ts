@@ -178,3 +178,19 @@ test('combat task tree: loot our drop when it is on the ground, otherwise attack
   dropped.groundItems[0]!.lootable = false;
   assert.ok(nextCombatStep(task, dropped).kind === 'subgoal' && /attack/.test((nextCombatStep(task, dropped) as { subgoal: { text: string } }).subgoal.text), "someone else's drop is ignored");
 });
+
+test('combat: level cap filters targets, bones get buried in batches', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const { buildCandidates } = await import('../src/engine/candidates.ts');
+  const { goblin } = await import('./support/fixtures.ts');
+  const task = COMBAT_PRESETS['kill-barbarians']!;
+  const s = snapshot({ npcs: [goblin({ name: 'Barbarian', combatLevel: 17, index: 1 }), goblin({ name: 'Barbarian', combatLevel: 9, index: 2 })], groundItems: [] });
+  const step = nextCombatStep(task, s);
+  assert.ok(step.kind === 'subgoal' && step.subgoal.maxTargetLevel === 10);
+  const ids = buildCandidates(s, null, step.kind === 'subgoal' ? step.subgoal : { text: '' }).candidates.filter((c) => c.kind === 'npc').map((c) => c.id);
+  assert.deepEqual(ids, ['npc:2#Attack'], 'the level-17 barbarian is never offered');
+
+  const bones = snapshot({ inventory: { freeSlots: 20, items: Array.from({ length: 5 }, (_, i) => item(i, 526, 'Bones', { actions: ['Bury', 'Drop'] })) } });
+  const bury = nextCombatStep(task, bones);
+  assert.ok(bury.kind === 'subgoal' && bury.subgoal.actions?.includes('Bury'));
+});

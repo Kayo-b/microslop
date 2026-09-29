@@ -92,6 +92,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
     if (npc.healthScale > 0 && npc.healthRatio === 0) continue;
     for (const action of npc.actions) {
       if (lc(action) === 'attack' && npc.interactingWithOther && !npc.interactingWithPlayer) continue;
+      if (lc(action) === 'attack' && goal.maxTargetLevel !== undefined && npc.combatLevel > goal.maxTargetLevel) continue;
       if (!admit(`npc|${npc.name}|${action}`)) continue;
       const hint = kb ? npcHint(kb, ctx, npc.name, npc.id, action) : { text: '', unmet: [] };
       out.push({

@@ -264,6 +264,8 @@ export interface SubGoal {
   avoid?: string[];
   /** Positions whose objects are never offered (known unreachable placements), within 1 tile. */
   avoidAt?: WorldPoint[];
+  /** Never offer attacking NPCs above this combat level. */
+  maxTargetLevel?: number;
   /** Quantity to make per production pick (anvil grid only). Default: all. */
   makeAmount?: 1 | 5 | 10;
   /** Deterministic completion check; when absent the decision engine's `done` answer decides. */

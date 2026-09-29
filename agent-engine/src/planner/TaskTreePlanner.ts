@@ -50,12 +50,17 @@ export interface CombatTask {
   untilLevel?: number;
   /** Where the monsters are; walked to when none is in view. */
   area?: { name: string; point: WorldPoint };
+  /** Only attack monsters up to this combat level. */
+  maxLevel?: number;
+  /** Bury carried bones once this many are held (Prayer XP). */
+  buryAt?: number;
 }
 
 export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
   'kill-chickens': { activity: 'kill chickens and collect feathers', monsters: ['Chicken'], loot: ['Feather'], keep: [], skill: 'Strength', area: { name: 'Lumbridge chicken farm', point: { x: 3232, y: 3295, plane: 0 } } },
   'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength', area: { name: 'Lumbridge cow field', point: { x: 3257, y: 3265, plane: 0 } } },
   'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength', area: { name: 'Lumbridge goblins', point: { x: 3245, y: 3240, plane: 0 } } },
+  'kill-barbarians': { activity: 'kill barbarians and bury their bones', monsters: ['Barbarian'], loot: ['Bones'], keep: [], skill: 'Strength', maxLevel: 10, buryAt: 5, area: { name: 'Barbarian Village', point: { x: 3079, y: 3419, plane: 0 } } },
   'kill-guards': { activity: 'kill Varrock guards and collect coins', monsters: ['Guard'], loot: ['Coins'], keep: ['Shrimps'], skill: 'Strength', area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } } },
 };
 
@@ -70,6 +75,9 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
     const sk = s.skills.find((k) => k.name.toLowerCase() === task.skill.toLowerCase());
     if (sk && sk.level >= task.untilLevel) return { kind: 'complete', reason: `${task.skill} reached ${sk.level}` };
   }
+  if (task.buryAt && held(s, 'Bones') >= task.buryAt) {
+    return { kind: 'subgoal', subgoal: goal('bury all the bones in the inventory', ['Bones'], ['Bury'], { lacksItem: 'Bones' }, 60, task.keep) };
+  }
   // Sequencing ("kill, then loot") is decided here, not by the classifier: offered both, it keeps
   // choosing the next attack over the drop on the floor.
   const lootHere = task.loot
@@ -83,7 +91,9 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
     };
   }
   if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };
-  const inView = s.npcs.some((n) => task.monsters.some((m) => n.name.toLowerCase() === m.toLowerCase()) && n.reachable);
+  const inView = s.npcs.some(
+    (n) => task.monsters.some((m) => n.name.toLowerCase() === m.toLowerCase()) && n.reachable && (task.maxLevel === undefined || n.combatLevel <= task.maxLevel),
+  );
   if (!inView && task.area) {
     return {
       kind: 'subgoal',
@@ -93,7 +103,10 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
   return {
     kind: 'subgoal',
     // Steps include every combat tick; a level-21 guard takes far longer than a chicken.
-    subgoal: goal(`attack a ${task.monsters.join(' or ')}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 250, task.keep),
+    subgoal: {
+      ...goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 250, task.keep),
+      maxTargetLevel: task.maxLevel,
+    },
   };
 }
 
