@@ -37,7 +37,7 @@ export interface Outcome {
 }
 
 export const FAILURE_MESSAGE =
-  /can't reach|cannot reach|you need|you do not have|you don't have|nothing interesting|inventory is too full|not enough space|you can't|you cannot|isn't anything|too far|someone else|out of reach|already|who said you could|not allowed|you're not allowed|you are not allowed/i;
+  /can't reach|cannot reach|you need|you do not have|you don't have|nothing interesting|inventory is too full|not enough space|you can't|you cannot|isn't anything|too far|someone else|out of reach|already|who said you could|not allowed|you're not allowed|you are not allowed|no ammo left|do not have enough/i;
 
 const invKey = (s: Snapshot) => s.inventory.items.map((i) => `${i.slot}:${i.id}:${i.quantity}`).join(',');
 const eqKey = (s: Snapshot) => s.equipment.map((e) => `${e.slot}:${e.id}`).join(',');

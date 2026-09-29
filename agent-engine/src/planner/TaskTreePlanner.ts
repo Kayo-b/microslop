@@ -10,7 +10,7 @@ import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { FOOD_HEAL, foodSupply } from '../kb/resources.ts';
 import { compile, type DoneCondition } from './conditions.ts';
 import { type CombatStyle, upgradesFrom, weakSlots } from './gear.ts';
-import { nextKitStep, planKit } from './kit.ts';
+import { nextKitStep, outOfSupplies, planKit } from './kit.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
 export interface GatherTask {
@@ -139,11 +139,16 @@ export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext 
       subgoal: { ...goal(`walk to the ${task.area.name}`, task.monsters, ['Attack'], { near: { ...task.area.point, radius: 6 } }, 300, task.keep), destination: task.area },
     };
   }
+  const attack = goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { lootNear: { names: task.loot, minValue: task.lootValue ?? 25, radius: 6 } }, 250, task.keep);
+  const style = task.style ?? 'melee';
+  const lootDone = attack.isDone!;
   return {
     kind: 'subgoal',
     // Steps include every combat tick; a level-21 guard takes far longer than a chicken.
     subgoal: {
-      ...goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { lootNear: { names: task.loot, minValue: task.lootValue ?? 25, radius: 6 } }, 250, task.keep),
+      ...attack,
+      // An empty quiver or missing runes also ends the fight, so the kit check can re-equip or restock.
+      isDone: (snap) => lootDone(snap) || outOfSupplies(style, snap),
       maxTargetLevel: task.maxLevel,
       noTravel: true,
     },

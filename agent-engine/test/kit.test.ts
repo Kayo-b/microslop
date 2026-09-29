@@ -57,3 +57,18 @@ test('kit: the combat planner does not swap the bow back for a scimitar, and res
   const fight = nextCombatStep(COMBAT_PRESETS['range-cows']!, s, { bankItems: [], bankCounts: new Map() });
   assert.ok(fight.kind === 'subgoal' && /attack|walk to/.test(fight.subgoal.text), JSON.stringify(fight));
 });
+
+test('kit: an empty quiver ends the fight and the next step re-equips the carried arrows', () => {
+  const s = char({
+    npcs: [{ index: 5, id: 2790, name: 'Cow', combatLevel: 2, actions: ['Attack'], position: { x: 3257, y: 3265, plane: 0 }, distance: 3, healthRatio: -1, healthScale: -1, interactingWithPlayer: false, animation: -1, reachable: true, pathDistance: 3 }] as never,
+    inventory: { freeSlots: 27, items: [item(0, 882, 'Bronze arrow', { quantity: 10, stackable: true, actions: ['Wield', 'Drop'] })] },
+    equipment: [{ slot: 'WEAPON', id: 841, name: 'Shortbow' }, { slot: 'AMMO', id: 882, name: 'Bronze arrow', quantity: 60 }],
+  });
+  const fight = nextCombatStep(COMBAT_PRESETS['range-cows']!, s, { bankItems: [], bankCounts: new Map() });
+  assert.ok(fight.kind === 'subgoal' && /attack/.test(fight.subgoal.text));
+  assert.equal(fight.subgoal.isDone!(s), false);
+  s.equipment = s.equipment.filter((e) => e.slot !== 'AMMO');
+  assert.equal(fight.subgoal.isDone!(s), true, 'quiver empty');
+  const next = nextCombatStep(COMBAT_PRESETS['range-cows']!, s, { bankItems: [], bankCounts: new Map() });
+  assert.ok(next.kind === 'subgoal' && /wield the Bronze arrow/.test(next.subgoal.text), JSON.stringify(next));
+});

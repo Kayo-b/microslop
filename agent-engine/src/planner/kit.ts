@@ -198,3 +198,14 @@ export function nextKitStep(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, k
   }
   return null;
 }
+
+/** The style can no longer attack: empty quiver (ranged), or missing runes / no autocast (magic). */
+export function outOfSupplies(style: CombatStyle, s: Snapshot): boolean {
+  if (style === 'ranged') return !s.equipment.some((e) => e.slot === 'AMMO' && (e.quantity ?? 1) > 0);
+  if (style === 'magic') {
+    const spell = SPELLS.find((sp) => sp.spell === s.player?.autocast);
+    if (!spell) return true;
+    return Object.entries(spell.runes).some(([rune, per]) => count(s, null, rune, 'carried') < per);
+  }
+  return false;
+}
