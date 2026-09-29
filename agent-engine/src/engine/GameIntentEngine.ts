@@ -93,6 +93,8 @@ export class GameIntentEngine {
   private loggedOutSince: number | null = null;
   /** Failed attempts per target (npc index / object tile / slot) within the current sub-goal. */
   private readonly targetFailures = new Map<string, number>();
+  /** Targets the watchdog caught looping; withheld for the whole run, across sub-goals. */
+  private readonly badTargets = new Set<string>();
   /** Last tick the player was seen animating (skilling batches pause between items). */
   private lastAnimTick = -1;
   /** Ticks of animation gap still treated as "busy" (make-all batches pause 1-3 ticks per item). */
@@ -117,11 +119,11 @@ export class GameIntentEngine {
   }
 
   /** History of the current sub-goal (action -> outcome), newest last. */
-  /** Withhold the target of `action` for the rest of the current sub-goal (e.g. the watchdog saw it loop). */
+  /** Withhold the target of `action` for the rest of the run (the watchdog saw it loop without progress). */
   withhold(action: GameAction): boolean {
     const tk = targetKey(action);
     if (!tk) return false;
-    this.targetFailures.set(tk, 2);
+    this.badTargets.add(tk);
     return true;
   }
 
@@ -171,7 +173,10 @@ export class GameIntentEngine {
     const built = buildCandidates(snap, kb, goal, this.o.candidates);
     // Targets that already failed twice in this sub-goal (a banker behind a counter, a rock behind a
     // fence) are withheld, with all their actions, so the model must pick something else.
-    const candidates = built.candidates.filter((c) => (this.targetFailures.get(targetKey(c.gameAction) ?? "") ?? 0) < 2);
+    const candidates = built.candidates.filter((c) => {
+      const tk = targetKey(c.gameAction) ?? '';
+      return (this.targetFailures.get(tk) ?? 0) < 2 && !this.badTargets.has(tk);
+    });
     const destinations = built.destinations;
     const state = buildDecisionState(snap, goal, this.history, kb, relevantSkillsFor(goal, kb));
 
