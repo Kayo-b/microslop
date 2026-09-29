@@ -7,11 +7,13 @@
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ActResponse, GameAction, Snapshot } from '../types.ts';
+import type { ActResponse, GameAction, Snapshot, WorldPoint } from '../types.ts';
 
 export interface GameBackend {
   snapshot(): Promise<Snapshot>;
   act(action: GameAction): Promise<ActResponse>;
+  /** Web-walker route length between two points; null when unreachable. Optional. */
+  pathLength?(from: WorldPoint, to: WorldPoint): Promise<number | null>;
 }
 
 export interface MicrobotBackendOptions {
@@ -66,6 +68,12 @@ export class MicrobotBackend implements GameBackend {
       throw new Error(`"${action.op}" is engine-side and is never sent to the client`);
     }
     return (await this.request('POST', '/act', toWire(action))) as ActResponse;
+  }
+
+  async pathLength(from: WorldPoint, to: WorldPoint): Promise<number | null> {
+    const q = new URLSearchParams({ from: `${from.x},${from.y},${from.plane}`, to: `${to.x},${to.y},${to.plane}` });
+    const r = (await this.request('GET', `/path?${q}`)) as { reachable: boolean; length: number };
+    return r.reachable ? r.length : null;
   }
 
   private async request(method: 'GET' | 'POST', route: string, body?: unknown, retried = false): Promise<unknown> {

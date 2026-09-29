@@ -6,6 +6,7 @@ import type { GameBackend } from '../backend/MicrobotBackend.ts';
 import type { GameIntentEngine, StepResult } from '../engine/GameIntentEngine.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { PlannedSubGoal, Planner, SubGoalReport } from '../planner/types.ts';
+import type { WorldPoint } from '../types.ts';
 
 export type AgentEvent =
   | { type: 'subgoal'; subgoal: PlannedSubGoal }
@@ -80,7 +81,8 @@ export class Agent {
         }
         if (!snapshot.loggedIn) return finish('halted', 'player is logged out');
 
-        const plan = await planner.next({ goal, snapshot, kb: this.o.kb ?? null, reports });
+        const pathCost = backend.pathLength ? (a: WorldPoint, b: WorldPoint) => backend.pathLength!(a, b) : undefined;
+        const plan = await planner.next({ goal, snapshot, kb: this.o.kb ?? null, reports, pathCost });
         if (plan.kind === 'complete') return finish('complete', plan.reason);
         if (plan.kind === 'impossible') return finish('impossible', plan.reason);
 

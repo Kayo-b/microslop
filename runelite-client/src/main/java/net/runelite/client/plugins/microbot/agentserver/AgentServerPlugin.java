@@ -155,7 +155,8 @@ public class AgentServerPlugin extends Plugin {
 				new ProfileHandler(gson),
 				new DynamicScriptDeployHandler(gson),
 				new SnapshotHandler(gson, client),
-				new ActHandler(gson, client)
+				new ActHandler(gson, client),
+				new PathHandler(gson)
 		);
 	}
 

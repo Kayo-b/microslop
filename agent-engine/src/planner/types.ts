@@ -1,5 +1,5 @@
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
-import type { Snapshot, SubGoal } from '../types.ts';
+import type { Snapshot, SubGoal, WorldPoint } from '../types.ts';
 import type { DoneCondition } from './conditions.ts';
 
 /** A sub-goal plus its declarative completion condition (kept for logging / LLM context). */
@@ -21,6 +21,8 @@ export interface PlannerContext {
   snapshot: Snapshot;
   kb: KnowledgeBase | null;
   reports: SubGoalReport[];
+  /** Real walking cost between two points (web walker), when the backend provides it. */
+  pathCost?: (from: WorldPoint, to: WorldPoint) => Promise<number | null>;
 }
 
 export type PlanStep =

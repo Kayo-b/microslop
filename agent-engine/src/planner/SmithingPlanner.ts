@@ -11,6 +11,7 @@
  */
 import type { Snapshot, WorldPoint } from '../types.ts';
 import { compile, type DoneCondition } from './conditions.ts';
+import { candidateSites, cheapestLoop, CostTable, type Site } from './routes.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
 interface GearTier {
@@ -138,6 +139,34 @@ export class SmithingPlanner implements Planner {
   private readonly forced?: Metal;
   /** Last seen bank counts (item name -> quantity); null until the bank has been opened once. */
   private bank: Map<string, number> | null = null;
+  /** Cheapest mine -> furnace -> anvil -> bank cycle per metal, chosen once from real path costs. */
+  private routes = new Map<string, { mine: Site; furnace: Site; anvil: Site; bank: Site; cost: number }>();
+  private costs: CostTable | null = null;
+
+  /**
+   * Picks the metal's sites as the cheapest walking cycle. Bronze keeps the Lumbridge sites (its
+   * rusted anvil sits beside the furnace, which no loop beats).
+   */
+  private async route(metal: Metal, ctx: PlannerContext) {
+    const cached = this.routes.get(metal.name);
+    if (cached) return cached;
+    const pos = ctx.snapshot.player?.position;
+    if (metal.name === 'Bronze' || !ctx.kb || !pos) return null;
+    this.costs ??= new CostTable(ctx.pathCost);
+    const stages = [
+      candidateSites(ctx.kb, pos, { object: metal.mineRocks, action: 'Mine', min: 3 }),
+      candidateSites(ctx.kb, pos, { object: 'Furnace', action: 'Smelt' }, 3),
+      candidateSites(ctx.kb, pos, { object: 'Anvil', action: 'Smith' }, 3),
+      candidateSites(ctx.kb, pos, { bank: true }, 3),
+    ];
+    const best = await cheapestLoop(stages, this.costs);
+    if (!best) return null;
+    const [mine, furnace, anvil, bank] = best.sites as [Site, Site, Site, Site];
+    const chosen = { mine, furnace, anvil, bank, cost: best.cost };
+    this.routes.set(metal.name, chosen);
+    console.log(`[smith-progression] ${metal.name} loop: ${mine.name} -> ${furnace.name} -> ${anvil.name} -> ${bank.name} (${best.cost} tiles per cycle)`);
+    return chosen;
+  }
 
   constructor(opts: SmithingPlannerOptions = {}) {
     this.untilLevel = opts.untilLevel ?? 33;
@@ -159,6 +188,7 @@ export class SmithingPlanner implements Planner {
 
     const smithing = level(s, 'Smithing');
     const metal = this.metal(smithing);
+    const route = await this.route(metal, ctx);
     const allGear = [...BRONZE.gear, ...IRON.gear];
 
     // Done at the target level only once every unlocked upgrade is made and worn.
@@ -190,8 +220,9 @@ export class SmithingPlanner implements Planner {
       const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
       const item = target?.item ?? metal.filler;
       const count = held(s, item) + 1;
+      const anvil = route ? route.anvil : { name: metal.anvil.name, point: metal.anvil.point };
       return sg(`smith a ${item} at the ${metal.anvil.name}`, [...metal.anvil.targets, item], ['Smith'], { hasItem: { name: item, count } }, {
-        destination: { name: metal.anvil.name, point: metal.anvil.point },
+        destination: { name: anvil.name, point: anvil.point },
         want: [{ name: item, count }],
         avoid: metal.anvil.avoid,
         maxSteps: 200,
@@ -204,7 +235,7 @@ export class SmithingPlanner implements Planner {
       const scarcest = [...metal.ores].sort((a, b) => held(s, a) - held(s, b))[0]!;
       const here = s.player?.position;
       const near = here && ctx.kb ? ctx.kb.nearestObjects('Furnace', here, { action: 'Smelt', radius: 200, limit: 1 })[0] : undefined;
-      const furnace = near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace };
+      const furnace = route?.furnace ?? (near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace });
       return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
         destination: furnace,
         maxSteps: 250,
@@ -218,8 +249,9 @@ export class SmithingPlanner implements Planner {
     // Bank the smithed junk first: a trip with a half-full inventory wastes the walk.
     const roomy = s.inventory.freeSlots >= 20 || held(s, metal.mineOre) > 0;
     if (needMining && roomy && s.inventory.freeSlots > 0 && hasPickaxe) {
-      return sg(`mine ${lc(metal.mineOre)} at the ${metal.mine.name} until the inventory is full`, [metal.mineRocks], ['Mine'], { inventoryFull: true }, {
-        destination: metal.mine,
+      const mine = route?.mine ?? metal.mine;
+      return sg(`mine ${lc(metal.mineOre)} at the ${mine.name} until the inventory is full`, [metal.mineRocks], ['Mine'], { inventoryFull: true }, {
+        destination: mine,
         maxSteps: 600,
       });
     }
@@ -227,7 +259,7 @@ export class SmithingPlanner implements Planner {
     // 6. Go and use the nearest bank (any bank works; the knowledge base knows where they are).
     const pos = s.player?.position;
     const nearest = pos && ctx.kb ? ctx.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
-    const bank = nearest ? { name: nearest.name, point: nearest.point } : { name: 'Lumbridge Top bank', point: PLACES.bank };
+    const bank = route?.bank ?? (nearest ? { name: nearest.name, point: nearest.point } : { name: 'Lumbridge Top bank', point: PLACES.bank });
     return sg(`go to the ${bank.name} and open the bank`, ['Bank booth', 'Banker', 'Bank chest'], ['Bank', 'Use'], { bankOpen: true }, {
       destination: bank,
       maxSteps: 200,
