@@ -65,6 +65,11 @@ export class Agent {
     };
 
     try {
+      // A walk started by an earlier run keeps going after that process exits; every engine
+      // step would then just wait for it.
+      const first = await backend.snapshot();
+      if (first.walk.active) await backend.act({ op: 'walk_cancel' }).catch(() => undefined);
+
       while (!this.stopRequested) {
         if (subgoals >= (this.o.maxSubGoals ?? 200)) return finish('stopped', 'sub-goal limit reached');
         const snapshot = await backend.snapshot();

@@ -42,6 +42,14 @@ const { values, positionals } = parseArgs({
     'done-has': { type: 'string' },
     'done-full': { type: 'boolean', default: false },
     'max-steps': { type: 'string' },
+    dest: { type: 'string' },
+    'dest-at': { type: 'string' },
+    'done-near': { type: 'string' },
+    'done-bank-open': { type: 'boolean', default: false },
+    'done-bank-closed': { type: 'boolean', default: false },
+    'done-shop-open': { type: 'boolean', default: false },
+    'make-amount': { type: 'string' },
+    'done-equipped': { type: 'string' },
     targets: { type: 'string' },
     bank: { type: 'boolean', default: false },
     'until-level': { type: 'string' },
@@ -73,7 +81,8 @@ function help(): void {
   npm run agent -- run --task PRESET [--bank] [--until-level N]
   npm run agent -- run --goal TEXT [--escalate]
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
-                       [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full] [--max-steps N]
+                       [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
+                       [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
 
 Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE`);
 }
@@ -125,18 +134,43 @@ async function run(): Promise<void> {
   } else if (values.subgoal) {
     const list = (v?: string) => v?.split(',').map((x) => x.trim()).filter(Boolean);
     const doneWhen: DoneCondition = {};
-    if (values['done-lacks']) doneWhen.lacksItem = values['done-lacks'];
+    let want: { name: string; count: number }[] | undefined;
+    if (values['done-lacks']) {
+      const names = list(values['done-lacks'])!;
+      if (names.length === 1) doneWhen.lacksItem = names[0];
+      else doneWhen.lacksItems = names;
+    }
     if (values['done-has']) {
-      // "Feather:30" = hold at least 30 feathers.
-      const [name, count] = values['done-has'].split(':');
-      doneWhen.hasItem = { name: name!.trim(), count: count ? Number(count) : 1 };
+      // "Feather:30" = hold at least 30 feathers. Several: "Copper ore:14,Tin ore:14".
+      const specs = list(values['done-has'])!.map((spec) => {
+        const [name, count] = spec.split(':');
+        return { name: name!.trim(), count: count ? Number(count) : 1 };
+      });
+      if (specs.length === 1) doneWhen.hasItem = specs[0];
+      else doneWhen.hasItems = specs;
+      want = specs.map((x) => ({ name: x.name, count: x.count }));
     }
     if (values['done-full']) doneWhen.inventoryFull = true;
+    if (values['done-bank-open']) doneWhen.bankOpen = true;
+    if (values['done-bank-closed']) doneWhen.bankOpen = false;
+    if (values['done-shop-open']) doneWhen.shopOpen = true;
+    if (values['done-equipped']) doneWhen.equipped = list(values['done-equipped']);
+    const point = (v?: string) => {
+      if (!v) return undefined;
+      const [x, y, plane] = v.split(',').map(Number);
+      return { x: x!, y: y!, plane: plane ?? 0 };
+    };
+    const destPoint = point(values['dest-at']);
+    const near = point(values['done-near']);
+    if (near) doneWhen.near = { ...near, radius: 4 };
     planner = new SingleSubGoalPlanner({
       text: values.subgoal,
       targets: list(values.targets),
       actions: list(values.actions),
       keep: list(values.keep),
+      want,
+      makeAmount: values['make-amount'] ? (Number(values['make-amount']) as 1 | 5 | 10) : undefined,
+      destination: values.dest || destPoint ? { name: values.dest, point: destPoint } : undefined,
       doneWhen,
       isDone: compile(doneWhen),
       maxSteps: values['max-steps'] ? Number(values['max-steps']) : 60,

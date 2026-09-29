@@ -29,7 +29,8 @@ export interface CandidateSet {
 }
 
 /** Items that are "used on" other items rather than having their own inventory action. */
-const TOOLS = ['tinderbox', 'knife', 'chisel', 'needle', 'pestle and mortar', 'hammer', 'glassblowing pipe'];
+// Not the hammer: smithing happens at an anvil, and "use hammer on bar" does nothing.
+const TOOLS = ['tinderbox', 'knife', 'chisel', 'needle', 'pestle and mortar', 'glassblowing pipe'];
 /** Inventory actions that never help a sub-goal and just burn option budget. */
 const IGNORED_INVENTORY_ACTIONS = new Set(['examine', 'check', 'rub', 'commune', 'check-charges']);
 
@@ -69,6 +70,9 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
   }
   if (s.bank.open) {
     return { candidates: bankCandidates(s, goal, maxCandidates), destinations: [] };
+  }
+  if (s.shop.open) {
+    return { candidates: shopCandidates(s, goal, maxCandidates), destinations: [] };
   }
 
   const groups = new Map<string, number>();
@@ -249,18 +253,51 @@ function dialogueCandidates(s: Snapshot): Candidate[] {
 }
 
 function productionCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
-  return s.production.options.map((option) => ({
-    id: `production:${option}`,
-    kind: 'production' as const,
-    name: option,
-    action: 'Make',
-    label: `Make all: ${option}`,
-    gameAction: { op: 'production_select' as const, option },
-    score: matchesAny(option, goal.targets) ? 1 : 0,
-  }));
+  return s.production.options.map((option) => {
+    // On the anvil grid, never queue more than the sub-goal still needs: a queued batch keeps
+    // running after the sub-goal ends and eats bars meant for the next item.
+    let amount: 1 | 5 | 10 | undefined = goal.makeAmount;
+    if (s.production.interface === 'smithing') {
+      const need = stillNeeded(s, goal, option);
+      if (need !== null) amount = need >= 10 ? 10 : need >= 5 ? 5 : 1;
+    }
+    const smithing = s.production.interface === 'smithing';
+    return {
+      id: `production:${option}`,
+      kind: 'production' as const,
+      name: option,
+      action: 'Make',
+      label: smithing ? `Smith ${amount ?? 'all'}: ${option}` : `Make all: ${option}`,
+      gameAction: { op: 'production_select' as const, option, ...(smithing && amount ? { amount } : {}) },
+      score: matchesAny(option, goal.targets) ? 1 : 0,
+    };
+  });
+}
+
+/** Held count of an item (substring match, stacks summed). */
+function heldCount(s: Snapshot, name: string): number {
+  const n = lc(name);
+  return s.inventory.items.filter((i) => lc(i.name).includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+}
+
+/** How many more of `name` the sub-goal wants, or null when it sets no count for it. */
+function stillNeeded(s: Snapshot, goal: SubGoal, name: string): number | null {
+  const w = goal.want?.find((x) => lc(name).includes(lc(x.name)) || lc(x.name).includes(lc(name)));
+  return w ? Math.max(0, w.count - heldCount(s, w.name)) : null;
+}
+
+/** Modal screens: when the sub-goal names actions, only offer those (plus closing). */
+function allowedAction(action: string, goal: SubGoal): boolean {
+  if (!goal.actions?.length || action === 'Close') return true;
+  const a = lc(action);
+  return goal.actions.some((g) => a.startsWith(lc(g).split('-')[0]!));
 }
 
 function bankCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
+  return bankCandidatesAll(s, goal, max * 2).filter((c) => allowedAction(c.action, goal)).slice(0, max);
+}
+
+function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
   const out: Candidate[] = [];
   // "Deposit inventory" would take the protected tools with it.
   if (s.inventory.items.length > 0 && !s.inventory.items.some((i) => isKept(i.name, goal.keep))) {
@@ -288,13 +325,40 @@ function bankCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
   }
   // Only withdraw what the sub-goal asks for; a bank can hold hundreds of items.
   const wanted = s.bank.items.filter((b) => matchesAny(b.name, goal.targets));
-  for (const b of wanted.slice(0, 6)) {
-    out.push(
-      { id: `bank:withdraw1:${b.id}`, kind: 'bank_item', name: b.name, action: 'Withdraw-1', label: `Withdraw 1 ${b.name} (bank has ${b.quantity})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: 1 } },
-      { id: `bank:withdrawAll:${b.id}`, kind: 'bank_item', name: b.name, action: 'Withdraw-All', label: `Withdraw all ${b.name} (bank has ${b.quantity})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: 'all' } },
-    );
+  for (const b of wanted.slice(0, 4)) {
+    const need = stillNeeded(s, goal, b.name);
+    if (need === 0) continue;
+    const needText = need === null ? '' : `; you need ${need} more`;
+    for (const n of [1, 5, 10] as const) {
+      if (b.quantity >= n && (need === null || n <= need)) {
+        out.push({ id: `bank:withdraw${n}:${b.id}`, kind: 'bank_item', name: b.name, action: `Withdraw-${n}`, label: `Withdraw ${n} ${b.name} (bank has ${b.quantity}${needText})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: n } });
+      }
+    }
+    // "All" only when it cannot overshoot the wanted count (or no count was given).
+    if (need === null || b.quantity <= need) {
+      out.push({ id: `bank:withdrawAll:${b.id}`, kind: 'bank_item', name: b.name, action: 'Withdraw-All', label: `Withdraw all ${b.name} (bank has ${b.quantity}${needText})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: 'all' } });
+    }
   }
   out.push({ id: 'bank:close', kind: 'bank_item', name: 'Bank', action: 'Close', label: 'Close the bank', gameAction: { op: 'bank_close' } });
+  return out.slice(0, max);
+}
+
+function shopCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
+  const out: Candidate[] = [];
+  // Offer what the sub-goal names; with no hints, the first few stocked items.
+  const stocked = s.shop.items.filter((i) => i.quantity > 0);
+  const wanted = goal.targets?.length ? stocked.filter((i) => matchesAny(i.name, goal.targets)) : stocked.slice(0, 8);
+  for (const i of wanted.slice(0, 8)) {
+    const need = stillNeeded(s, goal, i.name);
+    if (need === 0) continue;
+    const needText = need === null ? '' : `; you need ${need} more`;
+    for (const n of [1, 5] as const) {
+      if (i.quantity >= n && (need === null || n <= need)) {
+        out.push({ id: `shop:buy${n}:${i.id}`, kind: 'shop_item', name: i.name, action: `Buy-${n}`, label: `Buy ${n} ${i.name} (shop has ${i.quantity}${needText})`, gameAction: { op: 'shop_buy', itemId: i.id, amount: n } });
+      }
+    }
+  }
+  out.push({ id: 'shop:close', kind: 'shop_item', name: 'Shop', action: 'Close', label: 'Close the shop', gameAction: { op: 'shop_close' } });
   return out.slice(0, max);
 }
 
@@ -330,7 +394,8 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     const distance = tileDistance(me, to);
     if (distance <= 2) return; // already there
     if (out.some((d) => tileDistance(d.to, to) <= 3)) return;
-    out.push({ id: `dest:${out.length}`, label: `${label} (${distance >= 10_000 ? 'other floor' : `${distance} tiles`})`, to, distance });
+    const floor = to.plane !== me.plane ? `, floor ${to.plane}` : '';
+    out.push({ id: `dest:${out.length}`, label: `${label} (${distance} tiles${floor})`, to, distance });
   };
 
   if (goal.destination?.point) push(goal.destination.name ?? 'Sub-goal destination', goal.destination.point);

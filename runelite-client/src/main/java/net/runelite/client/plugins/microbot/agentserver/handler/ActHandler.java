@@ -7,6 +7,7 @@ import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.agentserver.AgentWidgets;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
@@ -16,6 +17,7 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.io.IOException;
@@ -49,7 +51,7 @@ public class ActHandler extends AgentHandler {
 	static final Set<String> OPS = new HashSet<>(Arrays.asList(
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
-			"drop", "toggle_run"));
+			"drop", "toggle_run", "shop_buy", "shop_close"));
 
 	private final Client client;
 
@@ -131,9 +133,30 @@ public class ActHandler extends AgentHandler {
 				return Result.ok();
 			case "dialogue_select":
 				return Rs2Dialogue.clickOption(requireString(body, "option"), false) ? Result.ok() : Result.fail("option_not_found");
-			case "production_select":
+			case "production_select": {
+				String option = requireString(body, "option");
+				if (AgentWidgets.isSmithingOpen()) {
+					Object amount = body.get("amount");
+					String quantity = amount instanceof Number ? String.valueOf(((Number) amount).intValue()) : "All";
+					return AgentWidgets.smith(client, option, quantity) ? Result.ok() : Result.fail("option_not_found");
+				}
 				if (!Rs2Widget.isProductionWidgetOpen()) return Result.fail("production_not_open");
-				return Rs2Widget.handleProcessingInterface(requireString(body, "option")) ? Result.ok() : Result.fail("option_not_found");
+				return Rs2Widget.handleProcessingInterface(option) ? Result.ok() : Result.fail("option_not_found");
+			}
+			case "shop_buy": {
+				if (!Rs2Shop.isOpen()) return Result.fail("shop_not_open");
+				int amount = optInt(body, "amount", 1);
+				if (amount != 1 && amount != 5 && amount != 10 && amount != 50) {
+					throw new IllegalArgumentException("amount must be 1, 5, 10 or 50 (the shop's Buy options)");
+				}
+				int itemId = requireInt(body, "itemId");
+				if (!Rs2Shop.hasStock(itemId)) return Result.fail("out_of_stock");
+				return Rs2Shop.buyItem(itemId, String.valueOf(amount)) ? Result.ok() : Result.fail("buy_failed");
+			}
+			case "shop_close":
+				if (!Rs2Shop.isOpen()) return Result.fail("shop_not_open");
+				Rs2Shop.closeShop();
+				return Result.ok();
 			case "bank_open":
 				if (Rs2Bank.isOpen()) return Result.ok();
 				return Rs2Bank.openBank() ? Result.ok() : Result.fail("no_bank_nearby");

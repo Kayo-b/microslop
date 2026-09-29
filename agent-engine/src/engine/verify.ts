@@ -22,7 +22,8 @@ export type Change =
   | 'bank'
   | 'walk'
   | 'run'
-  | 'xp';
+  | 'xp'
+  | 'shop';
 
 export interface Outcome {
   success: boolean;
@@ -58,6 +59,7 @@ export function diff(a: Snapshot, b: Snapshot): Change[] {
   if (dlgKey(a) !== dlgKey(b)) out.push('dialogue');
   if (a.production.open !== b.production.open) out.push('production');
   if (a.bank.open !== b.bank.open) out.push('bank');
+  if (a.shop.open !== b.shop.open) out.push('shop');
   if (!a.walk.active && b.walk.active) out.push('walk');
   if (xpGains(a, b).length > 0) out.push('xp');
   return out;
@@ -76,7 +78,7 @@ export function expectedChanges(action: GameAction): Change[] {
       switch (action.target.kind) {
         case 'npc':
         case 'object':
-          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank', 'xp'];
+          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank', 'shop', 'xp'];
         case 'ground_item':
           return ['inventory', 'moving', 'position'];
         case 'inventory':
@@ -96,7 +98,7 @@ export function expectedChanges(action: GameAction): Change[] {
     case 'dialogue_select':
       return ['dialogue', 'inventory', 'production'];
     case 'production_select':
-      return ['production', 'animation', 'inventory'];
+      return ['production', 'animation', 'inventory', 'xp'];
     case 'bank_open':
     case 'bank_close':
       return ['bank', 'moving', 'position'];
@@ -107,6 +109,10 @@ export function expectedChanges(action: GameAction): Change[] {
       return ['inventory'];
     case 'toggle_run':
       return ['run'];
+    case 'shop_buy':
+      return ['inventory'];
+    case 'shop_close':
+      return ['shop'];
     case 'wait':
     case 'done':
       return [];

@@ -122,7 +122,14 @@ export interface BankState {
 /** The skilling "how many?" interface (cook, smelt, fletch...). */
 export interface ProductionState {
   open: boolean;
+  /** "make": skill-multi chatbox (cook, smelt, fletch); "smithing": the anvil grid. */
+  interface?: 'make' | 'smithing' | null;
   options: string[];
+}
+
+export interface ShopState {
+  open: boolean;
+  items: { id: number; name: string; quantity: number }[];
 }
 
 export interface WalkStatus {
@@ -153,6 +160,7 @@ export interface Snapshot {
   dialogue: DialogueState;
   production: ProductionState;
   bank: BankState;
+  shop: ShopState;
   walk: WalkStatus;
   /** Recent game/system messages only; other players' chat is never included. */
   messages: GameMessage[];
@@ -177,13 +185,16 @@ export type GameAction =
   | { op: 'walk_cancel' }
   | { op: 'dialogue_continue' }
   | { op: 'dialogue_select'; option: string }
-  | { op: 'production_select'; option: string }
+  /** amount applies to the anvil smithing grid (1, 5, 10 or 'all'); the make-X chatbox always makes all. */
+  | { op: 'production_select'; option: string; amount?: 1 | 5 | 10 | 'all' }
   | { op: 'bank_open' }
   | { op: 'bank_close' }
   | { op: 'bank_deposit_all' }
   | { op: 'bank_deposit'; itemId: number; amount: number | 'all' }
   | { op: 'bank_withdraw'; itemId: number; amount: number | 'all' }
   | { op: 'drop'; slot: number }
+  | { op: 'shop_buy'; itemId: number; amount: 1 | 5 | 10 | 50 }
+  | { op: 'shop_close' }
   | { op: 'toggle_run'; enabled: boolean }
   | { op: 'wait'; ticks: number }
   | { op: 'done' };
@@ -206,6 +217,7 @@ export type CandidateKind =
   | 'inventory'
   | 'equipment'
   | 'bank_item'
+  | 'shop_item'
   | 'dialogue'
   | 'production'
   | 'destination';
@@ -246,6 +258,10 @@ export interface SubGoal {
   destination?: { name?: string; point?: WorldPoint };
   /** Items that must never be dropped or deposited (tools, bait). Case-insensitive substrings. */
   keep?: string[];
+  /** Target inventory counts; withdraw/buy options show what is still missing and never overshoot. */
+  want?: { name: string; count: number }[];
+  /** Quantity to make per production pick (anvil grid only). Default: all. */
+  makeAmount?: 1 | 5 | 10;
   /** Deterministic completion check; when absent the decision engine's `done` answer decides. */
   isDone?: (snapshot: Snapshot) => boolean;
   /** Give up after this many engine steps without completion. */

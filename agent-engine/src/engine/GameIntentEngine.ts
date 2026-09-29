@@ -150,7 +150,11 @@ export class GameIntentEngine {
     // sub-goal's own check when it has one. Classifiers are strong at "which option" and weak at
     // abstract "what now" questions, so the op question is skipped whenever one op remains.
     const ops: Op[] = [];
-    if (candidates.length > 0) ops.push('interact');
+    // A sub-goal with an explicit destination whose targets are nowhere in sight means "travel":
+    // the web walker handles doors and stairs on the way, so nothing else nearby is relevant.
+    const mustTravel =
+      !!goal.destination && !!goal.targets?.length && destinations.length > 0 && !candidates.some((c) => matchesAny(c.name, goal.targets));
+    if (candidates.length > 0 && !mustTravel) ops.push('interact');
     // Travel is only a real option when nothing the sub-goal names is usable right here.
     const targetHere = candidates.some((c) => matchesAny(c.name, goal.targets) && !(c.unmet && c.unmet.length > 0));
     if (destinations.length > 0 && !targetHere) ops.push('walk');
@@ -228,7 +232,7 @@ export class GameIntentEngine {
   private busyReason(s: Snapshot): string | null {
     const p = s.player!;
     if (s.walk.active) return 'walking';
-    if (s.dialogue.inDialogue || s.production.open || s.bank.open) return null;
+    if (s.dialogue.inDialogue || s.production.open || s.bank.open || s.shop.open) return null;
     if (p.animating) return 'animating';
     if (p.moving) return 'moving';
     if (p.inCombat && p.interacting?.type === 'npc') return 'in combat';

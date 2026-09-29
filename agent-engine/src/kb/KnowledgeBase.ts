@@ -55,10 +55,16 @@ export interface PlayerContext {
 
 const parse = (s: unknown): string[] => (typeof s === 'string' ? (JSON.parse(s) as string[]) : []);
 
-/** Chebyshev distance on the same plane (the metric tiles use); different planes are "far". */
+/** Tiles-equivalent cost of each floor of stairs/ladders between two points. */
+export const FLOOR_COST = 20;
+
+/**
+ * Chebyshev distance (the metric tiles use), plus FLOOR_COST per floor of difference. Upper-floor
+ * banks (Lumbridge castle top floor) must stay "near"; a huge cross-plane penalty used to push the
+ * agent toward a ground-floor bank on the other side of a toll gate.
+ */
 export function tileDistance(a: WorldPoint, b: WorldPoint): number {
-  if (a.plane !== b.plane) return 10_000 + Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) + FLOOR_COST * Math.abs(a.plane - b.plane);
 }
 
 export class KnowledgeBase {
@@ -186,9 +192,14 @@ export class KnowledgeBase {
     return sortAndLimit(rows, from, limit);
   }
 
-  nearestBanks(from: WorldPoint, limit = 3, includeMembers = true): Place[] {
-    const rows = this.stmt("SELECT name, kind, x, y, plane, members FROM places WHERE kind IN ('bank', 'deposit_box')")
+  /**
+   * Nearest banks and deposit boxes. Banks Microbot marks as conditional (quest, PvP world,
+   * guild access) are skipped unless `includeConditional`.
+   */
+  nearestBanks(from: WorldPoint, limit = 3, includeMembers = true, includeConditional = false): Place[] {
+    const rows = this.stmt("SELECT name, kind, x, y, plane, members, requirement FROM places WHERE kind IN ('bank', 'deposit_box')")
       .all()
+      .filter((r) => includeConditional || r.requirement == null)
       .map((r) => this.toPlace(r, from))
       .filter((p) => includeMembers || !p.members);
     return sortAndLimit(rows, from, limit);

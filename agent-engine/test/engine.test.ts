@@ -205,3 +205,30 @@ test('candidates skip dying NPCs; verification reports xp gains', async () => {
   assert.deepEqual(xpGains(s, after), ['Hitpoints']);
   assert.ok(diff(s, after).includes('xp'));
 });
+
+test('bank candidates follow wanted counts and the sub-goal actions', () => {
+  const s = snapshot({
+    inventory: { freeSlots: 20, items: [item(0, 436, 'Copper ore'), item(1, 436, 'Copper ore'), item(2, 436, 'Copper ore')] },
+    bank: { open: true, items: [{ slot: 0, id: 436, name: 'Copper ore', quantity: 40 }, { slot: 1, id: 438, name: 'Tin ore', quantity: 227 }] },
+  });
+  const goal = { text: 'withdraw ore', targets: ['Copper ore', 'Tin ore'], actions: ['Withdraw'], want: [{ name: 'Copper ore', count: 8 }, { name: 'Tin ore', count: 13 }] };
+  const ids = buildCandidates(s, null, goal).candidates.map((c) => c.id);
+  assert.ok(ids.includes('bank:withdraw5:436') && !ids.includes('bank:withdraw10:436'), 'copper: 5 more needed, never 10');
+  assert.ok(!ids.includes('bank:withdrawAll:436') && !ids.includes('bank:withdrawAll:438'), 'All would overshoot');
+  assert.ok(ids.includes('bank:withdraw10:438'));
+  assert.ok(!ids.some((id) => id.startsWith('bank:deposit')), 'no deposit options for a withdraw sub-goal');
+  assert.ok(ids.includes('bank:close'));
+  const label = buildCandidates(s, null, goal).candidates.find((c) => c.id === 'bank:withdraw5:436')!.label;
+  assert.match(label, /you need 5 more/);
+});
+
+test('smithing candidates queue no more than the sub-goal still needs', () => {
+  const s = snapshot({ production: { open: true, interface: 'smithing', options: ['Bronze sword', 'Bronze mace'] } });
+  s.inventory.items.push(item(3, 1321, 'Bronze sword'));
+  const pick = (want: number) =>
+    buildCandidates(s, null, { text: 'smith swords', targets: ['Bronze sword'], want: [{ name: 'Bronze sword', count: want }] })
+      .candidates.find((c) => c.name === 'Bronze sword')!.gameAction;
+  assert.deepEqual(pick(2), { op: 'production_select', option: 'Bronze sword', amount: 1 });
+  assert.deepEqual(pick(7), { op: 'production_select', option: 'Bronze sword', amount: 5 });
+  assert.deepEqual(pick(20), { op: 'production_select', option: 'Bronze sword', amount: 10 });
+});

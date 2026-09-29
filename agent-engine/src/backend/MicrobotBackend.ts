@@ -138,6 +138,7 @@ export function normalizeSnapshot(raw: Partial<Snapshot>): Snapshot {
     dialogue: raw.dialogue ?? { inDialogue: false, hasContinue: false, hasOptions: false, options: [] },
     production: raw.production ?? { open: false, options: [] },
     bank: raw.bank ?? { open: false, items: [] },
+    shop: raw.shop ?? { open: false, items: [] },
     walk: raw.walk ?? { active: false },
     messages: raw.messages ?? [],
   };

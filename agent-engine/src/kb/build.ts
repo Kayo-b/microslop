@@ -58,7 +58,9 @@ CREATE INDEX spawns_page ON spawns(page COLLATE NOCASE);
 
 -- Named places the planner can send the player to: map labels, banks, deposit boxes.
 CREATE TABLE places (
-  name TEXT, kind TEXT, x INTEGER, y INTEGER, plane INTEGER, members INTEGER
+  name TEXT, kind TEXT, x INTEGER, y INTEGER, plane INTEGER, members INTEGER,
+  -- Non-null when access is conditional (quest, PvP world, guild): from BankLocation.hasRequirements.
+  requirement TEXT
 );
 CREATE INDEX places_name ON places(name COLLATE NOCASE);
 
@@ -89,6 +91,29 @@ function readJsonl<T = Row>(file: string): T[] {
 const bool = (v: unknown): number => (v === true || v === 'true' || v === 'Yes' || v === 1 ? 1 : 0);
 const json = (v: unknown): string => JSON.stringify(v ?? []);
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : v == null ? [] : [v]);
+
+/**
+ * Reads the `case NAME:` branches of BankLocation.hasRequirements() and returns, per enum name, a
+ * short description of the requirement (its first comment line, or "conditional").
+ */
+export function parseRequirementCases(source: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const start = source.indexOf('hasRequirements()');
+  if (start < 0) return out;
+  const body = source.slice(start);
+  const re = /case\s+([A-Z0-9_]+)\s*:([\s\S]*?)(?=case\s+[A-Z0-9_]+\s*:|default\s*:|$)/g;
+  let pending: string[] = [];
+  for (const m of body.matchAll(re)) {
+    const name = m[1]!;
+    const block = m[2]!.trim();
+    pending.push(name);
+    if (block.length === 0) continue; // fall-through: shares the next case's requirement
+    const comment = /\/\/\s*(.+)/.exec(block)?.[1]?.trim() ?? 'conditional';
+    for (const n of pending) out.set(n, comment);
+    pending = [];
+  }
+  return out;
+}
 
 /** Parses `NAME(new WorldPoint(x, y, plane)[, members])` enum constants out of a Microbot source file. */
 export function parseWorldPointEnum(source: string): { name: string; x: number; y: number; plane: number; members: boolean }[] {
@@ -195,9 +220,9 @@ export function buildKnowledgeBase(rawDir: string, outFile: string): Record<stri
   }
 
   // --- places ----------------------------------------------------------------------------
-  const addPlace = insert('places', ['name', 'kind', 'x', 'y', 'plane', 'members']);
+  const addPlace = insert('places', ['name', 'kind', 'x', 'y', 'plane', 'members', 'requirement']);
   for (const e of readJsonl(path.join(rawDir, 'map_elements.jsonl'))) {
-    addPlace(e.name as string, 'label', e.x as number, e.y as number, e.plane as number, bool(e.members));
+    addPlace(e.name as string, 'label', e.x as number, e.y as number, e.plane as number, bool(e.members), null);
   }
   const enumSources: [string, string, string][] = [
     ['bank/enums/BankLocation.java', 'bank', ' bank'],
@@ -206,8 +231,10 @@ export function buildKnowledgeBase(rawDir: string, outFile: string): Record<stri
   for (const [rel, kind, suffix] of enumSources) {
     const file = path.join(MICROBOT_UTIL, rel);
     if (!existsSync(file)) continue;
-    for (const p of parseWorldPointEnum(readFileSync(file, 'utf8'))) {
-      addPlace(titleCase(p.name) + suffix, kind, p.x, p.y, p.plane, p.members ? 1 : 0);
+    const source = readFileSync(file, 'utf8');
+    const requirements = parseRequirementCases(source);
+    for (const p of parseWorldPointEnum(source)) {
+      addPlace(titleCase(p.name) + suffix, kind, p.x, p.y, p.plane, p.members ? 1 : 0, requirements.get(p.name) ?? null);
     }
   }
 

@@ -25,9 +25,31 @@ test('parseWorldPointEnum reads Microbot location enums', () => {
   ]);
 });
 
-test('tileDistance is Chebyshev on a plane and large across planes', () => {
+test('tileDistance is Chebyshev plus a per-floor stairs cost', () => {
   assert.equal(tileDistance({ x: 0, y: 0, plane: 0 }, { x: 3, y: 5, plane: 0 }), 5);
-  assert.ok(tileDistance({ x: 0, y: 0, plane: 0 }, { x: 0, y: 0, plane: 1 }) >= 10_000);
+  assert.equal(tileDistance({ x: 0, y: 0, plane: 0 }, { x: 0, y: 3, plane: 2 }), 43);
+});
+
+test('parseRequirementCases reads conditional banks, including fall-through cases', async () => {
+  const { parseRequirementCases } = await import('../src/kb/build.ts');
+  const src = `
+    public boolean hasRequirements() {
+        switch (this) {
+            case LUMBRIDGE_FRONT:
+                // Requires to be in a PvP World
+                return isPvp();
+            case FOO:
+            case BAR:
+                return quest();
+            default:
+                return true;
+        }
+    }`;
+  const req = parseRequirementCases(src);
+  assert.equal(req.get('LUMBRIDGE_FRONT'), 'Requires to be in a PvP World');
+  assert.equal(req.get('FOO'), 'conditional');
+  assert.equal(req.get('BAR'), 'conditional');
+  assert.equal(req.has('LUMBRIDGE_TOP'), false);
 });
 
 function fixtureKb(): KnowledgeBase {

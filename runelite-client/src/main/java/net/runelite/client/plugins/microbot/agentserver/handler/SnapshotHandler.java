@@ -14,6 +14,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.agentserver.AgentWidgets;
 import net.runelite.client.plugins.microbot.agentserver.GameMessageLog;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
@@ -25,6 +26,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -112,6 +114,7 @@ public class SnapshotHandler extends AgentHandler {
 		snapshot.put("dialogue", readDialogue());
 		snapshot.put("production", readProduction());
 		snapshot.put("bank", readBank(maxBankItems));
+		snapshot.put("shop", readShop());
 		snapshot.put("walk", WalkHandler.activeWalkStatus());
 		snapshot.put("messages", GameMessageLog.recent(maxMessages));
 
@@ -376,11 +379,21 @@ public class SnapshotHandler extends AgentHandler {
 		return d;
 	}
 
-	/** The skilling "how many?" interface (cook/smelt/fletch...), with its product names. */
+	/**
+	 * The skilling "how many?" interface (cook/smelt/fletch...) or the anvil smithing grid, with
+	 * the product names each offers.
+	 */
 	private Map<String, Object> readProduction() {
 		Map<String, Object> p = new LinkedHashMap<>();
+		if (AgentWidgets.isSmithingOpen()) {
+			p.put("open", true);
+			p.put("interface", "smithing");
+			p.put("options", AgentWidgets.smithingOptions(client));
+			return p;
+		}
 		boolean open = Rs2Widget.isProductionWidgetOpen();
 		p.put("open", open);
+		p.put("interface", open ? "make" : null);
 		List<String> options = new ArrayList<>();
 		if (open) {
 			Microbot.getClientThread().runOnClientThreadOptional(() -> {
@@ -398,6 +411,25 @@ public class SnapshotHandler extends AgentHandler {
 		}
 		p.put("options", options);
 		return p;
+	}
+
+	private Map<String, Object> readShop() {
+		Map<String, Object> s = new LinkedHashMap<>();
+		boolean open = Rs2Shop.isOpen();
+		s.put("open", open);
+		List<Map<String, Object>> items = new ArrayList<>();
+		if (open) {
+			for (Rs2ItemModel item : new ArrayList<>(Rs2Shop.shopItems)) {
+				if (item == null || item.getId() == -1) continue;
+				Map<String, Object> m = new LinkedHashMap<>();
+				m.put("id", item.getId());
+				m.put("name", item.getName());
+				m.put("quantity", item.getQuantity());
+				items.add(m);
+			}
+		}
+		s.put("items", items);
+		return s;
 	}
 
 	private Map<String, Object> readBank(int maxItems) {
