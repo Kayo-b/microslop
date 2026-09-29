@@ -194,3 +194,57 @@ test('combat: level cap filters targets, bones get buried in batches', async () 
   const bury = nextCombatStep(task, bones);
   assert.ok(bury.kind === 'subgoal' && bury.subgoal.actions?.includes('Bury'));
 });
+
+test('combat readiness: eat up, restock at a bank, rest when there is no food', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const { goblin } = await import('./support/fixtures.ts');
+  const task = COMBAT_PRESETS['kill-barbarians']!;
+  const kb = { nearestBanks: () => [{ name: 'Varrock West bank', kind: 'bank', point: { x: 3183, y: 3441, plane: 0 }, members: false }] } as never;
+  const shrimps = (n: number) => Array.from({ length: n }, (_, i) => item(i, 315, 'Shrimps', { actions: ['Eat', 'Drop'] }));
+  const base = () => {
+    const b = snapshot({ npcs: [goblin({ name: 'Barbarian', combatLevel: 9 })], groundItems: [], inventory: { freeSlots: 20, items: shrimps(8) } });
+    b.player!.hp = { current: 31, max: 31 };
+    return b;
+  };
+
+  const hurt = base();
+  hurt.player!.hp.current = 5;
+  const eat = nextCombatStep(task, hurt, { kb });
+  assert.ok(eat.kind === 'subgoal' && eat.subgoal.actions?.includes('Eat') && eat.subgoal.doneWhen?.hpAtLeast === 0.8);
+
+  const noFood = base();
+  noFood.inventory = { freeSlots: 28, items: [] };
+  const restock = nextCombatStep(task, noFood, { kb, bankFood: null });
+  assert.ok(restock.kind === 'subgoal' && /restock food/.test(restock.subgoal.text));
+
+  noFood.player!.hp.current = 10;
+  const rest = nextCombatStep(task, noFood, { kb, bankFood: new Map() });
+  assert.equal(rest.kind, 'wait', 'bank known to be empty of food and HP low: rest');
+  noFood.player!.hp.current = 31;
+  assert.ok(nextCombatStep(task, noFood, { kb, bankFood: new Map() }).kind === 'subgoal', 'full HP and no food anywhere: fight carefully');
+
+  const bank = base();
+  bank.inventory = { freeSlots: 26, items: [item(0, 526, 'Bones'), item(1, 1351, 'Bronze axe')] };
+  bank.bank = { open: true, items: [{ slot: 0, id: 315, name: 'Shrimps', quantity: 13 }, { slot: 1, id: 333, name: 'Trout', quantity: 4 }] };
+  const deposit = nextCombatStep(task, bank, { kb });
+  assert.ok(deposit.kind === 'subgoal' && /deposit the Bones, Bronze axe/.test(deposit.subgoal.text));
+  bank.inventory = { freeSlots: 28, items: [] };
+  const withdraw = nextCombatStep(task, bank, { kb });
+  assert.ok(withdraw.kind === 'subgoal' && /withdraw 4 Trout/.test(withdraw.subgoal.text), 'best-healing food first');
+});
+
+test('combat looting takes coins and valuable drops before the task loot', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const task = COMBAT_PRESETS['kill-barbarians']!;
+  const g = (name: string, geValue: number, distance: number, quantity = 1) => ({ id: 1, name, quantity, position: { x: 1, y: 1, plane: 0 }, distance, geValue, lootable: true, reachable: true, pathDistance: distance });
+  const shrimps = Array.from({ length: 6 }, (_, i) => item(i, 315, 'Shrimps', { actions: ['Eat'] }));
+  const s = snapshot({ inventory: { freeSlots: 22, items: shrimps }, groundItems: [g('Bones', 1, 1), g('Coins', 12, 3, 12), g('Mind rune', 60, 4)] });
+  const first = nextCombatStep(task, s);
+  assert.ok(first.kind === 'subgoal' && first.subgoal.text === 'pick up 12 coins on the ground');
+  s.groundItems = s.groundItems.filter((x) => x.name !== 'Coins');
+  const second = nextCombatStep(task, s);
+  assert.ok(second.kind === 'subgoal' && /Mind rune/.test(second.subgoal.text));
+  s.groundItems = [g('Bones', 1, 1), { ...g('Rune scimitar', 15000, 2), lootable: false }];
+  const third = nextCombatStep(task, s);
+  assert.ok(third.kind === 'subgoal' && /Bones/.test(third.subgoal.text), "another player's drop is never taken");
+});

@@ -6,9 +6,11 @@ import type { GameBackend } from '../backend/MicrobotBackend.ts';
 import type { GameIntentEngine, StepResult } from '../engine/GameIntentEngine.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { PlannedSubGoal, Planner, SubGoalReport } from '../planner/types.ts';
+import { evaluate } from '../planner/conditions.ts';
 import type { WorldPoint } from '../types.ts';
 
 export type AgentEvent =
+  | { type: 'wait'; reason: string }
   | { type: 'subgoal'; subgoal: PlannedSubGoal }
   | { type: 'step'; result: StepResult }
   | { type: 'report'; report: SubGoalReport }
@@ -91,6 +93,16 @@ export class Agent {
         const plan = await planner.next({ goal, snapshot, kb: this.o.kb ?? null, reports, pathCost });
         if (plan.kind === 'complete') return finish('complete', plan.reason);
         if (plan.kind === 'impossible') return finish('impossible', plan.reason);
+        if (plan.kind === 'wait') {
+          this.o.onEvent?.({ type: 'wait', reason: plan.reason });
+          const deadline = Date.now() + plan.maxSeconds * 1000;
+          while (!this.stopRequested && Date.now() < deadline) {
+            await sleep(3000);
+            const s = await backend.snapshot();
+            if (!s.loggedIn || evaluate(plan.until, s)) break;
+          }
+          continue;
+        }
 
         const sg = plan.subgoal;
         subgoals++;

@@ -103,3 +103,36 @@ export const STATIONS: StationRule[] = [
   { target: 'Pottery oven', action: 'Fire', skill: 'Crafting', inputs: ['unfired'] },
   { target: 'Altar', action: 'Pray-at', skill: 'Prayer', inputs: [] },
 ];
+
+/** Hitpoints restored by common cooked foods (OSRS). Used for pre-combat readiness checks. */
+export const FOOD_HEAL: Record<string, number> = {
+  Shrimps: 3,
+  Anchovies: 1,
+  Sardine: 4,
+  Herring: 5,
+  Bread: 5,
+  Trout: 7,
+  Cod: 7,
+  Pike: 8,
+  Salmon: 9,
+  Tuna: 10,
+  'Cooked chicken': 3,
+  'Cooked meat': 3,
+  Lobster: 12,
+  Bass: 13,
+  Swordfish: 14,
+  Monkfish: 16,
+  Shark: 20,
+};
+
+/** Estimated healing carried in the inventory: {count, heal}. Unknown edible items count as 3. */
+export function foodSupply(items: { name: string; quantity: number; actions: string[] }[]): { count: number; heal: number } {
+  let count = 0;
+  let heal = 0;
+  for (const i of items) {
+    if (!i.actions.some((a) => a.toLowerCase() === 'eat')) continue;
+    count += i.quantity;
+    heal += i.quantity * (FOOD_HEAL[i.name] ?? 3);
+  }
+  return { count, heal };
+}

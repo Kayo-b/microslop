@@ -5,6 +5,7 @@
  * happened. Entity lists go in the options, not here.
  */
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
+import { foodSupply } from '../kb/resources.ts';
 import type { Snapshot, SubGoal } from '../types.ts';
 
 export interface HistoryEntry {
@@ -21,6 +22,8 @@ export interface DecisionState {
   prayer?: string;
   run: string;
   inventory: string;
+  /** Carried food and total healing, so fight-or-not choices can weigh it. */
+  food: string;
   equipped: string;
   skills: string;
   recent_actions: string[];
@@ -72,6 +75,10 @@ export function buildDecisionState(
     hp: p ? `${p.hp.current}/${p.hp.max}` : '?',
     run: p ? `${p.runEnergy}% (${p.runEnabled ? 'on' : 'off'})` : '?',
     inventory: foldInventory(s),
+    food: (() => {
+      const f = foodSupply(s.inventory.items);
+      return f.count ? `${f.count} items (heals ~${f.heal} HP)` : 'none';
+    })(),
     equipped: s.equipment.length ? s.equipment.map((e) => e.name).join(', ') : 'nothing',
     skills,
     recent_actions: history.slice(-4).map((h) => `${h.action} -> ${h.outcome}`),

@@ -6,6 +6,8 @@
  * optionally until a skill level is reached.
  */
 import type { Snapshot, WorldPoint } from '../types.ts';
+import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
+import { FOOD_HEAL, foodSupply } from '../kb/resources.ts';
 import { compile, type DoneCondition } from './conditions.ts';
 import type { PlannedSubGoal, Planner, PlannerContext, PlanStep } from './types.ts';
 
@@ -54,14 +56,27 @@ export interface CombatTask {
   maxLevel?: number;
   /** Bury carried bones once this many are held (Prayer XP). */
   buryAt?: number;
+  /** Food to carry into fights; below this the planner restocks at a bank (or rests if none). Default 0. */
+  minFood?: number;
+  /** How much food to withdraw when restocking. Default 10. */
+  foodBatch?: number;
+  /** Also loot any of our drops worth at least this (gp, ground value). Coins are always looted. Default 25. */
+  lootValue?: number;
+}
+
+/** What the combat planner has seen of the bank, and helpers it needs from the world. */
+export interface CombatContext {
+  kb?: KnowledgeBase | null;
+  /** Cooked food last seen in the bank (name -> count); null until the bank has been opened. */
+  bankFood?: Map<string, number> | null;
 }
 
 export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
   'kill-chickens': { activity: 'kill chickens and collect feathers', monsters: ['Chicken'], loot: ['Feather'], keep: [], skill: 'Strength', area: { name: 'Lumbridge chicken farm', point: { x: 3232, y: 3295, plane: 0 } } },
   'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength', area: { name: 'Lumbridge cow field', point: { x: 3257, y: 3265, plane: 0 } } },
   'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength', area: { name: 'Lumbridge goblins', point: { x: 3245, y: 3240, plane: 0 } } },
-  'kill-barbarians': { activity: 'kill barbarians and bury their bones', monsters: ['Barbarian'], loot: ['Bones'], keep: [], skill: 'Strength', maxLevel: 10, buryAt: 5, area: { name: 'Barbarian Village', point: { x: 3079, y: 3419, plane: 0 } } },
-  'kill-guards': { activity: 'kill Varrock guards and collect coins', monsters: ['Guard'], loot: ['Coins'], keep: ['Shrimps'], skill: 'Strength', area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } } },
+  'kill-barbarians': { activity: 'kill barbarians and bury their bones', monsters: ['Barbarian'], loot: ['Bones'], keep: [], skill: 'Strength', maxLevel: 10, buryAt: 5, minFood: 5, area: { name: 'Barbarian Village', point: { x: 3079, y: 3419, plane: 0 } } },
+  'kill-guards': { activity: 'kill Varrock guards and collect coins', monsters: ['Guard'], loot: ['Coins'], keep: [], skill: 'Strength', minFood: 10, area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } } },
 };
 
 /** How many of an item (by name substring) the inventory holds, counting stack sizes. */
@@ -70,24 +85,31 @@ function held(s: Snapshot, name: string): number {
   return s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
 }
 
-export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
+export function nextCombatStep(task: CombatTask, s: Snapshot, cc: CombatContext = {}): PlanStep {
   if (task.untilLevel) {
     const sk = s.skills.find((k) => k.name.toLowerCase() === task.skill.toLowerCase());
     if (sk && sk.level >= task.untilLevel) return { kind: 'complete', reason: `${task.skill} reached ${sk.level}` };
   }
+  const readiness = combatReadiness(task, s, cc);
+  if (readiness) return readiness;
   if (task.buryAt && held(s, 'Bones') >= task.buryAt) {
     return { kind: 'subgoal', subgoal: goal('bury all the bones in the inventory', ['Bones'], ['Bury'], { lacksItem: 'Bones' }, 60, task.keep) };
   }
   // Sequencing ("kill, then loot") is decided here, not by the classifier: offered both, it keeps
-  // choosing the next attack over the drop on the floor.
-  const lootHere = task.loot
-    .map((name) => s.groundItems.find((g) => g.lootable && g.reachable && g.distance <= 8 && g.name.toLowerCase().includes(name.toLowerCase())))
-    .find(Boolean);
-  const stackable = lootHere && s.inventory.items.some((i) => i.name === lootHere.name && i.stackable);
+  // choosing the next attack over the drop on the floor. Coins and valuable drops come first, then
+  // the task's own loot (bones, hides); each pickup is its own sub-goal.
+  const minValue = task.lootValue ?? 25;
+  const ours = s.groundItems.filter((g) => g.lootable && g.reachable && g.distance <= 8);
+  const wanted = (g: (typeof ours)[number]) =>
+    /^coins$/i.test(g.name) || g.geValue >= minValue || task.loot.some((l) => g.name.toLowerCase().includes(l.toLowerCase()));
+  const priority = (g: (typeof ours)[number]) => (/^coins$/i.test(g.name) ? 0 : g.geValue >= minValue ? 1 : 2);
+  const lootHere = ours.filter(wanted).sort((x, y) => priority(x) - priority(y) || x.distance - y.distance)[0];
+  const stackable = lootHere && (/^coins$/i.test(lootHere.name) || s.inventory.items.some((i) => i.name === lootHere.name && i.stackable));
   if (lootHere && (s.inventory.freeSlots > 0 || stackable)) {
+    const what = /^coins$/i.test(lootHere.name) ? `${lootHere.quantity} coins` : `the ${lootHere.name}`;
     return {
       kind: 'subgoal',
-      subgoal: goal(`pick up the ${lootHere.name} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + 1 } }, 12, task.keep),
+      subgoal: goal(`pick up ${what} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + (/^coins$/i.test(lootHere.name) ? lootHere.quantity : 1) } }, 12, task.keep),
     };
   }
   if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };
@@ -104,10 +126,63 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
     kind: 'subgoal',
     // Steps include every combat tick; a level-21 guard takes far longer than a chicken.
     subgoal: {
-      ...goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 250, task.keep),
+      ...goal(`attack a ${task.monsters.join(' or ')}${task.maxLevel ? ` (level ${task.maxLevel} or lower)` : ''}`, task.monsters, ['Attack'], { lootNear: { names: task.loot, minValue: task.lootValue ?? 25, radius: 6 } }, 250, task.keep),
       maxTargetLevel: task.maxLevel,
     },
   };
+}
+
+const foodKeep = Object.keys(FOOD_HEAL);
+
+/**
+ * Pre-fight checks, in order: finish banking; top HP up with carried food; restock food when below
+ * the task's minimum and the bank has some; with no food anywhere, rest to 80% HP before fighting.
+ * Returns null when ready to fight.
+ */
+function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): PlanStep | null {
+  const hp = s.player?.hp;
+  const hpFrac = hp && hp.max > 0 ? hp.current / hp.max : 1;
+  const food = foodSupply(s.inventory.items);
+  const minFood = task.minFood ?? 0;
+  const keep = [...task.keep, ...foodKeep];
+
+  if (s.bank.open) {
+    const loot = [...new Set(s.inventory.items.map((i) => i.name))].filter((n) => !keep.some((k) => n.toLowerCase().includes(k.toLowerCase())) && !/coins/i.test(n));
+    if (loot.length) return { kind: 'subgoal', subgoal: goal(`deposit the ${loot.join(', ')}`, loot, ['Deposit'], { lacksItems: loot }, 20, keep) };
+    const best = s.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).sort((a, b) => FOOD_HEAL[b.name]! - FOOD_HEAL[a.name]!)[0];
+    const batch = task.foodBatch ?? 10;
+    if (best && food.count < batch) {
+      const count = Math.min(batch, food.count + best.quantity);
+      return {
+        kind: 'subgoal',
+        subgoal: { ...goal(`withdraw ${count} ${best.name} to eat during combat`, [best.name], ['Withdraw'], { hasItem: { name: best.name, count } }, 20, keep), want: [{ name: best.name, count }] },
+      };
+    }
+    return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };
+  }
+
+  // Top up before engaging: the in-fight reflex only eats below 50%.
+  if (hpFrac < 0.6 && food.count > 0 && !s.player?.inCombat) {
+    const edible = s.inventory.items.find((i) => i.actions.some((a) => a.toLowerCase() === 'eat'))!;
+    return { kind: 'subgoal', subgoal: goal(`eat the ${edible.name} to heal before fighting`, [edible.name], ['Eat'], { hpAtLeast: 0.8 }, 12, keep) };
+  }
+
+  if (food.count < minFood) {
+    const bankHasFood = cc.bankFood === null || cc.bankFood === undefined ? true : [...cc.bankFood.values()].some((n) => n > 0);
+    const pos = s.player?.position;
+    const bank = pos && cc.kb ? cc.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
+    if (bankHasFood && bank) {
+      return {
+        kind: 'subgoal',
+        subgoal: { ...goal(`restock food at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point } },
+      };
+    }
+    // No food to be had: never start a fight weak; let HP regenerate (1 HP/min) first.
+    if (hpFrac < 0.8) {
+      return { kind: 'wait', reason: `no food; resting until HP >= 80% (now ${hp?.current}/${hp?.max})`, until: { hpAtLeast: 0.8 }, maxSeconds: 900 };
+    }
+  }
+  return null;
 }
 
 const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker', 'Bank'];
@@ -159,6 +234,7 @@ type Task = ({ kind: 'gather' } & GatherTask) | ({ kind: 'combat' } & CombatTask
 export class TaskTreePlanner implements Planner {
   readonly name: string;
   private readonly task: Task;
+  private bankFood: Map<string, number> | null = null;
 
   constructor(task: GatherTask | Task, name = 'task-tree') {
     this.task = 'kind' in task ? task : { kind: 'gather', ...task };
@@ -179,7 +255,12 @@ export class TaskTreePlanner implements Planner {
     if (last.length === 3 && last.every((r) => r.result === 'blocked' && r.subgoal === last[0]!.subgoal)) {
       return { kind: 'impossible', reason: `blocked 3 times on "${last[0]!.subgoal}": ${last[2]!.reason}` };
     }
-    return this.task.kind === 'combat' ? nextCombatStep(this.task, ctx.snapshot) : nextGatherStep(this.task, ctx.snapshot);
+    if (ctx.snapshot.bank.open) {
+      this.bankFood = new Map(ctx.snapshot.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).map((b) => [b.name, b.quantity]));
+    }
+    return this.task.kind === 'combat'
+      ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood })
+      : nextGatherStep(this.task, ctx.snapshot);
   }
 }
 

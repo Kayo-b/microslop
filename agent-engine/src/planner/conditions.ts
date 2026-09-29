@@ -18,6 +18,8 @@ export interface DoneCondition {
   lacksItems?: string[];
   bankOpen?: boolean;
   shopOpen?: boolean;
+  /** Current HP is at least this fraction of max (0-1). */
+  hpAtLeast?: number;
   /** Every listed item is worn/wielded (case-insensitive substring). */
   equipped?: string[];
   /** Player is within `radius` tiles of a point. */
@@ -26,6 +28,8 @@ export interface DoneCondition {
   dialogueOpen?: boolean;
   /** An object with this name is within `radius` tiles (a lit fire, an open door...). */
   objectNear?: { name: string; radius?: number };
+  /** Any of our drops lies within `radius`: named items, coins, or anything worth >= minValue gp. */
+  lootNear?: { names: string[]; minValue: number; radius?: number };
   /** One of our (lootable) items of this name lies on the ground within `radius` tiles. */
   groundItemNear?: { name: string; radius?: number };
 }
@@ -45,6 +49,10 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
   if (cond.lacksItems?.length) clauses.push(cond.lacksItems.every((n) => count(s, n) === 0));
   if (cond.bankOpen !== undefined) clauses.push(s.bank.open === cond.bankOpen);
   if (cond.shopOpen !== undefined) clauses.push(s.shop.open === cond.shopOpen);
+  if (cond.hpAtLeast !== undefined) {
+    const hp = s.player?.hp;
+    clauses.push(!!hp && hp.max > 0 && hp.current / hp.max >= cond.hpAtLeast);
+  }
   if (cond.equipped?.length) {
     const worn = s.equipment.map((e) => e.name.toLowerCase());
     clauses.push(cond.equipped.every((n) => worn.some((w) => w.includes(n.toLowerCase()))));
@@ -54,6 +62,16 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
     const n = cond.objectNear.name.toLowerCase();
     const r = cond.objectNear.radius ?? 3;
     clauses.push(s.objects.some((o) => o.distance <= r && o.name.toLowerCase() === n));
+  }
+  if (cond.lootNear) {
+    const { names, minValue } = cond.lootNear;
+    const r = cond.lootNear.radius ?? 6;
+    clauses.push(
+      s.groundItems.some(
+        (g) => g.lootable && g.reachable && g.distance <= r &&
+          (/^coins$/i.test(g.name) || g.geValue >= minValue || names.some((n) => g.name.toLowerCase().includes(n.toLowerCase()))),
+      ),
+    );
   }
   if (cond.groundItemNear) {
     const n = cond.groundItemNear.name.toLowerCase();
@@ -86,11 +104,13 @@ export function describe(cond: DoneCondition | undefined): string {
   if (cond.lacksItems?.length) parts.push(`no ${cond.lacksItems.join('/')}`);
   if (cond.bankOpen !== undefined) parts.push(cond.bankOpen ? 'bank open' : 'bank closed');
   if (cond.shopOpen !== undefined) parts.push(cond.shopOpen ? 'shop open' : 'shop closed');
+  if (cond.hpAtLeast !== undefined) parts.push(`HP >= ${Math.round(cond.hpAtLeast * 100)}%`);
   if (cond.equipped?.length) parts.push(`wearing ${cond.equipped.join(', ')}`);
   if (cond.dialogueOpen !== undefined) parts.push(cond.dialogueOpen ? 'dialogue open' : 'dialogue closed');
   if (cond.near) parts.push(`within ${cond.near.radius ?? 3} of (${cond.near.x}, ${cond.near.y}, ${cond.near.plane})`);
   if (cond.skillLevel) parts.push(`${cond.skillLevel.skill} >= ${cond.skillLevel.level}`);
   if (cond.groundItemNear) parts.push(`${cond.groundItemNear.name} on the ground nearby`);
+  if (cond.lootNear) parts.push(`loot (${[...cond.lootNear.names, 'coins'].join('/')} or >=${cond.lootNear.minValue} gp) on the ground nearby`);
   if (cond.objectNear) parts.push(`${cond.objectNear.name} within ${cond.objectNear.radius ?? 3} tiles`);
   return parts.join(' and ') || 'model decides';
 }

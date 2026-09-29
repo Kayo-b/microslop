@@ -28,7 +28,9 @@ export interface PlannerContext {
 export type PlanStep =
   | { kind: 'subgoal'; subgoal: PlannedSubGoal }
   | { kind: 'complete'; reason: string }
-  | { kind: 'impossible'; reason: string };
+  | { kind: 'impossible'; reason: string }
+  /** Do nothing until `until` holds (or `maxSeconds` pass), e.g. resting for HP to regenerate. */
+  | { kind: 'wait'; reason: string; until: DoneCondition; maxSeconds: number };
 
 /** Long-horizon layer: decides the next sub-goal whenever the previous one ends. */
 export interface Planner {
