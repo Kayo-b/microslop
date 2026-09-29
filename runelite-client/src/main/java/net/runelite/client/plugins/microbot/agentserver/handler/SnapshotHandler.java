@@ -31,7 +31,6 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -230,7 +229,11 @@ public class SnapshotHandler extends AgentHandler {
 		m.put("distance", loc.distanceTo(me));
 		m.put("healthRatio", npc.getHealthRatio());
 		m.put("healthScale", npc.getHealthScale());
-		m.put("interactingWithPlayer", npc.getInteracting() == client.getLocalPlayer());
+		Actor npcTarget = npc.getInteracting();
+		m.put("interactingWithPlayer", npcTarget == client.getLocalPlayer());
+		// In single-combat areas an NPC fighting another player cannot be attacked
+		// ("Someone else is fighting that.").
+		m.put("interactingWithOther", npcTarget instanceof Player && npcTarget != client.getLocalPlayer());
 		m.put("animation", npc.getAnimation());
 		putReach(m, reach, loc, comp.getSize(), comp.getSize());
 		return m;
@@ -347,7 +350,9 @@ public class SnapshotHandler extends AgentHandler {
 		d.put("hasContinue", inDialogue && Rs2Dialogue.hasContinue());
 		boolean hasOptions = inDialogue && Rs2Dialogue.hasSelectAnOption();
 		d.put("hasOptions", hasOptions);
-		List<String> options = Collections.emptyList();
+		// Never Collections.emptyList(): Gson 2.8 reflects into it, which Java 17 blocks unless the
+		// JVM runs with --add-opens java.base/java.util (the launcher adds it; :client:run does not).
+		List<String> options = new ArrayList<>();
 		if (inDialogue) {
 			String text = Rs2Dialogue.getDialogueText();
 			if (text != null && !text.isEmpty()) {
@@ -417,7 +422,7 @@ public class SnapshotHandler extends AgentHandler {
 	}
 
 	private static List<String> actions(String[] raw) {
-		if (raw == null) return Collections.emptyList();
+		if (raw == null) return new ArrayList<>();
 		return Arrays.stream(raw)
 				.filter(a -> a != null && !a.isEmpty() && !"Hidden".equalsIgnoreCase(a))
 				.map(Rs2UiHelper::stripColTags)

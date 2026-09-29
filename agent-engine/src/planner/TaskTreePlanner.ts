@@ -38,6 +38,54 @@ export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = 
   'mine-iron': { activity: 'mine iron ore', targets: ['Iron rocks'], action: 'Mine', product: 'Iron ore', skill: 'Mining', keep: ['pickaxe'] },
 };
 
+/** Fight-and-loot loop: loot whenever our drop is on the ground, otherwise attack. */
+export interface CombatTask {
+  activity: string;
+  monsters: string[];
+  /** Drop names to pick up, most important first. */
+  loot: string[];
+  keep: string[];
+  /** Skill to watch for --until-level (e.g. Strength). */
+  skill: string;
+  untilLevel?: number;
+}
+
+export const COMBAT_PRESETS: Record<string, Omit<CombatTask, 'untilLevel'>> = {
+  'kill-chickens': { activity: 'kill chickens and collect feathers', monsters: ['Chicken'], loot: ['Feather'], keep: [], skill: 'Strength' },
+  'kill-cows': { activity: 'kill cows and collect cowhides', monsters: ['Cow', 'Cow calf'], loot: ['Cowhide'], keep: [], skill: 'Strength' },
+  'kill-goblins': { activity: 'kill goblins and collect their bones', monsters: ['Goblin'], loot: ['Bones'], keep: [], skill: 'Strength' },
+};
+
+/** How many of an item (by name substring) the inventory holds, counting stack sizes. */
+function held(s: Snapshot, name: string): number {
+  const n = name.toLowerCase();
+  return s.inventory.items.filter((i) => i.name.toLowerCase().includes(n)).reduce((sum, i) => sum + i.quantity, 0);
+}
+
+export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
+  if (task.untilLevel) {
+    const sk = s.skills.find((k) => k.name.toLowerCase() === task.skill.toLowerCase());
+    if (sk && sk.level >= task.untilLevel) return { kind: 'complete', reason: `${task.skill} reached ${sk.level}` };
+  }
+  // Sequencing ("kill, then loot") is decided here, not by the classifier: offered both, it keeps
+  // choosing the next attack over the drop on the floor.
+  const lootHere = task.loot
+    .map((name) => s.groundItems.find((g) => g.lootable && g.reachable && g.distance <= 8 && g.name.toLowerCase().includes(name.toLowerCase())))
+    .find(Boolean);
+  const stackable = lootHere && s.inventory.items.some((i) => i.name === lootHere.name && i.stackable);
+  if (lootHere && (s.inventory.freeSlots > 0 || stackable)) {
+    return {
+      kind: 'subgoal',
+      subgoal: goal(`pick up the ${lootHere.name} on the ground`, [lootHere.name], ['Take'], { hasItem: { name: lootHere.name, count: held(s, lootHere.name) + 1 } }, 12, task.keep),
+    };
+  }
+  if (s.inventory.freeSlots === 0) return { kind: 'complete', reason: 'inventory full' };
+  return {
+    kind: 'subgoal',
+    subgoal: goal(`attack a ${task.monsters.join(' or ')}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 60, task.keep),
+  };
+}
+
 const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker', 'Bank'];
 
 function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
@@ -82,19 +130,23 @@ export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
   };
 }
 
+type Task = ({ kind: 'gather' } & GatherTask) | ({ kind: 'combat' } & CombatTask);
+
 export class TaskTreePlanner implements Planner {
   readonly name: string;
-  private readonly task: GatherTask;
+  private readonly task: Task;
 
-  constructor(task: GatherTask, name = 'task-tree') {
-    this.task = task;
+  constructor(task: GatherTask | Task, name = 'task-tree') {
+    this.task = 'kind' in task ? task : { kind: 'gather', ...task };
     this.name = name;
   }
 
   static fromPreset(preset: string, opts: { bank?: boolean; untilLevel?: number } = {}): TaskTreePlanner {
-    const base = PRESETS[preset];
-    if (!base) throw new Error(`Unknown task preset "${preset}". Available: ${Object.keys(PRESETS).join(', ')}`);
-    return new TaskTreePlanner({ ...base, bank: opts.bank ?? false, untilLevel: opts.untilLevel }, preset);
+    const gather = PRESETS[preset];
+    if (gather) return new TaskTreePlanner({ kind: 'gather', ...gather, bank: opts.bank ?? false, untilLevel: opts.untilLevel }, preset);
+    const combat = COMBAT_PRESETS[preset];
+    if (combat) return new TaskTreePlanner({ kind: 'combat', ...combat, untilLevel: opts.untilLevel }, preset);
+    throw new Error(`Unknown task preset "${preset}". Available: ${[...Object.keys(PRESETS), ...Object.keys(COMBAT_PRESETS)].join(', ')}`);
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
@@ -103,6 +155,28 @@ export class TaskTreePlanner implements Planner {
     if (last.length === 3 && last.every((r) => r.result === 'blocked' && r.subgoal === last[0]!.subgoal)) {
       return { kind: 'impossible', reason: `blocked 3 times on "${last[0]!.subgoal}": ${last[2]!.reason}` };
     }
-    return nextGatherStep(this.task, ctx.snapshot);
+    return this.task.kind === 'combat' ? nextCombatStep(this.task, ctx.snapshot) : nextGatherStep(this.task, ctx.snapshot);
+  }
+}
+
+/** Runs exactly one fixed sub-goal, then reports complete (or impossible if it failed). */
+export class SingleSubGoalPlanner implements Planner {
+  readonly name = 'single';
+  private readonly subgoal: PlannedSubGoal;
+  private issued = false;
+
+  constructor(subgoal: PlannedSubGoal) {
+    this.subgoal = subgoal;
+  }
+
+  async next(ctx: PlannerContext): Promise<PlanStep> {
+    if (!this.issued) {
+      this.issued = true;
+      return { kind: 'subgoal', subgoal: this.subgoal };
+    }
+    const last = ctx.reports.at(-1);
+    return last?.result === 'done'
+      ? { kind: 'complete', reason: `sub-goal done: ${last.reason}` }
+      : { kind: 'impossible', reason: `sub-goal ${last?.result ?? 'not run'}: ${last?.reason ?? ''}` };
   }
 }

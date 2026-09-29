@@ -67,6 +67,8 @@ export interface SnapshotNpc {
   healthRatio: number;
   healthScale: number;
   interactingWithPlayer: boolean;
+  /** Fighting / talking to another player. */
+  interactingWithOther?: boolean;
   animation: number;
   reachable: boolean;
   /** Walking distance to the best tile beside it; -1 when unreachable. */

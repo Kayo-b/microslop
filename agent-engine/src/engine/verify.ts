@@ -21,7 +21,8 @@ export type Change =
   | 'production'
   | 'bank'
   | 'walk'
-  | 'run';
+  | 'run'
+  | 'xp';
 
 export interface Outcome {
   success: boolean;
@@ -58,7 +59,14 @@ export function diff(a: Snapshot, b: Snapshot): Change[] {
   if (a.production.open !== b.production.open) out.push('production');
   if (a.bank.open !== b.bank.open) out.push('bank');
   if (!a.walk.active && b.walk.active) out.push('walk');
+  if (xpGains(a, b).length > 0) out.push('xp');
   return out;
+}
+
+/** Skills whose XP rose between two snapshots, e.g. ["Attack", "Hitpoints"]. */
+export function xpGains(a: Snapshot, b: Snapshot): string[] {
+  const before = new Map(a.skills.map((s) => [s.name, s.xp]));
+  return b.skills.filter((s) => s.xp > (before.get(s.name) ?? s.xp)).map((s) => s.name);
 }
 
 /** Which changes count as "the game accepted this action". */
@@ -68,12 +76,12 @@ export function expectedChanges(action: GameAction): Change[] {
       switch (action.target.kind) {
         case 'npc':
         case 'object':
-          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank'];
+          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank', 'xp'];
         case 'ground_item':
           return ['inventory', 'moving', 'position'];
         case 'inventory':
         case 'equipment':
-          return ['inventory', 'equipment', 'hp', 'animation', 'dialogue', 'production'];
+          return ['inventory', 'equipment', 'hp', 'animation', 'dialogue', 'production', 'xp'];
         case 'dialogue':
           return ['dialogue'];
       }
@@ -136,7 +144,10 @@ export async function verifyEffect(backend: GameBackend, before: Snapshot, actio
     }
     const hits = changes.filter((c) => expected.has(c));
     if (hits.length > 0) {
-      return { success: true, effect: `changed: ${hits.join(',')}`, changes, ticks, messages: fresh, after };
+      // XP is the clearest evidence of progress (a kill, a catch) for the next decision.
+      const gained = xpGains(before, after);
+      const xp = gained.length ? ` (+xp ${gained.join(', ')})` : '';
+      return { success: true, effect: `changed: ${hits.filter((h) => h !== 'xp').join(',') || 'xp'}${xp}`, changes, ticks, messages: fresh, after };
     }
     if (Date.now() >= deadline || ticks >= timeoutTicks + 2) {
       return { success: false, effect: 'no effect', changes, ticks, messages: fresh, after };

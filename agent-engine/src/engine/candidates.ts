@@ -81,7 +81,11 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
 
   for (const npc of [...s.npcs].sort((a, b) => a.distance - b.distance)) {
     if (!npc.reachable && !opts.includeUnreachable) continue;
+    // A killed NPC lingers for a few ticks during its death animation with an empty health bar;
+    // clicking it does nothing.
+    if (npc.healthScale > 0 && npc.healthRatio === 0) continue;
     for (const action of npc.actions) {
+      if (lc(action) === 'attack' && npc.interactingWithOther && !npc.interactingWithPlayer) continue;
       if (!admit(`npc|${npc.name}|${action}`)) continue;
       const hint = kb ? npcHint(kb, ctx, npc.name, npc.id, action) : { text: '', unmet: [] };
       out.push({

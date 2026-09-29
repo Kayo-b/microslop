@@ -192,3 +192,16 @@ test('engine: low confidence escalates and the escalator decision wins', async (
     await server.close();
   }
 });
+
+test('candidates skip dying NPCs; verification reports xp gains', async () => {
+  const { goblin } = await import('./support/fixtures.ts');
+  const { xpGains } = await import('../src/engine/verify.ts');
+  const s = snapshot({ npcs: [goblin({ healthScale: 30, healthRatio: 0 }), goblin({ index: 78, healthScale: 30, healthRatio: 12 })] });
+  const ids = buildCandidates(s, null, { text: 'kill goblins' }).candidates.filter((c) => c.kind === 'npc').map((c) => c.id);
+  assert.deepEqual(ids, ['npc:78#Attack']);
+
+  const after = structuredClone(s);
+  after.skills.find((k) => k.name === 'Hitpoints')!.xp += 13;
+  assert.deepEqual(xpGains(s, after), ['Hitpoints']);
+  assert.ok(diff(s, after).includes('xp'));
+});

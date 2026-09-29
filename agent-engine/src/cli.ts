@@ -5,6 +5,7 @@
  *   npm run agent -- inspect [--decide] [--goal "chop trees"] [--targets "Tree,Oak tree"]
  *   npm run agent -- run --task chop-trees [--bank] [--until-level 15]
  *   npm run agent -- run --goal "get 10 woodcutting near Lumbridge" [--escalate]
+ *   npm run agent -- run --subgoal "bury all bones" --targets Bones --actions Bury --done-lacks Bones
  *
  * Common flags: --engine jev|laya (default DECISION_ENGINE or jev), --min-confidence 0.4,
  * --log-dir logs/agent, --kb data/kb.sqlite, --max-subgoals 200.
@@ -23,7 +24,8 @@ import { JsonlStepLogger } from './engine/log.ts';
 import { buildDecisionState, relevantSkillsFor } from './engine/state.ts';
 import { KnowledgeBase } from './kb/KnowledgeBase.ts';
 import { ClaudeEscalator, ClaudePlanner, describeSubGoal } from './llm/claude.ts';
-import { PRESETS, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
+import { compile, type DoneCondition } from './planner/conditions.ts';
+import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import type { Planner } from './planner/types.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,6 +35,13 @@ const { values, positionals } = parseArgs({
   options: {
     task: { type: 'string' },
     goal: { type: 'string' },
+    subgoal: { type: 'string' },
+    actions: { type: 'string' },
+    keep: { type: 'string' },
+    'done-lacks': { type: 'string' },
+    'done-has': { type: 'string' },
+    'done-full': { type: 'boolean', default: false },
+    'max-steps': { type: 'string' },
     targets: { type: 'string' },
     bank: { type: 'boolean', default: false },
     'until-level': { type: 'string' },
@@ -63,6 +72,8 @@ function help(): void {
   npm run agent -- inspect [--decide] [--goal TEXT] [--targets A,B]
   npm run agent -- run --task PRESET [--bank] [--until-level N]
   npm run agent -- run --goal TEXT [--escalate]
+  npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
+                       [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full] [--max-steps N]
 
 Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE`);
 }
@@ -111,11 +122,31 @@ async function run(): Promise<void> {
   if (values.task) {
     planner = TaskTreePlanner.fromPreset(values.task, { bank: values.bank, untilLevel: values['until-level'] ? Number(values['until-level']) : undefined });
     goal = `${values.task}${values.bank ? ' (banking)' : ' (dropping)'}${values['until-level'] ? ` until level ${values['until-level']}` : ''}`;
+  } else if (values.subgoal) {
+    const list = (v?: string) => v?.split(',').map((x) => x.trim()).filter(Boolean);
+    const doneWhen: DoneCondition = {};
+    if (values['done-lacks']) doneWhen.lacksItem = values['done-lacks'];
+    if (values['done-has']) {
+      // "Feather:30" = hold at least 30 feathers.
+      const [name, count] = values['done-has'].split(':');
+      doneWhen.hasItem = { name: name!.trim(), count: count ? Number(count) : 1 };
+    }
+    if (values['done-full']) doneWhen.inventoryFull = true;
+    planner = new SingleSubGoalPlanner({
+      text: values.subgoal,
+      targets: list(values.targets),
+      actions: list(values.actions),
+      keep: list(values.keep),
+      doneWhen,
+      isDone: compile(doneWhen),
+      maxSteps: values['max-steps'] ? Number(values['max-steps']) : 60,
+    });
+    goal = values.subgoal;
   } else if (values.goal) {
     planner = new ClaudePlanner();
     goal = values.goal;
   } else {
-    throw new Error('run needs --task PRESET or --goal TEXT');
+    throw new Error('run needs --task PRESET, --subgoal TEXT or --goal TEXT');
   }
 
   const logger = new JsonlStepLogger(values['log-dir']);
@@ -175,7 +206,7 @@ function printEvent(e: AgentEvent): void {
 
 try {
   if (values.help || command === 'help') help();
-  else if (command === 'presets') console.log(Object.entries(PRESETS).map(([k, v]) => `${k.padEnd(14)} ${v.activity}`).join('\n'));
+  else if (command === 'presets') console.log(Object.entries({ ...PRESETS, ...COMBAT_PRESETS }).map(([k, v]) => `${k.padEnd(14)} ${v.activity}`).join('\n'));
   else if (command === 'inspect') await inspect();
   else if (command === 'run') await run();
   else {

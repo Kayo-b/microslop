@@ -17,6 +17,8 @@ export interface DoneCondition {
   near?: { x: number; y: number; plane: number; radius?: number };
   skillLevel?: { skill: string; level: number };
   dialogueOpen?: boolean;
+  /** One of our (lootable) items of this name lies on the ground within `radius` tiles. */
+  groundItemNear?: { name: string; radius?: number };
 }
 
 const count = (s: Snapshot, name: string) => {
@@ -32,6 +34,11 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
   if (cond.lacksItem) clauses.push(count(s, cond.lacksItem) === 0);
   if (cond.bankOpen !== undefined) clauses.push(s.bank.open === cond.bankOpen);
   if (cond.dialogueOpen !== undefined) clauses.push(s.dialogue.inDialogue === cond.dialogueOpen);
+  if (cond.groundItemNear) {
+    const n = cond.groundItemNear.name.toLowerCase();
+    const r = cond.groundItemNear.radius ?? 6;
+    clauses.push(s.groundItems.some((g) => g.lootable && g.reachable && g.distance <= r && g.name.toLowerCase().includes(n)));
+  }
   if (cond.near) {
     const pos = s.player?.position;
     clauses.push(!!pos && tileDistance(pos, cond.near) <= (cond.near.radius ?? 3));
@@ -58,5 +65,6 @@ export function describe(cond: DoneCondition | undefined): string {
   if (cond.dialogueOpen !== undefined) parts.push(cond.dialogueOpen ? 'dialogue open' : 'dialogue closed');
   if (cond.near) parts.push(`within ${cond.near.radius ?? 3} of (${cond.near.x}, ${cond.near.y}, ${cond.near.plane})`);
   if (cond.skillLevel) parts.push(`${cond.skillLevel.skill} >= ${cond.skillLevel.level}`);
+  if (cond.groundItemNear) parts.push(`${cond.groundItemNear.name} on the ground nearby`);
   return parts.join(' and ') || 'model decides';
 }

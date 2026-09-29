@@ -158,3 +158,23 @@ test('dataset export keeps verified model decisions and successful escalations',
   assert.equal(toExample({ ...base, source: 'model', chosen: { op: 'done' } }), null);
   assert.deepEqual(toExample({ ...base, source: 'model', chosen: { op: 'done' } }, true)?.labels, { op: 'done' });
 });
+
+test('combat task tree: loot our drop when it is on the ground, otherwise attack', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const { goblin } = await import('./support/fixtures.ts');
+  const task = { ...COMBAT_PRESETS['kill-chickens']!, monsters: ['Goblin'] };
+  const s = snapshot({ npcs: [goblin()], groundItems: [] });
+  const attack = nextCombatStep(task, s);
+  assert.ok(attack.kind === 'subgoal' && attack.subgoal.actions?.includes('Attack'));
+  assert.equal(attack.kind === 'subgoal' && attack.subgoal.isDone!(s), false);
+
+  const dropped = structuredClone(s);
+  dropped.groundItems = [{ id: 314, name: 'Feather', quantity: 5, position: { x: 1, y: 1, plane: 0 }, distance: 2, geValue: 10, lootable: true, reachable: true, pathDistance: 2 }];
+  assert.equal(attack.kind === 'subgoal' && attack.subgoal.isDone!(dropped), true, 'attack ends once our loot is down');
+
+  const loot = nextCombatStep(task, dropped);
+  assert.ok(loot.kind === 'subgoal' && loot.subgoal.targets?.[0] === 'Feather' && loot.subgoal.doneWhen?.hasItem?.count === 1);
+
+  dropped.groundItems[0]!.lootable = false;
+  assert.ok(nextCombatStep(task, dropped).kind === 'subgoal' && /attack/.test((nextCombatStep(task, dropped) as { subgoal: { text: string } }).subgoal.text), "someone else's drop is ignored");
+});

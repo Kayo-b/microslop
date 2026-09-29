@@ -83,6 +83,10 @@ export class GameIntentEngine {
   private busyWaits = 0;
   private stepNo = 0;
   private lastActTick = -1;
+  /** NPC the last successful Attack targeted, so the approach is not abandoned mid-way. */
+  private attackTarget: { index: number; tick: number } | null = null;
+  /** Ticks to keep pursuing an attacked NPC before re-deciding. Chickens and goblins wander. */
+  private static readonly ATTACK_SETTLE_TICKS = 8;
 
   constructor(options: GameIntentEngineOptions) {
     this.o = {
@@ -230,6 +234,15 @@ export class GameIntentEngine {
     if (p.inCombat && p.interacting?.type === 'npc') return 'in combat';
     // Give a just-dispatched interaction a tick to start before re-deciding.
     if (this.lastActTick >= 0 && s.tick - this.lastActTick < 1) return 'action just dispatched';
+    // Keep pursuing the NPC we attacked while it is alive and nobody else took it; the player
+    // briefly shows neither moving nor fighting while re-pathing to a wandering target.
+    const t = this.attackTarget;
+    if (t && s.tick - t.tick < GameIntentEngine.ATTACK_SETTLE_TICKS) {
+      const npc = s.npcs.find((n) => n.index === t.index);
+      const alive = npc && !(npc.healthScale > 0 && npc.healthRatio === 0);
+      if (alive && !(npc!.interactingWithOther && !npc!.interactingWithPlayer)) return 'pursuing attack target';
+    }
+    this.attackTarget = null;
     return null;
   }
 
@@ -244,6 +257,10 @@ export class GameIntentEngine {
   ): Promise<StepResult> {
     const act = await this.o.backend.act(action);
     this.lastActTick = act.tick;
+    this.attackTarget =
+      act.success && action.op === 'interact' && action.target.kind === 'npc' && action.action.toLowerCase() === 'attack'
+        ? { index: action.target.index, tick: act.tick }
+        : null;
     let outcome: Outcome;
     if (!act.success) {
       outcome = { success: false, effect: `not dispatched: ${act.reason ?? 'unknown'}`, changes: [], ticks: 0, messages: [], after: snap };
