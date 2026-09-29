@@ -392,7 +392,10 @@ function shopCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
     const need = stillNeeded(s, goal, i.name);
     if (need === 0) continue;
     const needText = need === null ? '' : `; you need ${need} more`;
-    for (const n of [1, 5] as const) {
+    // With a known need, one option: the biggest Buy pack that does not overshoot (arrows and
+    // runes come by the hundred). Without one, single items only.
+    const packs = need === null ? ([1, 5] as const) : [([50, 10, 5, 1] as const).find((n) => n <= need && n <= i.quantity) ?? 1];
+    for (const n of packs) {
       if (i.quantity >= n && (need === null || n <= need)) {
         out.push({ id: `shop:buy${n}:${i.id}`, kind: 'shop_item', name: i.name, action: `Buy-${n}`, label: `Buy ${n} ${i.name} (shop has ${i.quantity}${needText})`, gameAction: { op: 'shop_buy', itemId: i.id, amount: n } });
       }
