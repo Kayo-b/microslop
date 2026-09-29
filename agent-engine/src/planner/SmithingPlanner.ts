@@ -282,7 +282,8 @@ export class SmithingPlanner implements Planner {
       const furnace = route?.furnace ?? (near ? { name: 'nearest furnace', point: near.point } : { name: 'Lumbridge furnace', point: PLACES.furnace });
       return sg(`smelt the ${metal.ores.join(' and ').toLowerCase()} into ${lc(metal.bar)}s at the furnace`, ['Furnace', metal.bar], ['Smelt', 'Make'], { lacksItem: scarcest }, {
         destination: furnace,
-        maxSteps: 250,
+        // Includes the walk to the furnace (Edgeville is ~130 tiles from the mine).
+        maxSteps: 800,
       });
     }
 
@@ -297,7 +298,7 @@ export class SmithingPlanner implements Planner {
         want: [{ name: item, count }],
         avoid: metal.anvil.avoid,
         avoidAt: this.retiredPoints(),
-        maxSteps: 200,
+        maxSteps: 500,
       });
     }
 
