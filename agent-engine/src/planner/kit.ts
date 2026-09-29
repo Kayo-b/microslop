@@ -69,7 +69,8 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
   const minSupply = opts.minSupply ?? 50;
   const maxBuy = opts.maxBuy ?? 300;
   const owned = new Set([...s.inventory.items.map((i) => i.name), ...s.equipment.map((e) => e.name), ...(kc.bank?.keys() ?? [])]);
-  const coins = count(s, kc.bank, 'Coins', 'all');
+  // Shop prices climb above base as stock drops; size purchases with a margin so they complete.
+  const coins = Math.floor(count(s, kc.bank, 'Coins', 'all') / 1.3);
   const need: KitPlan['need'] = [];
   const buy: KitPlan['buy'] = [];
   let cost = 0;
@@ -153,7 +154,9 @@ export function nextKitStep(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, k
     for (const n of kit.need) {
       if (carried(n.name) < n.count && (kc.bank?.get(n.name) ?? 0) > 0) want.push({ name: n.name, count: Math.min(n.count, carried(n.name) + kc.bank!.get(n.name)!) });
     }
-    if (kit.cost > invCoins && (kc.bank?.get('Coins') ?? 0) > 0) want.push({ name: 'Coins', count: Math.min(kit.cost, invCoins + kc.bank!.get('Coins')!) });
+    // Carry the price margin too (see planKit).
+    const coinsNeeded = Math.ceil(kit.cost * 1.3);
+    if (coinsNeeded > invCoins && (kc.bank?.get('Coins') ?? 0) > 0) want.push({ name: 'Coins', count: Math.min(coinsNeeded, invCoins + kc.bank!.get('Coins')!) });
     if (want.length) return sub(`withdraw ${want.map((w) => `${w.count} ${w.name}`).join(', ')} for ${style}`, want.map((w) => w.name), ['Withdraw'], { hasItems: want }, 30, keep, { want });
     return null;
   }

@@ -22,12 +22,12 @@ function char(extra: Partial<Snapshot> = {}): Snapshot {
 test('kit: ranged buys a shortbow and arrows within the coins owned', () => {
   const s = char({ inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 203, stackable: true })] } });
   const kit = planKit('ranged', s, { bank: new Map([['Coins', 100]]) });
-  assert.deepEqual(kit.buy.map((b) => [b.name, b.count]), [['Shortbow', 1], ['Bronze arrow', 253]]);
-  assert.equal(kit.cost, 303);
+  assert.deepEqual(kit.buy.map((b) => [b.name, b.count]), [['Shortbow', 1], ['Bronze arrow', 183]]);
+  assert.equal(kit.cost, 233, 'sized to the coins owned less a 30% price margin');
 
   // Coins partly banked: fetch them first; then shop at Lowe's.
   const fetch = nextKitStep('ranged', s, { bank: new Map([['Coins', 100]]) }, bank);
-  assert.ok(fetch?.kind === 'subgoal' && /get 303 coins/.test(fetch.subgoal.text));
+  assert.ok(fetch?.kind === 'subgoal' && /get 233 coins/.test(fetch.subgoal.text));
   const rich = char({ inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 1000, stackable: true })] } });
   const shop = nextKitStep('ranged', rich, { bank: new Map() }, bank);
   assert.ok(shop?.kind === 'subgoal' && shop.subgoal.targets?.[0] === 'Lowe' && shop.subgoal.doneWhen?.shopOpen, JSON.stringify(shop));
