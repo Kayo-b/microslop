@@ -91,6 +91,8 @@ export class GameIntentEngine {
   private stepNo = 0;
   private lastActTick = -1;
   private loggedOutSince: number | null = null;
+  /** Failed attempts per target (npc index / object tile / slot) within the current sub-goal. */
+  private readonly targetFailures = new Map<string, number>();
   /** Last tick the player was seen animating (skilling batches pause between items). */
   private lastAnimTick = -1;
   /** Ticks of animation gap still treated as "busy" (make-all batches pause 1-3 ticks per item). */
@@ -126,6 +128,7 @@ export class GameIntentEngine {
       this.goalKey = key;
       this.history = [];
       this.failures = 0;
+      this.targetFailures.clear();
       this.busyWaits = 0;
     }
     const started = Date.now();
@@ -157,7 +160,11 @@ export class GameIntentEngine {
     this.busyWaits = 0;
 
     const kb = this.o.kb ?? null;
-    const { candidates, destinations } = buildCandidates(snap, kb, goal, this.o.candidates);
+    const built = buildCandidates(snap, kb, goal, this.o.candidates);
+    // Targets that already failed twice in this sub-goal (a banker behind a counter, a rock behind a
+    // fence) are withheld, with all their actions, so the model must pick something else.
+    const candidates = built.candidates.filter((c) => (this.targetFailures.get(targetKey(c.gameAction) ?? "") ?? 0) < 2);
+    const destinations = built.destinations;
     const state = buildDecisionState(snap, goal, this.history, kb, relevantSkillsFor(goal, kb));
 
     // A lone "click to continue" needs no classifier.
@@ -309,6 +316,8 @@ export class GameIntentEngine {
     }
 
     this.failures = outcome.success ? 0 : this.failures + 1;
+    const tk = targetKey(action);
+    if (tk && !outcome.success) this.targetFailures.set(tk, (this.targetFailures.get(tk) ?? 0) + 1);
     this.history.push({ tick: snap.tick, action: label, outcome: outcome.effect });
     if (this.history.length > 20) this.history.shift();
 
@@ -337,6 +346,21 @@ export class GameIntentEngine {
       source,
       ...rec,
     } as StepRecord);
+  }
+}
+
+/** Identity of the entity an action targets, ignoring which menu action was used. */
+function targetKey(a: GameAction): string | null {
+  if (a.op !== 'interact' && a.op !== 'use_item_on') return null;
+  const t = a.target;
+  switch (t.kind) {
+    case 'npc':
+      return `npc:${t.index}`;
+    case 'object':
+    case 'ground_item':
+      return `${t.kind}:${t.id}@${t.x},${t.y},${t.plane}`;
+    default:
+      return null;
   }
 }
 

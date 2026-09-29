@@ -10,7 +10,7 @@ import { diff, expectedChanges } from '../src/engine/verify.ts';
 import type { SubGoal } from '../src/types.ts';
 import { FakeGame, startFakeServer } from './support/FakeMicrobotServer.ts';
 import { ScriptedDecisionEngine } from './support/ScriptedDecisionEngine.ts';
-import { item, snapshot, tree } from './support/fixtures.ts';
+import { goblin, item, snapshot, tree } from './support/fixtures.ts';
 
 const noSleep = { sleep: async () => {}, pollMs: 0 };
 
@@ -285,4 +285,27 @@ test('objects at avoided positions are never offered', () => {
   const s = snapshot({ objects: [tree({ id: 2097, name: 'Anvil', actions: ['Smith'], position: { x: 3246, y: 3404, plane: 0 } }), tree({ id: 2097, name: 'Anvil', actions: ['Smith'], position: { x: 3188, y: 3421, plane: 0 }, distance: 9 })] });
   const ids = buildCandidates(s, null, { text: 'smith', targets: ['Anvil'], avoidAt: [{ x: 3246, y: 3404, plane: 0 }] }).candidates.map((c) => c.id);
   assert.deepEqual(ids.filter((i) => i.startsWith('obj:')), ['obj:2097@3188,3421,0#Smith']);
+});
+
+test('a target that fails twice is withheld for the rest of the sub-goal', async () => {
+  const initial = snapshot();
+  initial.npcs = [goblin({ name: 'Banker', actions: ['Bank', 'Talk-to'], index: 5 })];
+  initial.objects = [{ id: 10355, name: 'Bank booth', type: 'GAME', actions: ['Bank'], position: { x: 3238, y: 3150, plane: 0 }, distance: 5, reachable: true, pathDistance: 4 }];
+  const game = new FakeGame({ initial });
+  const server = await startFakeServer(game, 'tok');
+  // Always prefer the banker; the fake client does nothing for it, so every banker click has "no effect".
+  const decider = new ScriptedDecisionEngine((p) => {
+    const t = p.questions.target as { criteria: Record<string, string> };
+    const banker = Object.keys(t.criteria).find((k) => k.startsWith('npc:5'));
+    return { op: { choice: 'interact' }, target: { choice: banker ?? Object.keys(t.criteria).find((k) => k.includes('Bank booth') || k.startsWith('obj:10355'))! } };
+  });
+  const engine = new GameIntentEngine({ backend: new MicrobotBackend({ port: server.port, token: 'tok' }), decisionEngine: decider, verify: { ...noSleep, timeoutTicks: 1 }, maxFailures: 5 });
+  try {
+    for (let i = 0; i < 3; i++) await engine.step({ text: 'open the bank', targets: ['Bank booth', 'Banker'] });
+    const lastTargets = Object.keys((decider.calls.at(-1)!.questions.target as { criteria: Record<string, string> }).criteria);
+    assert.ok(!lastTargets.some((k) => k.startsWith('npc:5')), 'banker withheld after two failures');
+    assert.equal(game.state.bank.open, true, 'the booth was used instead');
+  } finally {
+    await server.close();
+  }
 });
