@@ -92,7 +92,8 @@ export function nextCombatStep(task: CombatTask, s: Snapshot): PlanStep {
   }
   return {
     kind: 'subgoal',
-    subgoal: goal(`attack a ${task.monsters.join(' or ')}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 60, task.keep),
+    // Steps include every combat tick; a level-21 guard takes far longer than a chicken.
+    subgoal: goal(`attack a ${task.monsters.join(' or ')}`, task.monsters, ['Attack'], { groundItemNear: { name: task.loot[0]!, radius: 6 } }, 250, task.keep),
   };
 }
 
