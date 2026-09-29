@@ -58,6 +58,8 @@ export interface GameIntentEngineOptions {
   maxFailures?: number;
   /** Consecutive busy waits before forcing a fresh decision anyway. Default 40. */
   maxBusyWaits?: number;
+  /** Retries for a failed decision-engine call (timeouts, 5xx) before blocking. Default 2. */
+  decisionRetries?: number;
 }
 
 export type StepResult =
@@ -95,6 +97,7 @@ export class GameIntentEngine {
       doneConfidence: 0.55,
       maxFailures: 3,
       maxBusyWaits: 40,
+      decisionRetries: 2,
       ...options,
     };
     this.runId = options.runId ?? new Date().toISOString();
@@ -173,10 +176,17 @@ export class GameIntentEngine {
     }
 
     let decision;
-    try {
-      decision = await this.o.decisionEngine.decide({ state, questions });
-    } catch (err) {
-      return { kind: 'blocked', reason: `decision engine error: ${err instanceof Error ? err.message : err}`, snapshot: snap };
+    // Hosted engines occasionally time out; a stalled tick is cheap, a blocked sub-goal is not.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        decision = await this.o.decisionEngine.decide({ state, questions });
+        break;
+      } catch (err) {
+        if (attempt >= this.o.decisionRetries + 1) {
+          return { kind: 'blocked', reason: `decision engine error: ${err instanceof Error ? err.message : err}`, snapshot: snap };
+        }
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
     }
 
     const opAns = decision.answers.op as ChoiceAnswer | undefined;

@@ -26,6 +26,7 @@ import { KnowledgeBase } from './kb/KnowledgeBase.ts';
 import { ClaudeEscalator, ClaudePlanner, describeSubGoal } from './llm/claude.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
+import { SmithingPlanner } from './planner/SmithingPlanner.ts';
 import type { Planner } from './planner/types.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -128,7 +129,10 @@ async function run(): Promise<void> {
   const backend = new MicrobotBackend();
   let planner: Planner;
   let goal: string;
-  if (values.task) {
+  if (values.task === 'smith-progression') {
+    planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined });
+    goal = `smithing progression to level ${values['until-level'] ?? 18}`;
+  } else if (values.task) {
     planner = TaskTreePlanner.fromPreset(values.task, { bank: values.bank, untilLevel: values['until-level'] ? Number(values['until-level']) : undefined });
     goal = `${values.task}${values.bank ? ' (banking)' : ' (dropping)'}${values['until-level'] ? ` until level ${values['until-level']}` : ''}`;
   } else if (values.subgoal) {
@@ -240,7 +244,10 @@ function printEvent(e: AgentEvent): void {
 
 try {
   if (values.help || command === 'help') help();
-  else if (command === 'presets') console.log(Object.entries({ ...PRESETS, ...COMBAT_PRESETS }).map(([k, v]) => `${k.padEnd(14)} ${v.activity}`).join('\n'));
+  else if (command === 'presets') {
+    console.log(Object.entries({ ...PRESETS, ...COMBAT_PRESETS }).map(([k, v]) => `${k.padEnd(18)} ${v.activity}`).join('\n'));
+    console.log(`${'smith-progression'.padEnd(18)} mine, smelt and smith bronze gear around Lumbridge, equipping upgrades`);
+  }
   else if (command === 'inspect') await inspect();
   else if (command === 'run') await run();
   else {
