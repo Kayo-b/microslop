@@ -51,3 +51,13 @@ test('watchdog: an alternating loop blames the targeted action, not the dialogue
   assert.match(v!.reason, /Continue/);
   assert.deepEqual(v!.action, chop);
 });
+
+test('watchdog: clicks that start the skilling animation are not a loop; the idle window still applies', () => {
+  let t = 0;
+  const w = new ProgressWatchdog({ repeatLimit: 4, windowMs: 60_000, now: () => t });
+  const s = snapshot();
+  const fish = { ...acted(s, 'Fishing spot: Small Net'), outcome: { success: true, effect: 'changed: animation', changes: ['animation'], after: s } } as unknown as StepResult;
+  for (let i = 0; i < 10; i++) assert.equal(w.observe(fish), null);
+  t = 61_000;
+  assert.match(w.observe(fish)?.reason ?? '', /no progress/);
+});

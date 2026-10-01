@@ -92,3 +92,15 @@ test('quest planner: selects the quest in Quest Helper and plans toward its curr
   assert.deepEqual(calls, ["Cook's Assistant"]);
   assert.ok(step.kind === 'subgoal' && /Talk to the Cook in Lumbridge Castle/.test(seenGoal));
 });
+
+test('quest planner waits for Quest Helper to produce the first step after starting a quest', async () => {
+  let polls = 0;
+  const api = {
+    questHelperStatus: async () => (polls++ < 3 ? { selected: true, questName: 'Demon Slayer', completed: false } : { selected: true, questName: 'Demon Slayer', completed: false, stepText: 'Talk to the Gypsy in Varrock.' }),
+    questHelperStart: async () => {},
+  };
+  const llm: Planner = { name: 'llm', next: async () => ({ kind: 'subgoal', subgoal: { text: 'talk to the Gypsy', targets: ['Gypsy Aris'], actions: ['Talk-to'] } }) };
+  const q = new QuestPlanner('Demon Slayer', { ...api, questHelperStatus: async () => (polls === 0 ? (polls++, { selected: false }) : api.questHelperStatus()) }, llm, 1);
+  const step = await q.next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.equal(step.kind, 'subgoal');
+});

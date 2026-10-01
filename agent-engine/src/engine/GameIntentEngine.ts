@@ -315,6 +315,11 @@ export class GameIntentEngine {
     started: number,
     extra: Partial<StepRecord>,
   ): Promise<StepResult> {
+    // A web walk still in flight keeps clicking route tiles: it would walk away from the booth or
+    // NPC just clicked and close the bank or shop that click opened.
+    if (snap.walk?.active && action.op !== 'walk' && action.op !== 'walk_cancel') {
+      await this.o.backend.act({ op: 'walk_cancel' }).catch(() => undefined);
+    }
     const act = await this.o.backend.act(action);
     this.lastActTick = act.tick;
     this.attackTarget =

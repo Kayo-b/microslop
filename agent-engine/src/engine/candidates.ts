@@ -473,6 +473,10 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
   const me = s.player?.position;
   if (!me) return [];
   const out: Destination[] = [];
+  // Entities in view that the client says cannot be reached from here (e.g. bank booths seen
+  // through Al Kharid bank's back wall): walking onto their tile ends where the player stands.
+  const blocked = [...s.objects, ...s.npcs].filter((e) => !e.reachable).map((e) => e.position);
+  const isBlocked = (to: WorldPoint) => blocked.some((b) => b.x === to.x && b.y === to.y && b.plane === to.plane);
   const push = (label: string, to: WorldPoint) => {
     const distance = tileDistance(me, to);
     if (distance <= 2) return; // already there
@@ -491,7 +495,8 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     for (const p of kb.findPlaces(goal.destination.name, me, 2)) push(p.name, p.point);
   }
   for (const target of goal.targets ?? []) {
-    for (const p of kb.nearestObjects(target, me, { limit: 1 })) push(`Nearest ${p.name}`, p.point);
+    const reachable = kb.nearestObjects(target, me, { limit: 4 }).find((p) => !isBlocked(p.point));
+    if (reachable) push(`Nearest ${reachable.name}`, reachable.point);
     for (const p of kb.nearestSpawns(target, me, { limit: 1 })) push(`Nearest ${p.name}`, p.point);
   }
   const bank = kb.nearestBanks(me, 1)[0];

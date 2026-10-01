@@ -16,8 +16,10 @@ export class QuestPlanner implements Planner {
   private readonly quest: string;
   private readonly api: QuestHelperApi;
   private readonly llm: Planner;
+  private readonly pollMs: number;
 
-  constructor(quest: string, api: QuestHelperApi, llm: Planner) {
+  constructor(quest: string, api: QuestHelperApi, llm: Planner, pollMs = 600) {
+    this.pollMs = pollMs;
     this.quest = quest;
     this.api = api;
     this.llm = llm;
@@ -29,9 +31,16 @@ export class QuestPlanner implements Planner {
     if (!status.selected || status.questName !== this.quest) {
       await this.api.questHelperStart(this.quest);
       status = await this.api.questHelperStatus();
+      // Quest Helper sets the quest up on the client thread after start returns: for a moment the
+      // status still shows the previous quest, then the new one without a step.
+      const ready = () => status.questName === this.quest && (!!status.stepText?.length || !!status.completed);
+      for (let i = 0; i < 10 && !ready(); i++) {
+        await new Promise((r) => setTimeout(r, this.pollMs));
+        status = await this.api.questHelperStatus();
+      }
     }
     if (status.completed) return { kind: 'complete', reason: `${this.quest} completed` };
-    if (!status.stepText) return { kind: 'impossible', reason: `Quest Helper has no current step for ${this.quest}` };
+    if (!status.stepText?.length) return { kind: 'impossible', reason: `Quest Helper has no current step for ${this.quest}` };
     const goal = [
       `Complete the quest "${this.quest}".`,
       `Quest Helper's current step: ${status.stepText}`,

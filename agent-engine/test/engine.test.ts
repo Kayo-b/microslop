@@ -242,6 +242,18 @@ test('an exact sub-goal destination is the only destination offered', async () =
   assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Lumbridge Top bank']);
 });
 
+test('a nearest placement seen as unreachable is not offered; the bank stand point is', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const booth = { x: 3268, y: 3168, plane: 0 };
+  const kb = { findPlaces: () => [], nearestObjects: () => [{ name: 'Bank booth', kind: 'object', point: booth, members: false }], nearestSpawns: () => [], nearestBanks: () => [{ name: 'Al Kharid bank', kind: 'bank', point: { x: 3270, y: 3166, plane: 0 }, members: false }] } as never;
+  const s = snapshot({
+    player: { ...snapshot().player!, position: { x: 3264, y: 3172, plane: 0 } },
+    objects: [{ id: 10355, name: 'Bank booth', type: 'GAME', actions: ['Bank', 'Collect'], position: booth, distance: 4, reachable: false, pathDistance: -1 }],
+  });
+  const dests = buildDestinations(s, kb, { text: 'go to the nearest bank and open it', targets: ['Bank booth'] }, 5);
+  assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Nearest bank: Al Kharid bank']);
+});
+
 test('action-less objects such as a fire become use-item-on targets', () => {
   const s = snapshot({
     inventory: { freeSlots: 26, items: [item(0, 317, 'Raw shrimps'), item(1, 590, 'Tinderbox')] },
@@ -355,4 +367,27 @@ test('conditions: picked-up ammo joining the quiver counts as carried', async ()
   const s = snapshot({ equipment: [{ slot: 'AMMO', id: 882, name: 'Bronze arrow', quantity: 97 }] });
   assert.ok(evaluate({ hasItem: { name: 'Bronze arrow', count: 93 } }, s));
   assert.ok(!evaluate({ hasItem: { name: 'Bronze arrow', count: 98 } }, s));
+});
+
+test('engine: an active web walk is cancelled before clicking something else', async () => {
+  const initial = snapshot({ inventory: { freeSlots: 3, items: [item(0, 303, 'Small fishing net')] } });
+  initial.walk = { active: true } as never;
+  const game = new FakeGame({ initial, actionTicks: 5 });
+  const server = await startFakeServer(game, 'tok');
+  const engine = new GameIntentEngine({
+    backend: new MicrobotBackend({ port: server.port, token: 'tok' }),
+    decisionEngine: new ScriptedDecisionEngine(),
+    logger: new MemoryStepLogger(),
+    verify: noSleep,
+    maxBusyWaits: 0,
+  });
+  try {
+    const r = await engine.step({ text: 'catch shrimp with the small net at the fishing spot', targets: ['Fishing spot'], actions: ['Small Net'], noTravel: true, isDone: () => false });
+    assert.equal(r.kind, 'acted', JSON.stringify(r).slice(0, 200));
+    const ops = game.acts.map((a) => a.op);
+    assert.equal(ops[0], 'walk_cancel');
+    assert.equal(ops[1], 'interact');
+  } finally {
+    await server.close();
+  }
 });

@@ -26,6 +26,8 @@ export interface DoneCondition {
   near?: { x: number; y: number; plane: number; radius?: number };
   skillLevel?: { skill: string; level: number };
   dialogueOpen?: boolean;
+  /** The player is (not) in combat. */
+  inCombat?: boolean;
   /** An object with this name is within `radius` tiles (a lit fire, an open door...). */
   objectNear?: { name: string; radius?: number };
   /** Any of our drops lies within `radius`: named items, coins, or anything worth >= minValue gp. */
@@ -61,6 +63,7 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
     clauses.push(cond.equipped.every((n) => worn.some((w) => w.includes(n.toLowerCase()))));
   }
   if (cond.dialogueOpen !== undefined) clauses.push(s.dialogue.inDialogue === cond.dialogueOpen);
+  if (cond.inCombat !== undefined) clauses.push(!!s.player?.inCombat === cond.inCombat);
   if (cond.objectNear) {
     const n = cond.objectNear.name.toLowerCase();
     const r = cond.objectNear.radius ?? 3;
@@ -110,6 +113,7 @@ export function describe(cond: DoneCondition | undefined): string {
   if (cond.hpAtLeast !== undefined) parts.push(`HP >= ${Math.round(cond.hpAtLeast * 100)}%`);
   if (cond.equipped?.length) parts.push(`wearing ${cond.equipped.join(', ')}`);
   if (cond.dialogueOpen !== undefined) parts.push(cond.dialogueOpen ? 'dialogue open' : 'dialogue closed');
+  if (cond.inCombat !== undefined) parts.push(cond.inCombat ? 'in combat' : 'out of combat');
   if (cond.near) parts.push(`within ${cond.near.radius ?? 3} of (${cond.near.x}, ${cond.near.y}, ${cond.near.plane})`);
   if (cond.skillLevel) parts.push(`${cond.skillLevel.skill} >= ${cond.skillLevel.level}`);
   if (cond.groundItemNear) parts.push(`${cond.groundItemNear.name} on the ground nearby`);

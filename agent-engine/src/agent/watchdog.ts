@@ -6,7 +6,7 @@
  * Progress = any XP gained, the inventory contents changing, the player moving more than
  * `moveTiles` from where progress was last seen, or a sub-goal completing. The watchdog trips when
  * there has been no progress for `windowMs`, or when the same action repeats `repeatLimit` times
- * since the last progress.
+ * since the last progress (clicks that start an animation do not count as repeats).
  */
 import type { StepResult } from '../engine/GameIntentEngine.ts';
 import type { GameAction, Snapshot, WorldPoint } from '../types.ts';
@@ -97,7 +97,10 @@ export class ProgressWatchdog {
       return null;
     }
 
-    if (result.kind === 'acted') {
+    // A click that starts the skilling animation took effect; a slow catch (shrimp at Fishing 5
+    // can take 20 s) re-clicks the same spot many times. The idle window still bounds it.
+    const started = result.kind === 'acted' && result.outcome.success && result.outcome.changes?.includes('animation');
+    if (result.kind === 'acted' && !started) {
       const key = result.label ?? result.action.op;
       const n = (this.repeats.get(key)?.n ?? 0) + 1;
       this.repeats.set(key, { n, action: result.action });

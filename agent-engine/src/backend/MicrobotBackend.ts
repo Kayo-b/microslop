@@ -59,8 +59,18 @@ export class MicrobotBackend implements GameBackend {
 
   async snapshot(): Promise<Snapshot> {
     const qs = new URLSearchParams(Object.fromEntries(Object.entries(this.snapshotParams).map(([k, v]) => [k, String(v)])));
-    const raw = await this.request('GET', `/snapshot${qs.size ? `?${qs}` : ''}`);
-    return normalizeSnapshot(raw as Partial<Snapshot>);
+    const route = `/snapshot${qs.size ? `?${qs}` : ''}`;
+    // A 503 means one client-thread read timed out (the client hitches under load); reads are
+    // side-effect free, so retry a couple of times before failing the run.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return normalizeSnapshot((await this.request('GET', route)) as Partial<Snapshot>);
+      } catch (e) {
+        const transient = e instanceof MicrobotApiError && (e.status === 503 || e.status === undefined);
+        if (!transient || attempt >= 3) throw e;
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
+    }
   }
 
   async act(action: GameAction): Promise<ActResponse> {

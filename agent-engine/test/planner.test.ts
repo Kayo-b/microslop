@@ -52,6 +52,31 @@ test('task tree: gather -> bank -> deposit -> close -> gather', () => {
   assert.equal(nextGatherStep({ ...task, untilLevel: 20 }, leveled).kind, 'complete');
 });
 
+test('task tree: a gather task without its tool fetches it from the bank, or is impossible', () => {
+  const task = { ...PRESETS['chop-trees']!, bank: true };
+  const noAxe = () => snapshot({ inventory: { freeSlots: 27, items: [item(0, 1265, 'Bronze pickaxe')] } });
+  const toBank = nextGatherStep(task, noAxe());
+  assert.ok(toBank.kind === 'subgoal' && toBank.subgoal.doneWhen?.bankOpen === true && /axe/.test(toBank.subgoal.text));
+
+  const atBank = noAxe();
+  atBank.bank = { open: true, items: [{ id: 1351, name: 'Bronze axe', quantity: 1 } as never] };
+  const withdraw = nextGatherStep(task, atBank);
+  assert.ok(withdraw.kind === 'subgoal' && withdraw.subgoal.actions?.includes('Withdraw') && withdraw.subgoal.doneWhen?.hasItem?.name === 'Bronze axe');
+
+  atBank.bank = { open: true, items: [] };
+  assert.equal(nextGatherStep(task, atBank).kind, 'impossible');
+  assert.equal(nextGatherStep(task, noAxe(), ['Logs']).kind, 'impossible');
+
+  const oaks = { ...PRESETS['chop-oaks']!, bank: true };
+  const low = snapshot({ skills: [{ name: 'Woodcutting', level: 8, xp: 0, boostedLevel: 8 } as never] });
+  const tooLow = nextGatherStep(oaks, low);
+  assert.ok(tooLow.kind === 'impossible' && /Woodcutting 15/.test(tooLow.reason));
+
+  const wielded = noAxe();
+  wielded.equipment = [{ slot: 'weapon', id: 1351, name: 'Bronze axe' } as never];
+  assert.ok(nextGatherStep(task, wielded).kind === 'subgoal' && /chop/.test((nextGatherStep(task, wielded) as { subgoal: { text: string } }).subgoal.text));
+});
+
 test('task tree planner gives up after three identical blocked sub-goals', async () => {
   const planner = TaskTreePlanner.fromPreset('chop-trees');
   const r = { subgoal: 'x', result: 'blocked' as const, reason: 'stuck', steps: 3, trail: [] };
@@ -286,4 +311,13 @@ test('combat gear check: wield carried upgrades, fetch banked ones, check the ba
   s.bank = { open: false, items: [] } as never;
   const fight = nextCombatStep(task, s, { kb, bankItems: ['Rune scimitar', 'Shrimps'] });
   assert.ok(fight.kind === 'subgoal' && /attack|walk to the Barbarian/.test(fight.subgoal.text), JSON.stringify(fight));
+});
+
+test('combat: out of runes mid-fight waits for the fight to end instead of re-planning attacks', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const s = snapshot();
+  s.player = { ...s.player!, inCombat: true, autocast: 'WIND_STRIKE' } as never;
+  s.equipment = [{ slot: 'WEAPON', id: 1379, name: 'Staff' } as never];
+  const step = nextCombatStep(COMBAT_PRESETS['mage-chickens']!, s, { bankCounts: new Map(), bankItems: [], bankFood: new Map() });
+  assert.ok(step.kind === 'wait' && step.until.inCombat === false);
 });

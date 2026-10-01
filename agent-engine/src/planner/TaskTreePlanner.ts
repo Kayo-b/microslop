@@ -7,7 +7,7 @@
  */
 import type { Snapshot, WorldPoint } from '../types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
-import { FOOD_HEAL, foodSupply } from '../kb/resources.ts';
+import { FOOD_HEAL, foodSupply, RESOURCES } from '../kb/resources.ts';
 import { compile, type DoneCondition } from './conditions.ts';
 import { type CombatStyle, upgradesFrom, weakSlots } from './gear.ts';
 import { nextKitStep, outOfSupplies, planKit } from './kit.ts';
@@ -38,7 +38,8 @@ export interface GatherTask {
 export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = {
   'fish-shrimp': { activity: 'catch shrimp with a small fishing net', targets: ['Fishing spot'], action: 'Small Net', altActions: ['Net'], product: 'Raw', skill: 'Fishing', keep: ['Small fishing net'], area: { name: 'Draynor Village fishing spots', point: { x: 3087, y: 3228, plane: 0 } } },
   'fish-trout': { activity: 'fly fish for trout and salmon', targets: ['Rod Fishing spot'], action: 'Lure', product: 'Raw', skill: 'Fishing', keep: ['Fly fishing rod', 'Feather'], area: { name: 'Barbarian Village fishing spots', point: { x: 3104, y: 3430, plane: 0 } } },
-  'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'] },
+  // A fixed spot: the nearest trees are often next to aggressive NPCs (Draynor's jail guards).
+  'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'], area: { name: 'trees by Varrock West bank', point: { x: 3170, y: 3450, plane: 0 } } },
   'chop-oaks': { activity: 'chop oak trees for oak logs', targets: ['Oak tree'], action: 'Chop down', product: 'Oak logs', skill: 'Woodcutting', keep: ['axe'] },
   'chop-willows': { activity: 'chop willow trees for willow logs', targets: ['Willow tree'], action: 'Chop down', product: 'Willow logs', skill: 'Woodcutting', keep: ['axe'] },
   'mine-copper': { activity: 'mine copper ore', targets: ['Copper rocks'], action: 'Mine', product: 'Copper ore', skill: 'Mining', keep: ['pickaxe'] },
@@ -208,6 +209,10 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
   if (!s.player?.inCombat) {
     const kit = kitStep();
     if (kit) return kit;
+  } else if (outOfSupplies(style, s)) {
+    // Mid-fight with no ammo/runes: an attack sub-goal would be done before it starts (see
+    // nextCombatStep), and re-planning it spins. Let the fight end, then restock.
+    return { kind: 'wait', reason: `out of ${style} supplies; waiting for the fight to end`, until: { inCombat: false }, maxSeconds: 30 };
   }
 
   // Never fight with a tool in hand: wield the best carried weapon/armour first.
@@ -255,14 +260,34 @@ function goal(text: string, targets: string[], actions: string[], doneWhen: Done
   return { text, targets, actions, doneWhen, isDone: compile(doneWhen), maxSteps, keep };
 }
 
-export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
+/** Whether an item name is the tool a keep entry names: "axe" matches "Bronze axe", not "Bronze pickaxe". */
+export function isTool(name: string, tool: string): boolean {
+  const n = name.toLowerCase();
+  const t = tool.toLowerCase();
+  return n === t || n.endsWith(` ${t}`);
+}
+
+/**
+ * @param bankItems item names last seen in the bank; null until the bank has been opened. With it,
+ * a missing tool (the first `keep` entry) is fetched from the bank, or the task is impossible.
+ */
+export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[] | null = null): PlanStep {
   if (task.untilLevel) {
     const sk = s.skills.find((k) => k.name.toLowerCase() === task.skill.toLowerCase());
     if (sk && sk.level >= task.untilLevel) return { kind: 'complete', reason: `${task.skill} reached ${sk.level}` };
   }
+  // Too low a level for every target (oaks at Woodcutting 8): each click would only fail.
+  const rules = RESOURCES.filter((r) => task.targets.includes(r.target) && r.skill.toLowerCase() === task.skill.toLowerCase());
+  const level = s.skills.find((k) => k.name.toLowerCase() === task.skill.toLowerCase())?.level;
+  if (rules.length && level !== undefined && rules.every((r) => level < r.level)) {
+    return { kind: 'impossible', reason: `${task.skill} ${Math.min(...rules.map((r) => r.level))} needed (have ${level})` };
+  }
   const product = task.product.toLowerCase();
   const hasProduct = s.inventory.items.some((i) => i.name.toLowerCase().includes(product));
   const full = s.inventory.freeSlots === 0;
+
+  const tool = task.keep[0];
+  const hasTool = !tool || [...s.inventory.items, ...s.equipment].some((i) => isTool(i.name, tool));
 
   if (s.bank.open) {
     if (hasProduct) {
@@ -271,7 +296,21 @@ export function nextGatherStep(task: GatherTask, s: Snapshot): PlanStep {
         subgoal: goal(`deposit all ${task.product} items into the bank, keeping the ${task.keep.join(' and ')}`, [task.product], ['Deposit'], { lacksItem: task.product }, 10, task.keep),
       };
     }
+    if (!hasTool) {
+      const banked = s.bank.items.find((b) => isTool(b.name, tool));
+      if (!banked) return { kind: 'impossible', reason: `no ${tool} carried, worn or banked` };
+      const want = [{ name: banked.name, count: 1 }];
+      return { kind: 'subgoal', subgoal: { ...goal(`withdraw 1 ${banked.name}`, [banked.name], ['Withdraw'], { hasItem: want[0] }, 20, [...task.keep, banked.name]), want } };
+    }
     return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, task.keep) };
+  }
+
+  if (!hasTool) {
+    if (bankItems && !bankItems.some((b) => isTool(b, tool))) return { kind: 'impossible', reason: `no ${tool} carried, worn or banked` };
+    return {
+      kind: 'subgoal',
+      subgoal: { ...goal(`go to the nearest bank and open it to fetch the ${tool}`, BANK_TARGETS, ['Bank'], { bankOpen: true }, 300, task.keep), avoid: NOT_BANKS },
+    };
   }
 
   if (full && hasProduct) {
@@ -343,7 +382,7 @@ export class TaskTreePlanner implements Planner {
     }
     return this.task.kind === 'combat'
       ? nextCombatStep(this.task, ctx.snapshot, { kb: ctx.kb, bankFood: this.bankFood, bankItems: this.bankItems, bankCounts: this.bankCounts })
-      : nextGatherStep(this.task, ctx.snapshot);
+      : nextGatherStep(this.task, ctx.snapshot, this.bankItems);
   }
 }
 
