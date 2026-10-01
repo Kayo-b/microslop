@@ -189,6 +189,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
       (c) => inventoryActionAllowed(c.action, goal) && (c.action !== 'Drop' || (!!goal.targets?.length && matchesAny(c.name, goal.targets))),
     ),
   );
+  out.push(...namedItemPairs(s, goal));
   out.push(...equipmentCandidates(s, goal));
 
   const destinations = goal.noTravel ? [] : kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
@@ -270,6 +271,32 @@ function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
         action: `Use ${tool.name}`,
         label: `Use ${tool.name} on ${other.name}`,
         gameAction: { op: 'use_item_on', itemSlot: tool.slot, target: { kind: 'inventory', slot: other.slot, id: other.id } },
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * "Use A on B" for two carried items the sub-goal names together (Poison on Fish food, Bucket of
+ * water on Pot of flour); the tool pairs above only cover tinderbox, knife, chisel and the like.
+ */
+function namedItemPairs(s: Snapshot, goal: SubGoal): Candidate[] {
+  const targets = goal.targets ?? [];
+  if (targets.length < 2) return [];
+  const named = s.inventory.items.filter((i) => targets.some((t) => lc(t) === lc(i.name)));
+  const firsts = [...new Map(named.map((i) => [i.name, i])).values()];
+  const out: Candidate[] = [];
+  for (const a of firsts) {
+    for (const b of firsts) {
+      if (a.name === b.name || TOOLS.some((t) => lc(a.name).includes(t))) continue;
+      out.push({
+        id: `use:${a.slot}>inv:${b.slot}`,
+        kind: 'inventory',
+        name: b.name,
+        action: `Use ${a.name}`,
+        label: `Use ${a.name} on ${b.name}`,
+        gameAction: { op: 'use_item_on', itemSlot: a.slot, target: { kind: 'inventory', slot: b.slot, id: b.id } },
       });
     }
   }

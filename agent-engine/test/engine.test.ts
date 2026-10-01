@@ -474,3 +474,11 @@ test('the nearest-bank destination is only offered to banking sub-goals', async 
   const banking = buildDestinations(snapshot(), kb, { text: 'go to the nearest bank and open it', targets: ['Bank booth'] }, 5);
   assert.deepEqual(banking.map((d) => d.label.split(' (')[0]), ['Nearest bank: Falador deposit box']);
 });
+
+test('two carried items the sub-goal names can be used on each other', () => {
+  const s = snapshot({ inventory: { freeSlots: 26, items: [item(0, 273, 'Poison'), item(1, 272, 'Fish food')] } });
+  const c = buildCandidates(s, null, { text: 'use the Poison on the Fish food', targets: ['Poison', 'Fish food'], actions: ['Use'], noTravel: true }).candidates;
+  const use = c.find((x) => x.label === 'Use Poison on Fish food');
+  assert.ok(use, JSON.stringify(c.map((x) => x.label)));
+  assert.deepEqual(use!.gameAction, { op: 'use_item_on', itemSlot: 0, target: { kind: 'inventory', slot: 1, id: 272 } });
+});
