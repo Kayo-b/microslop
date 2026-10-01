@@ -4,6 +4,10 @@ import com.google.gson.Gson;
 import com.sun.net.httpserver.HttpExchange;
 import net.runelite.api.Actor;
 import net.runelite.api.Client;
+import net.runelite.api.CollisionData;
+import net.runelite.api.CollisionDataFlag;
+import net.runelite.api.WorldView;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
@@ -19,6 +23,7 @@ import net.runelite.client.plugins.microbot.agentserver.GameMessageLog;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
 import net.runelite.client.plugins.microbot.api.tileobject.models.Rs2TileObjectModel;
+import net.runelite.client.plugins.microbot.api.tileobject.models.TileObjectType;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
@@ -285,7 +290,13 @@ public class SnapshotHandler extends AgentHandler {
 		m.put("actions", actions);
 		m.put("position", point(loc));
 		m.put("distance", loc.distanceTo(me));
-		putReach(m, reach, loc, comp.getSizeX(), comp.getSizeY());
+		// A GAME object (spinning wheel, booth, rock) is used from a tile beside it with no wall in
+		// between; doors and other WALL objects sit on the wall and work from either side.
+		if (model.getTileObjectType() == TileObjectType.GAME) {
+			putReachThroughWalls(m, reach, loc, comp.getSizeX(), comp.getSizeY());
+		} else {
+			putReach(m, reach, loc, comp.getSizeX(), comp.getSizeY());
+		}
 		return m;
 	}
 
@@ -325,6 +336,54 @@ public class SnapshotHandler extends AgentHandler {
 		}
 		m.put("reachable", best != Integer.MAX_VALUE);
 		m.put("pathDistance", best == Integer.MAX_VALUE ? -1 : best);
+	}
+
+	/**
+	 * Like {@link #putReach}, but only counts the tiles straight beside the footprint (not its
+	 * corners) whose edge toward the object has no wall: next to a spinning wheel on the far side of
+	 * a room's wall is not "reachable", and clicking it there fails with "I can't reach that!".
+	 */
+	private void putReachThroughWalls(Map<String, Object> m, Map<WorldPoint, Integer> reach, WorldPoint loc, int sizeX, int sizeY) {
+		int best = Integer.MAX_VALUE;
+		int halfX = Math.max(1, sizeX) / 2;
+		int halfY = Math.max(1, sizeY) / 2;
+		int[][] flags = collisionFlags(loc.getPlane());
+		for (int dx = -halfX - 1; dx <= halfX + 1; dx++) {
+			for (int dy = -halfY - 1; dy <= halfY + 1; dy++) {
+				boolean westOrEast = dx == -halfX - 1 || dx == halfX + 1;
+				boolean southOrNorth = dy == -halfY - 1 || dy == halfY + 1;
+				if (westOrEast && southOrNorth) continue;
+				WorldPoint tile = new WorldPoint(loc.getX() + dx, loc.getY() + dy, loc.getPlane());
+				Integer d = reach.get(tile);
+				if (d == null || d >= best) continue;
+				if (westOrEast || southOrNorth) {
+					int toward = dx == -halfX - 1 ? CollisionDataFlag.BLOCK_MOVEMENT_EAST
+						: dx == halfX + 1 ? CollisionDataFlag.BLOCK_MOVEMENT_WEST
+						: dy == -halfY - 1 ? CollisionDataFlag.BLOCK_MOVEMENT_NORTH
+						: CollisionDataFlag.BLOCK_MOVEMENT_SOUTH;
+					if (wallFlag(flags, tile, toward)) continue;
+				}
+				best = d;
+			}
+		}
+		m.put("reachable", best != Integer.MAX_VALUE);
+		m.put("pathDistance", best == Integer.MAX_VALUE ? -1 : best);
+	}
+
+	private int[][] collisionFlags(int plane) {
+		WorldView wv = client.getTopLevelWorldView();
+		CollisionData[] maps = wv == null ? null : wv.getCollisionMaps();
+		return maps == null || plane < 0 || plane >= maps.length ? null : maps[plane].getFlags();
+	}
+
+	private boolean wallFlag(int[][] flags, WorldPoint tile, int flag) {
+		if (flags == null) return false;
+		LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), tile);
+		if (lp == null) return false;
+		int sx = lp.getSceneX();
+		int sy = lp.getSceneY();
+		if (sx < 0 || sy < 0 || sx >= flags.length || sy >= flags[sx].length) return false;
+		return (flags[sx][sy] & flag) != 0;
 	}
 
 	private Map<String, Object> readInventory() {

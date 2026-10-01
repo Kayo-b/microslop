@@ -346,3 +346,21 @@ if (CantReachTargetRecovery.shouldStart(detectionEnabled, cantReachTarget)) {
 **Where this applies:** `Rs2GameObject.clickObject`, `Rs2Npc.interact`, `Rs2NpcModel.interact`, legacy walker door dispatch, and any future interaction helper that starts `Rs2Walker.walkTo` in response to the global can't-reach flag.
 
 **Defensive check:** During a recovery route through a closed door, assert that the door click occurs once, the original object or NPC target is passed unchanged to the walker, nested recovery is suppressed, and retry exhaustion still returns failure.
+
+## 17. A reachable neighbour tile does not make an object usable through a wall
+
+A GAME object (spinning wheel, bank booth, rock) is used from a tile straight beside its footprint
+whose edge toward the object has no wall. A path to *some* tile bordering the object is not
+enough: that tile can be on the far side of a room's wall, or diagonal to the object.
+
+**Why this matters:** `/snapshot` marked the Lumbridge castle spinning wheel `reachable` from
+outside its room; the agent clicked Spin six times ("I can't reach that!") instead of opening the
+door, and Sheep Shearer stalled for ten minutes.
+
+**Pattern to follow:** for GAME objects, accept only cardinal neighbours of the footprint and check
+the neighbour's `CollisionDataFlag.BLOCK_MOVEMENT_<toward object>` bit
+(`SnapshotHandler.putReachThroughWalls`). WALL objects (doors, gates) sit on the wall and are used
+from either side, so they keep the plain neighbour rule.
+
+**Where this applies:** `agentserver/handler/SnapshotHandler`, any reachability pre-check before
+`Rs2GameObject` interactions.
