@@ -55,7 +55,12 @@ export class QuestPlanner implements Planner {
     // Quest places ("Lumbridge General Store") are often missing from the map database; the step's
     // own location is exact.
     const dest = step.kind === 'subgoal' ? step.subgoal.destination : undefined;
-    if (at && dest && !dest.point && (dest.name === STEP_PLACE || !ctx.kb || ctx.kb.findPlaces(dest.name ?? '', undefined, 1).length === 0)) {
+    // ...unless the player already stands there: then the step is done here and the LLM's place is
+    // somewhere else (Cadava bushes after talking to the Apothecary), so leave the targets to it.
+    const me = ctx.snapshot.player?.position;
+    const here = !!me && me.plane === at?.plane && Math.max(Math.abs(me.x - at.x), Math.abs(me.y - at.y)) < 5;
+    const unresolved = !ctx.kb || ctx.kb.findPlaces(dest?.name ?? '', undefined, 1).length === 0;
+    if (at && dest && !dest.point && (dest.name === STEP_PLACE || (unresolved && !here))) {
       dest.point = at;
     }
     return step;

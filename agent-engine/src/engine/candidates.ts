@@ -489,7 +489,9 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     // An exact destination from the planner is authoritative: offering "nearest X" alternatives
     // let the classifier walk to a spurious placement instead of the bank it was sent to.
     push(goal.destination.name ?? 'Sub-goal destination', goal.destination.point);
-    return out;
+    // Already standing there (a quest step's location is often where the last step happened):
+    // fall through to the nearest targets rather than offering nothing.
+    if (out.length) return out;
   }
   if (goal.destination?.name && !goal.destination.point) {
     for (const p of kb.findPlaces(goal.destination.name, me, 2)) push(p.name, p.point);

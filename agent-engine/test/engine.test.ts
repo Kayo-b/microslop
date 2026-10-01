@@ -430,3 +430,11 @@ test('engine: toggling run or eating does not cancel an active walk', async () =
     await server.close();
   }
 });
+
+test('a sub-goal destination already reached falls back to the nearest targets', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const me = snapshot().player!.position;
+  const kb = { findPlaces: () => [], nearestObjects: () => [{ name: 'Cadava bush', kind: 'object', point: { x: me.x + 60, y: me.y, plane: me.plane }, members: false }], nearestSpawns: () => [], nearestBanks: () => [] } as never;
+  const dests = buildDestinations(snapshot(), kb, { text: 'pick cadava berries', targets: ['Cadava bush'], destination: { name: 'quest step location', point: { ...me } } }, 5);
+  assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Nearest Cadava bush']);
+});
