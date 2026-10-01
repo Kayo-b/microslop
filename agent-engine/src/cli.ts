@@ -272,6 +272,10 @@ async function run(): Promise<void> {
     throw new Error('run needs --task PRESET, --subgoal TEXT or --goal TEXT');
   }
 
+  // A quest selected by an earlier run (or by hand) keeps Quest Helper's QuestScript walking
+  // and clicking next to the agent; quest phases re-select theirs with autoplay off.
+  await backend.questHelperStop().catch(() => undefined);
+
   if (values.rescue) {
     if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();

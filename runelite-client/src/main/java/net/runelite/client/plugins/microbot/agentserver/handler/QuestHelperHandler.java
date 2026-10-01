@@ -143,14 +143,22 @@ public class QuestHelperHandler extends AgentHandler
 			return;
 		}
 
+		// autoplay=false: Quest Helper only tracks steps and the caller performs them; its QuestScript
+		// would otherwise walk and click alongside the caller.
+		boolean autoplay = !Boolean.FALSE.equals(body.get("autoplay"));
 		Microbot.getConfigManager().setRSProfileConfiguration(
 			QuestHelperConfig.QUEST_HELPER_GROUP,
 			"TurnOn",
-			true);
+			autoplay);
+		if (!autoplay)
+		{
+			Microbot.getConfigManager().setConfiguration(QuestHelperConfig.QUEST_HELPER_GROUP, "TurnOn", false);
+		}
 
 		Map<String, Object> result = new LinkedHashMap<>();
 		result.put("success", true);
 		result.put("questName", name);
+		result.put("autoplay", autoplay);
 		sendJson(exchange, 200, result);
 	}
 

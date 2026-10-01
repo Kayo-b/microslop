@@ -99,8 +99,14 @@ export class MicrobotBackend implements GameBackend {
     return (await this.request('GET', '/quest-helper/status')) as { selected: boolean; questName?: string; completed?: boolean; stepText?: string };
   }
 
+  /** Selects the quest in Quest Helper for its step text only: its own QuestScript stays off. */
   async questHelperStart(name: string): Promise<void> {
-    await this.request('POST', '/quest-helper/start', { name });
+    await this.request('POST', '/quest-helper/start', { name, autoplay: false });
+  }
+
+  /** Deselects the quest, so no Quest Helper script walks or clicks alongside the agent. */
+  async questHelperStop(): Promise<void> {
+    await this.request('POST', '/quest-helper/stop', {});
   }
 
   private async request(method: 'GET' | 'POST', route: string, body?: unknown, retried = false): Promise<unknown> {
