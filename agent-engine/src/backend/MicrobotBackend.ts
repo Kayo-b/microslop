@@ -14,6 +14,8 @@ export interface GameBackend {
   act(action: GameAction): Promise<ActResponse>;
   /** Web-walker route length between two points; null when unreachable. Optional. */
   pathLength?(from: WorldPoint, to: WorldPoint): Promise<number | null>;
+  /** Logs in (or, when already logged in, dismisses the welcome screen). Optional. */
+  login?(): Promise<void>;
 }
 
 export interface MicrobotBackendOptions {
@@ -99,6 +101,10 @@ export class MicrobotBackend implements GameBackend {
     return (await this.request('GET', '/quest-helper/status')) as { selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint };
   }
 
+  async login(): Promise<void> {
+    await this.request('POST', '/login', { wait: true });
+  }
+
   /** Selects the quest in Quest Helper for its step text only: its own QuestScript stays off. */
   async questHelperStart(name: string): Promise<void> {
     await this.request('POST', '/quest-helper/start', { name, autoplay: false });
@@ -168,6 +174,7 @@ export function normalizeSnapshot(raw: Partial<Snapshot>): Snapshot {
     tick: raw.tick ?? 0,
     timestamp: raw.timestamp ?? Date.now(),
     loggedIn: raw.loggedIn ?? false,
+    welcomeScreen: raw.welcomeScreen ?? false,
     gameState: raw.gameState ?? 'UNKNOWN',
     player: raw.player ?? null,
     skills: raw.skills ?? [],

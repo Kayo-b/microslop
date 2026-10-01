@@ -7,6 +7,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.client.config.ConfigProfile;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.events.WelcomeScreenEvent;
 import net.runelite.client.plugins.microbot.util.security.LoginManager;
 
 import java.io.IOException;
@@ -105,8 +106,22 @@ public class LoginHandler extends AgentHandler {
 		return result;
 	}
 
+	/**
+	 * The "CLICK HERE TO PLAY" welcome screen follows some logins. Microbot's blocking-event loop
+	 * dismisses it only while a script runs; with just the agent server active it stays up and
+	 * every minimap or canvas click fails behind it.
+	 */
+	private static boolean dismissWelcomeScreen() {
+		WelcomeScreenEvent event = new WelcomeScreenEvent();
+		for (int attempt = 0; attempt < 3 && event.validate(); attempt++) {
+			event.execute();
+		}
+		return !event.validate();
+	}
+
 	private void handleLogin(HttpExchange exchange) throws IOException {
 		if (Microbot.isLoggedIn()) {
+			dismissWelcomeScreen();
 			Map<String, Object> result = new LinkedHashMap<>();
 			result.put("success", true);
 			result.put("message", "Already logged in");
@@ -245,6 +260,9 @@ public class LoginHandler extends AgentHandler {
 			}
 		}
 
+		if (!dismissWelcomeScreen()) {
+			log.warn("Logged in, but the welcome screen is still showing");
+		}
 		return LoginResult.ok("Login successful");
 	}
 

@@ -107,6 +107,11 @@ export class Agent {
           snapshot = await backend.snapshot();
         }
         if (!snapshot.loggedIn) return finish('halted', 'player is logged out');
+        if (snapshot.welcomeScreen && backend.login) {
+          // Nothing is clickable behind it; /login dismisses it.
+          await backend.login().catch(() => undefined);
+          snapshot = await backend.snapshot();
+        }
 
         const pathCost = backend.pathLength ? (a: WorldPoint, b: WorldPoint) => backend.pathLength!(a, b) : undefined;
         const plan = await planner.next({ goal, snapshot, kb: this.o.kb ?? null, reports, pathCost });

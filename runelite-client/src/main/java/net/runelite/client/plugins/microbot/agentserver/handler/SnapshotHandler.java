@@ -97,6 +97,8 @@ public class SnapshotHandler extends AgentHandler {
 		snapshot.put("tick", client.getTickCount());
 		snapshot.put("timestamp", System.currentTimeMillis());
 		snapshot.put("loggedIn", Microbot.isLoggedIn());
+		// Logged in but still on the "CLICK HERE TO PLAY" screen: nothing in the world is clickable.
+		snapshot.put("welcomeScreen", Rs2Widget.isWidgetVisible(InterfaceID.WelcomeScreen.PLAY));
 		snapshot.put("gameState", client.getGameState().name());
 
 		if (!Microbot.isLoggedIn()) {

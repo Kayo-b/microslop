@@ -155,6 +155,8 @@ export interface Snapshot {
   /** Wall-clock ms on the client when the snapshot was taken. */
   timestamp: number;
   loggedIn: boolean;
+  /** Logged in but still on the "CLICK HERE TO PLAY" welcome screen. */
+  welcomeScreen?: boolean;
   gameState: string;
   player: PlayerState | null;
   skills: SkillState[];
