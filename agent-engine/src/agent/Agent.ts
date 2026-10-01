@@ -198,6 +198,12 @@ export class Agent {
         if (blockedInARow >= (this.o.maxBlockedInARow ?? 4)) {
           return finish('impossible', `${blockedInARow} sub-goals in a row failed; last: ${report.reason}`);
         }
+        // The planner re-issuing a sub-goal that is complete the moment it starts (its done check
+        // and the planner's own test disagree) spins without acting; nothing will change that.
+        const recent = reports.slice(-20);
+        if (recent.length === 20 && recent.every((r) => r.subgoal === report.subgoal && r.result === 'done' && r.steps <= 1)) {
+          return finish('impossible', `planner keeps re-issuing "${report.subgoal}", which is already complete`);
+        }
       }
       return finish('stopped', 'stop requested');
     } catch (err) {

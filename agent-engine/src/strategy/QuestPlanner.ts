@@ -5,11 +5,14 @@
  * LLM planner turn that step into a sub-goal. Recurring steps are candidates for scripting.
  */
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
+import type { WorldPoint } from '../types.ts';
 
 export interface QuestHelperApi {
-  questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string }>;
+  questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint }>;
   questHelperStart(name: string): Promise<void>;
 }
+
+const STEP_PLACE = 'quest step location';
 
 export class QuestPlanner implements Planner {
   readonly name: string;
@@ -41,11 +44,20 @@ export class QuestPlanner implements Planner {
     }
     if (status.completed) return { kind: 'complete', reason: `${this.quest} completed` };
     if (!status.stepText?.length) return { kind: 'impossible', reason: `Quest Helper has no current step for ${this.quest}` };
+    const at = status.stepPoint;
     const goal = [
       `Complete the quest "${this.quest}".`,
       `Quest Helper's current step: ${status.stepText}`,
+      ...(at ? [`The step takes place at (${at.x}, ${at.y}, floor ${at.plane}). To travel there, set the destination name to exactly "${STEP_PLACE}".`] : []),
       'Plan the next sub-goal toward this step only (gather the listed items, travel, talk to the named NPC, pick the dialogue options it names).',
     ].join('\n');
-    return this.llm.next({ ...ctx, goal });
+    const step = await this.llm.next({ ...ctx, goal });
+    // Quest places ("Lumbridge General Store") are often missing from the map database; the step's
+    // own location is exact.
+    const dest = step.kind === 'subgoal' ? step.subgoal.destination : undefined;
+    if (at && dest && !dest.point && (dest.name === STEP_PLACE || !ctx.kb || ctx.kb.findPlaces(dest.name ?? '', undefined, 1).length === 0)) {
+      dest.point = at;
+    }
+    return step;
   }
 }

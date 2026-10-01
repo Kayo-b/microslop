@@ -15,7 +15,9 @@ import net.runelite.client.plugins.microbot.questhelper.QuestHelperConfig;
 import net.runelite.client.plugins.microbot.questhelper.QuestHelperPlugin;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestHelper;
 import net.runelite.client.plugins.microbot.questhelper.questinfo.QuestHelperQuest;
+import net.runelite.client.plugins.microbot.questhelper.steps.DetailedQuestStep;
 import net.runelite.client.plugins.microbot.questhelper.steps.QuestStep;
+import net.runelite.client.plugins.microbot.questhelper.steps.tools.DefinedPoint;
 
 public class QuestHelperHandler extends AgentHandler
 {
@@ -104,6 +106,17 @@ public class QuestHelperHandler extends AgentHandler
 				result.put("stepClass", activeStep != null
 					? activeStep.getClass().getSimpleName()
 					: currentStep.getClass().getSimpleName());
+				// Where the step happens (the NPC, object or tile Quest Helper marks), when it has one.
+				QuestStep shown = activeStep != null ? activeStep : currentStep;
+				if (shown instanceof DetailedQuestStep && ((DetailedQuestStep) shown).getDefinedPoint() != null)
+				{
+					DefinedPoint p = ((DetailedQuestStep) shown).getDefinedPoint();
+					Map<String, Object> point = new LinkedHashMap<>();
+					point.put("x", p.getX());
+					point.put("y", p.getY());
+					point.put("plane", p.getPlane());
+					result.put("stepPoint", point);
+				}
 			}
 		}
 

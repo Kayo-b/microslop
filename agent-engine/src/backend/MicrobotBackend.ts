@@ -95,8 +95,8 @@ export class MicrobotBackend implements GameBackend {
     return ((await this.request('GET', '/quest-helper/states')) as { quests: { displayName: string; state: string }[] }).quests;
   }
 
-  async questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string }> {
-    return (await this.request('GET', '/quest-helper/status')) as { selected: boolean; questName?: string; completed?: boolean; stepText?: string };
+  async questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint }> {
+    return (await this.request('GET', '/quest-helper/status')) as { selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint };
   }
 
   /** Selects the quest in Quest Helper for its step text only: its own QuestScript stays off. */

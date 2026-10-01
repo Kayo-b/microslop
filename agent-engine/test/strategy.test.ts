@@ -104,3 +104,17 @@ test('quest planner waits for Quest Helper to produce the first step after start
   const step = await q.next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
   assert.equal(step.kind, 'subgoal');
 });
+
+test('quest planner gives an unresolvable destination the Quest Helper step location', async () => {
+  const at = { x: 3212, y: 3246, plane: 0 };
+  const api = {
+    questHelperStatus: async () => ({ selected: true, questName: "Cook's Assistant", completed: false, stepText: ['Purchase a bucket from the Lumbridge General Store.'], stepPoint: at }),
+    questHelperStart: async () => {},
+  };
+  let prompt = '';
+  const llm: Planner = { name: 'llm', next: async (c) => ((prompt = c.goal), { kind: 'subgoal', subgoal: { text: 'buy a bucket', targets: ['Shop keeper'], actions: ['Trade'], destination: { name: 'Lumbridge General Store' } } }) };
+  const kb = { findPlaces: () => [] } as never;
+  const step = await new QuestPlanner("Cook's Assistant", api, llm, 1).next({ goal: 'g', snapshot: snapshot(), kb, reports: [] });
+  assert.ok(/3212, 3246/.test(prompt));
+  assert.ok(step.kind === 'subgoal' && step.subgoal.destination?.point?.x === 3212);
+});

@@ -197,10 +197,12 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
     const best = s.bank.items.filter((b) => FOOD_HEAL[b.name] !== undefined).sort((a, b) => FOOD_HEAL[b.name]! - FOOD_HEAL[a.name]!)[0];
     const batch = task.foodBatch ?? 10;
     if (best && food.count < batch) {
-      const count = Math.min(batch, food.count + best.quantity);
+      // Exact name: "Shrimps" must not count the Raw shrimps a fishing trip left in the bag.
+      const heldExact = s.inventory.items.filter((i) => i.name === best.name).reduce((sum, i) => sum + i.quantity, 0);
+      const count = heldExact + Math.min(best.quantity, batch - food.count);
       return {
         kind: 'subgoal',
-        subgoal: { ...goal(`withdraw ${count} ${best.name} to eat during combat`, [best.name], ['Withdraw'], { hasItem: { name: best.name, count } }, 20, keep), want: [{ name: best.name, count }] },
+        subgoal: { ...goal(`withdraw ${count} ${best.name} to eat during combat`, [best.name], ['Withdraw'], { hasItem: { name: best.name, count, exact: true } }, 20, keep), want: [{ name: best.name, count }] },
       };
     }
     return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };

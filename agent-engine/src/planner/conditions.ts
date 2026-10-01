@@ -9,7 +9,7 @@ import type { Snapshot } from '../types.ts';
 export interface DoneCondition {
   inventoryFull?: boolean;
   /** Inventory holds at least `count` of an item (case-insensitive substring match). */
-  hasItem?: { name: string; count?: number };
+  hasItem?: { name: string; count?: number; exact?: boolean };
   /** Every listed item is held in at least the given count. */
   hasItems?: { name: string; count?: number }[];
   /** Inventory holds none of this item. */
@@ -48,7 +48,12 @@ const count = (s: Snapshot, name: string) => {
 export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
   const clauses: boolean[] = [];
   if (cond.inventoryFull !== undefined) clauses.push((s.inventory.freeSlots === 0) === cond.inventoryFull);
-  if (cond.hasItem) clauses.push(count(s, cond.hasItem.name) >= (cond.hasItem.count ?? 1));
+  if (cond.hasItem) {
+    const held = cond.hasItem.exact
+      ? s.inventory.items.filter((i) => i.name.toLowerCase() === cond.hasItem!.name.toLowerCase()).reduce((sum, i) => sum + i.quantity, 0)
+      : count(s, cond.hasItem.name);
+    clauses.push(held >= (cond.hasItem.count ?? 1));
+  }
   if (cond.hasItems?.length) clauses.push(cond.hasItems.every((h) => count(s, h.name) >= (h.count ?? 1)));
   if (cond.lacksItem) clauses.push(count(s, cond.lacksItem) === 0);
   if (cond.lacksItems?.length) clauses.push(cond.lacksItems.every((n) => count(s, n) === 0));

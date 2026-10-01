@@ -321,3 +321,30 @@ test('combat: out of runes mid-fight waits for the fight to end instead of re-pl
   const step = nextCombatStep(COMBAT_PRESETS['mage-chickens']!, s, { bankCounts: new Map(), bankItems: [], bankFood: new Map() });
   assert.ok(step.kind === 'wait' && step.until.inCombat === false);
 });
+
+test('combat: restocking food ignores raw fish of the same name', async () => {
+  const { nextCombatStep, COMBAT_PRESETS } = await import('../src/planner/TaskTreePlanner.ts');
+  const s = snapshot({
+    inventory: { freeSlots: 10, items: [item(0, 317, 'Raw shrimps', { quantity: 1 }), ...Array.from({ length: 12 }, (_, i) => item(i + 1, 317, 'Raw shrimps'))] },
+    bank: { open: true, items: [{ id: 315, name: 'Shrimps', quantity: 40 } as never] },
+  });
+  const step = nextCombatStep({ ...COMBAT_PRESETS['kill-chickens']!, minFood: 5 }, s, { bankCounts: new Map([['Shrimps', 40]]), bankItems: ['Shrimps'], bankFood: new Map([['Shrimps', 40]]) });
+  assert.ok(step.kind === 'subgoal' && /withdraw 10 Shrimps/.test(step.subgoal.text), JSON.stringify(step).slice(0, 200));
+  assert.equal(step.subgoal.isDone!(s), false);
+});
+
+test('agent: a sub-goal that is already complete every time it is issued ends the run', async () => {
+  const game = new FakeGame({ initial: snapshot(), actionTicks: 3 });
+  const server = await startFakeServer(game, 'tok');
+  const backend = new MicrobotBackend({ port: server.port, token: 'tok' });
+  const engine = new GameIntentEngine({ backend, decisionEngine: new ScriptedDecisionEngine(), verify: { sleep: async () => {}, pollMs: 0 } });
+  const planner = { name: 'spin', next: async () => ({ kind: 'subgoal' as const, subgoal: { text: 'withdraw 10 Shrimps', targets: ['Shrimps'], isDone: () => true } }) };
+  const agent = new Agent({ backend, engine, planner, maxSubGoals: 100, sleep: async () => {} });
+  try {
+    const outcome = await agent.run('spin');
+    assert.equal(outcome.status, 'impossible');
+    assert.match(outcome.reason, /already complete/);
+  } finally {
+    await server.close();
+  }
+});
