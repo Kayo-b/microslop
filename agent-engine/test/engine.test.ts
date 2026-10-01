@@ -408,3 +408,25 @@ test('engine: an /act that times out is a failed step, not a crash', async () =>
   assert.equal(r.kind, 'acted');
   assert.ok(r.kind === 'acted' && /did not answer/.test(r.outcome.effect));
 });
+
+test('engine: toggling run or eating does not cancel an active walk', async () => {
+  const initial = snapshot({ inventory: { freeSlots: 27, items: [item(0, 315, 'Shrimps', { actions: ['Eat', 'Drop'] })] } });
+  initial.walk = { active: true } as never;
+  initial.player = { ...initial.player!, runEnergy: 80, runEnabled: false } as never;
+  const game = new FakeGame({ initial, actionTicks: 5 });
+  const server = await startFakeServer(game, 'tok');
+  const engine = new GameIntentEngine({
+    backend: new MicrobotBackend({ port: server.port, token: 'tok' }),
+    decisionEngine: new ScriptedDecisionEngine(),
+    logger: new MemoryStepLogger(),
+    verify: noSleep,
+    maxBusyWaits: 0,
+  });
+  try {
+    await engine.step({ text: 'walk to the bank', targets: [], isDone: () => false });
+    assert.ok(game.acts.some((a) => a.op === 'toggle_run'), JSON.stringify(game.acts));
+    assert.ok(!game.acts.some((a) => a.op === 'walk_cancel'), JSON.stringify(game.acts));
+  } finally {
+    await server.close();
+  }
+});

@@ -317,7 +317,7 @@ export class GameIntentEngine {
   ): Promise<StepResult> {
     // A web walk still in flight keeps clicking route tiles: it would walk away from the booth or
     // NPC just clicked and close the bank or shop that click opened.
-    if (snap.walk?.active && action.op !== 'walk' && action.op !== 'walk_cancel') {
+    if (snap.walk?.active && clicksAwayFromWalk(action)) {
       await this.o.backend.act({ op: 'walk_cancel' }).catch(() => undefined);
     }
     // A click Microbot keeps retrying can outlast the HTTP timeout. The client is alive (snapshots
@@ -391,4 +391,27 @@ function isValidChoice(esc: EscalationResponse, candidates: Candidate[], destina
   if (esc.op === 'interact') return candidates.some((c) => c.id === esc.optionId);
   if (esc.op === 'walk') return destinations.some((d) => d.id === esc.optionId);
   return esc.op === 'wait' || esc.op === 'done';
+}
+
+/**
+ * Actions a still-running web walk would undo: clicking something in the world (the walk walks
+ * away from it) or using an open bank, shop or make menu (the next route click closes it). Run
+ * toggles and inventory clicks (eat, bury, drop) happen fine mid-walk; cancelling for them stalled
+ * every walk while the run reflex kept firing.
+ */
+function clicksAwayFromWalk(a: GameAction): boolean {
+  switch (a.op) {
+    case 'interact':
+    case 'use_item_on':
+      return a.target.kind === 'npc' || a.target.kind === 'object' || a.target.kind === 'ground_item';
+    case 'bank_open':
+    case 'bank_withdraw':
+    case 'bank_deposit':
+    case 'bank_deposit_all':
+    case 'shop_buy':
+    case 'production_select':
+      return true;
+    default:
+      return false;
+  }
 }
