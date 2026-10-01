@@ -450,8 +450,8 @@ test('an open Grand Exchange offers buying the wanted item, collecting and closi
 test('reflexes: low HP and no food while something else attacks -> walk away from it', async () => {
   const { goblin } = await import('./support/fixtures.ts');
   const s = snapshot({ inventory: { freeSlots: 28, items: [] } });
-  s.player = { ...s.player!, hp: { current: 13, max: 33 }, inCombat: true } as never;
   const me = s.player!.position;
+  s.player = { ...s.player!, hp: { current: 13, max: 33 }, inCombat: true };
   s.npcs = [goblin({ name: 'Black Knight', combatLevel: 33, interactingWithPlayer: true, position: { x: me.x + 1, y: me.y, plane: me.plane } })];
   const r = checkReflexes(s, undefined, { text: 'kill imps', targets: ['Imp'] });
   assert.ok(r?.kind === 'act' && r.action.op === 'walk' && r.action.to.x < me.x, JSON.stringify(r));
