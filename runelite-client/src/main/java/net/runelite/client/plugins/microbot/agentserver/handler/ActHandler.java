@@ -178,7 +178,15 @@ public class ActHandler extends AgentHandler {
 				int guide = Microbot.getRs2ItemManager().getGEPrice(name);
 				if (guide <= 0) return Result.fail("no_ge_price");
 				int price = Math.max(5, (int) Math.ceil(guide * 1.3));
-				if (!Rs2GrandExchange.buyItem(name, price, quantity)) return Result.fail("offer_failed");
+				int coins = Rs2Inventory.itemQuantity("Coins");
+				if (coins < price * quantity) return Result.fail("not_enough_coins (need " + (price * quantity) + ", have " + coins + ")");
+				// Finished offers hold their slot until collected; free accounts have three.
+				if (Rs2GrandExchange.getAvailableSlots().length == 0) Rs2GrandExchange.collectAllToInventory();
+				// Still full: stale offers placed by earlier runs that never filled. Abort them (the
+				// coins come back) rather than block every later purchase.
+				if (Rs2GrandExchange.getAvailableSlots().length == 0) Rs2GrandExchange.abortAllOffers(false);
+				if (Rs2GrandExchange.getAvailableSlots().length == 0) return Result.fail("no_free_ge_slot");
+				if (!Rs2GrandExchange.buyItem(name, price, quantity)) return Result.fail("offer_failed (item search or price entry did not complete)");
 				sleepUntil(Rs2GrandExchange::hasBoughtOffer, 10_000);
 				Rs2GrandExchange.collectAllToInventory();
 				return Result.ok();
