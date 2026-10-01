@@ -200,6 +200,8 @@ async function run(): Promise<void> {
   let planner: Planner;
   let goal: string;
   let strategyFailed: ((phaseId: string) => void) | undefined;
+  // Kept apart from `planner`: --rescue wraps it.
+  let strategy: StrategyPlanner | null = null;
   if (values.task && COOK_PRESETS[values.task]) {
     planner = new CookingPlanner(COOK_PRESETS[values.task]!, values.task);
     goal = `${values.task} on fires until the bank has none left`;
@@ -262,7 +264,7 @@ async function run(): Promise<void> {
     const failing = recentFailures(skipFile);
     if (failing.size) console.log(`[strategy] skipping phases that failed twice in the last 12 h: ${[...failing].join(', ')}`);
     strategyFailed = (id) => recordFailure(skipFile, id);
-    planner = new StrategyPlanner(g, {
+    planner = strategy = new StrategyPlanner(g, {
       skip: failing,
       account: backend,
       kb,
@@ -329,7 +331,7 @@ async function run(): Promise<void> {
   const outcome = await agent.run(goal);
   console.log(`[agent] ${outcome.status}: ${outcome.reason} (${outcome.subgoals} sub-goals, ${outcome.steps} steps)`);
   // The run itself gave up mid-phase (sub-goals kept failing): count it against that phase.
-  const phase = planner instanceof StrategyPlanner ? planner.phase : null;
+  const phase = strategy?.phase ?? null;
   if (phase && (outcome.status === 'impossible' || outcome.status === 'halted')) strategyFailed?.(phase.id);
   kb?.close();
   if (outcome.status === 'error') process.exitCode = 1;
