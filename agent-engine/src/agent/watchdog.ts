@@ -3,7 +3,7 @@
  * (re-clicking a banker behind a counter, pacing between two tiles, a menu that never closes,
  * waiting on an animation that never ends).
  *
- * Progress = any XP gained, the inventory contents changing, the player moving more than
+ * Progress = any XP gained, the inventory contents changing, new dialogue text, the player moving more than
  * `moveTiles` from where progress was last seen, or a sub-goal completing. The watchdog trips when
  * there has been no progress for `windowMs`, or when the same action repeats `repeatLimit` times
  * since the last progress (clicks that start an animation do not count as repeats).
@@ -33,6 +33,11 @@ function inventoryKey(s: Snapshot): string {
   return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([n, c]) => `${n}:${c}`).join('|');
 }
 
+function dialogueKey(s: Snapshot): string {
+  const d = s.dialogue;
+  return d.inDialogue ? `${d.text ?? ''}|${d.question ?? ''}|${d.options.join('/')}` : '';
+}
+
 function totalXp(s: Snapshot): number {
   return s.skills.reduce((sum, k) => sum + k.xp, 0);
 }
@@ -45,6 +50,7 @@ export class ProgressWatchdog {
   private lastProgressAt: number;
   private xp = -1;
   private inv = '';
+  private dialogue = '';
   /** Recent progress points; returning to one of them (pacing) is not progress. */
   private anchors: WorldPoint[] = [];
   private repeats = new Map<string, { n: number; action: GameAction }>();
@@ -67,6 +73,7 @@ export class ProgressWatchdog {
   private baseline(s: Snapshot): void {
     this.xp = totalXp(s);
     this.inv = inventoryKey(s);
+    this.dialogue = dialogueKey(s);
     const p = s.player?.position;
     if (p) this.anchors = [...this.anchors.slice(-5), p];
   }
@@ -92,7 +99,9 @@ export class ProgressWatchdog {
     const moved =
       !!pos && this.anchors.length > 0 &&
       this.anchors.every((a) => pos.plane !== a.plane || Math.max(Math.abs(pos.x - a.x), Math.abs(pos.y - a.y)) > this.moveTiles);
-    if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || result.kind === 'done') {
+    // A long NPC explanation is clicked through one line at a time: new text is progress.
+    const talked = s.dialogue.inDialogue && dialogueKey(s) !== this.dialogue;
+    if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || talked || result.kind === 'done') {
       this.reset(s);
       return null;
     }

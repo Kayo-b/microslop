@@ -61,3 +61,17 @@ test('watchdog: clicks that start the skilling animation are not a loop; the idl
   t = 61_000;
   assert.match(w.observe(fish)?.reason ?? '', /no progress/);
 });
+
+test('watchdog: clicking through a long dialogue (new text each time) is progress', () => {
+  const w = new ProgressWatchdog({ repeatLimit: 3 });
+  const cont = (text: string) => {
+    const s = snapshot();
+    s.dialogue = { inDialogue: true, hasContinue: true, hasOptions: false, text, options: [] };
+    return { kind: 'acted', source: 'gate', action: { op: 'dialogue_continue' }, label: 'Click to continue the dialogue', outcome: { success: true, effect: 'changed: dialogue', changes: ['dialogue'], after: s } } as unknown as StepResult;
+  };
+  for (let i = 0; i < 8; i++) assert.equal(w.observe(cont(`line ${i}`)), null);
+  assert.equal(w.observe(cont('same')), null); // new text once more
+  w.observe(cont('same'));
+  w.observe(cont('same'));
+  assert.ok(w.observe(cont('same')));
+});
