@@ -39,6 +39,8 @@ export interface StrategyDeps {
   questPlanner?: (quest: string) => Planner | null;
   onPhase?: (phase: Phase, why: string) => void;
   now?: () => number;
+  /** Phase ids to leave out from the start (ones that kept failing in earlier runs). */
+  skip?: Iterable<string>;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
@@ -144,6 +146,7 @@ export class StrategyPlanner implements Planner {
     this.bank = deps.bank ?? new BankMemory();
     this.now = deps.now ?? Date.now;
     this.name = `strategy:${goal.kind}`;
+    for (const id of deps.skip ?? []) this.skip.add(id);
   }
 
   get phase(): Phase | null {

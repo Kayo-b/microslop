@@ -30,6 +30,7 @@ import { BankMemory, buildProfile, level, readAccount, unmet } from './strategy/
 import { MONEY, QUESTS, TRAINING } from './strategy/catalog.ts';
 import { QuestPlanner } from './strategy/QuestPlanner.ts';
 import { choosePhase, StrategyPlanner, type StrategyGoal } from './strategy/StrategyPlanner.ts';
+import { recentFailures, recordFailure } from './strategy/skips.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
@@ -198,6 +199,7 @@ async function run(): Promise<void> {
   const backend = new MicrobotBackend();
   let planner: Planner;
   let goal: string;
+  let strategyFailed: ((phaseId: string) => void) | undefined;
   if (values.task && COOK_PRESETS[values.task]) {
     planner = new CookingPlanner(COOK_PRESETS[values.task]!, values.task);
     goal = `${values.task} on fires until the bank has none left`;
@@ -256,12 +258,20 @@ async function run(): Promise<void> {
     goal = values.subgoal;
   } else if (values.strategy) {
     const g = strategyGoal(values.strategy);
+    const skipFile = path.join(ROOT, 'data', 'strategy-failures.json');
+    const failing = recentFailures(skipFile);
+    if (failing.size) console.log(`[strategy] skipping phases that failed twice in the last 12 h: ${[...failing].join(', ')}`);
+    strategyFailed = (id) => recordFailure(skipFile, id);
     planner = new StrategyPlanner(g, {
+      skip: failing,
       account: backend,
       kb,
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
       questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
-      onPhase: (phase, why) => console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`),
+      onPhase: (phase, why) => {
+        console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`);
+        if (why.startsWith('gave up')) strategyFailed?.(phase.id);
+      },
     });
     goal = `strategy ${values.strategy}${values.skill ? ` ${values.skill}` : ''}${values.level ? ` to ${values.level}` : ''}${values.quest ? ` ${values.quest}` : ''}`;
   } else if (values.goal) {
@@ -318,6 +328,9 @@ async function run(): Promise<void> {
   console.log(`[agent] goal: ${goal} | planner: ${planner.name} | log: ${logger.file}`);
   const outcome = await agent.run(goal);
   console.log(`[agent] ${outcome.status}: ${outcome.reason} (${outcome.subgoals} sub-goals, ${outcome.steps} steps)`);
+  // The run itself gave up mid-phase (sub-goals kept failing): count it against that phase.
+  const phase = planner instanceof StrategyPlanner ? planner.phase : null;
+  if (phase && (outcome.status === 'impossible' || outcome.status === 'halted')) strategyFailed?.(phase.id);
   kb?.close();
   if (outcome.status === 'error') process.exitCode = 1;
 }
