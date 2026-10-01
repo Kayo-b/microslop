@@ -187,6 +187,7 @@ export function normalizeSnapshot(raw: Partial<Snapshot>): Snapshot {
     production: raw.production ?? { open: false, options: [] },
     bank: raw.bank ?? { open: false, items: [] },
     shop: raw.shop ?? { open: false, items: [] },
+    grandExchange: raw.grandExchange ?? { open: false },
     walk: raw.walk ?? { active: false },
     messages: raw.messages ?? [],
   };

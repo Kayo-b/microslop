@@ -438,3 +438,11 @@ test('a sub-goal destination already reached falls back to the nearest targets',
   const dests = buildDestinations(snapshot(), kb, { text: 'pick cadava berries', targets: ['Cadava bush'], destination: { name: 'quest step location', point: { ...me } } }, 5);
   assert.deepEqual(dests.map((d) => d.label.split(' (')[0]), ['Nearest Cadava bush']);
 });
+
+test('an open Grand Exchange offers buying the wanted item, collecting and closing', () => {
+  const s = snapshot();
+  s.grandExchange = { open: true };
+  const { candidates } = buildCandidates(s, null, { text: 'buy 1 Redberry pie at the Grand Exchange', targets: ['Grand Exchange Clerk', 'Redberry pie'], actions: ['Exchange'], want: [{ name: 'Redberry pie', count: 1 }] });
+  assert.deepEqual(candidates.map((c) => c.id), ['ge:buy:Redberry pie', 'ge:collect', 'ge:close']);
+  assert.deepEqual(candidates[0]!.gameAction, { op: 'ge_buy', name: 'Redberry pie', quantity: 1 });
+});

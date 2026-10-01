@@ -22,6 +22,7 @@ import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -62,7 +63,7 @@ public class ActHandler extends AgentHandler {
 	static final Set<String> OPS = new HashSet<>(Arrays.asList(
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
-			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close"));
+			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_collect", "ge_close"));
 
 	private final Client client;
 
@@ -167,6 +168,27 @@ public class ActHandler extends AgentHandler {
 			case "shop_close":
 				if (!Rs2Shop.isOpen()) return Result.fail("shop_not_open");
 				Rs2Shop.closeShop();
+				return Result.ok();
+			case "ge_buy": {
+				// Buy offer at the guide price +30% (min 5 gp), so low-volume quest items fill at once,
+				// then collect the items into the inventory.
+				if (!Rs2GrandExchange.isOpen()) return Result.fail("ge_not_open");
+				String name = requireString(body, "name");
+				int quantity = Math.max(1, optInt(body, "quantity", 1));
+				int guide = Microbot.getRs2ItemManager().getGEPrice(name);
+				if (guide <= 0) return Result.fail("no_ge_price");
+				int price = Math.max(5, (int) Math.ceil(guide * 1.3));
+				if (!Rs2GrandExchange.buyItem(name, price, quantity)) return Result.fail("offer_failed");
+				sleepUntil(Rs2GrandExchange::hasBoughtOffer, 10_000);
+				Rs2GrandExchange.collectAllToInventory();
+				return Result.ok();
+			}
+			case "ge_collect":
+				if (!Rs2GrandExchange.isOpen()) return Result.fail("ge_not_open");
+				return Rs2GrandExchange.collectAllToInventory() ? Result.ok() : Result.fail("nothing_to_collect");
+			case "ge_close":
+				if (!Rs2GrandExchange.isOpen()) return Result.fail("ge_not_open");
+				Rs2GrandExchange.closeExchange();
 				return Result.ok();
 			case "bank_open":
 				if (Rs2Bank.isOpen()) return Result.ok();

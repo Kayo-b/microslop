@@ -76,6 +76,9 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
   if (s.shop.open) {
     return { candidates: shopCandidates(s, goal, maxCandidates), destinations: [] };
   }
+  if (s.grandExchange?.open) {
+    return { candidates: geCandidates(s, goal), destinations: [] };
+  }
 
   const groups = new Map<string, number>();
   const admit = (groupKey: string): boolean => {
@@ -421,6 +424,27 @@ function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[]
   }
   out.push({ id: 'bank:close', kind: 'bank_item', name: 'Bank', action: 'Close', label: 'Close the bank', gameAction: { op: 'bank_close' } });
   return out.slice(0, max);
+}
+
+/** Not items: the sub-goal's targets also name the clerk and booth that opened the exchange. */
+const GE_FIXTURES = /grand exchange|clerk|booth|banker/i;
+
+/**
+ * Grand Exchange: buy what the sub-goal wants (or names), collect, close. Prices are the server's
+ * (guide +30%); the offer is collected straight into the inventory.
+ */
+function geCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
+  const out: Candidate[] = [];
+  const wants = goal.want?.length
+    ? goal.want.map((w) => ({ name: w.name, need: stillNeeded(s, goal, w.name) ?? w.count }))
+    : (goal.targets ?? []).filter((t) => !GE_FIXTURES.test(t)).map((name) => ({ name, need: 1 }));
+  for (const w of wants.slice(0, 6)) {
+    if (w.need <= 0) continue;
+    out.push({ id: `ge:buy:${w.name}`, kind: 'ge_item', name: w.name, action: 'Buy', label: `Buy ${w.need} ${w.name} on the Grand Exchange`, gameAction: { op: 'ge_buy', name: w.name, quantity: w.need } });
+  }
+  out.push({ id: 'ge:collect', kind: 'ge_item', name: 'Offers', action: 'Collect', label: 'Collect finished offers', gameAction: { op: 'ge_collect' } });
+  out.push({ id: 'ge:close', kind: 'ge_item', name: 'Grand Exchange', action: 'Close', label: 'Close the Grand Exchange', gameAction: { op: 'ge_close' } });
+  return out;
 }
 
 function shopCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {

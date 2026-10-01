@@ -43,6 +43,7 @@ Each sub-goal you write is executed by a fast classifier that sees the player's 
 - List tools and supplies that must never be dropped or deposited (axe, pickaxe, net, bait, food) in "keep_items".
 - Set "destination_name" to a place name (town, bank, area) when the player must travel; the agent resolves it with a map database. Leave it null when the targets are already nearby.
 - Always give a deterministic "done_when" condition when one exists (inventory full, has/lacks an item, bank open, skill level, near a point). Only leave every field null when completion can only be judged by looking.
+- Items no shop nearby sells can be bought at the Grand Exchange (north-west Varrock): one sub-goal "buy N <item> at the Grand Exchange" with targets ["Grand Exchange Clerk", "<item>"], action "Exchange", done_when has_item <item> with the count. It costs the guide price +30%, so carry enough coins.
 - Use the reports of previous sub-goals: if one was blocked, change approach (different place, get the missing tool, open a door or gate first) rather than repeating it.
 - Answer "complete" when the overall goal is achieved and "impossible" when it cannot be achieved from here without human help (missing membership, quest requirement, money you cannot obtain).
 - Keep the account safe: avoid the Wilderness and monsters far above the player's combat level unless the goal requires them.`;
@@ -99,6 +100,8 @@ export function planToStep(plan: Plan): PlanStep {
     doneWhen,
     isDone: compile(doneWhen),
     maxSteps: Math.min(Math.max(sg.max_steps, 5), 600),
+    // The count to buy/withdraw (shop, bank and Grand Exchange options size themselves on it).
+    want: doneWhen?.hasItem ? [{ name: doneWhen.hasItem.name, count: doneWhen.hasItem.count ?? 1 }] : undefined,
   };
   return { kind: 'subgoal', subgoal };
 }

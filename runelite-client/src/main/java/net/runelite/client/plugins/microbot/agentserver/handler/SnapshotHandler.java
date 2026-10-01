@@ -31,6 +31,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
 import net.runelite.client.plugins.microbot.util.tile.Rs2Tile;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -124,6 +125,9 @@ public class SnapshotHandler extends AgentHandler {
 		snapshot.put("production", readProduction());
 		snapshot.put("bank", readBank(maxBankItems));
 		snapshot.put("shop", readShop());
+		Map<String, Object> ge = new LinkedHashMap<>();
+		ge.put("open", Rs2GrandExchange.isOpen());
+		snapshot.put("grandExchange", ge);
 		snapshot.put("walk", WalkHandler.activeWalkStatus());
 		snapshot.put("messages", GameMessageLog.recent(maxMessages));
 

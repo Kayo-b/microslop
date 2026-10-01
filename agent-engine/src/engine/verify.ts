@@ -24,7 +24,8 @@ export type Change =
   | 'run'
   | 'combat_style'
   | 'xp'
-  | 'shop';
+  | 'shop'
+  | 'ge';
 
 export interface Outcome {
   success: boolean;
@@ -62,6 +63,7 @@ export function diff(a: Snapshot, b: Snapshot): Change[] {
   if (a.production.open !== b.production.open) out.push('production');
   if (a.bank.open !== b.bank.open) out.push('bank');
   if (a.shop.open !== b.shop.open) out.push('shop');
+  if (!!a.grandExchange?.open !== !!b.grandExchange?.open) out.push('ge');
   if (!a.walk.active && b.walk.active) out.push('walk');
   if (xpGains(a, b).length > 0) out.push('xp');
   return out;
@@ -80,7 +82,7 @@ export function expectedChanges(action: GameAction): Change[] {
       switch (action.target.kind) {
         case 'npc':
         case 'object':
-          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank', 'shop', 'xp'];
+          return ['animation', 'moving', 'position', 'interacting', 'inventory', 'dialogue', 'production', 'bank', 'shop', 'ge', 'xp'];
         case 'ground_item':
           return ['inventory', 'moving', 'position'];
         case 'inventory':
@@ -118,6 +120,11 @@ export function expectedChanges(action: GameAction): Change[] {
       return ['inventory'];
     case 'shop_close':
       return ['shop'];
+    case 'ge_buy':
+    case 'ge_collect':
+      return ['inventory'];
+    case 'ge_close':
+      return ['ge'];
     case 'wait':
     case 'done':
       return [];

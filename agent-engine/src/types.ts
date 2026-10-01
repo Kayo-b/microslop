@@ -169,6 +169,8 @@ export interface Snapshot {
   production: ProductionState;
   bank: BankState;
   shop: ShopState;
+  /** The Grand Exchange interface. */
+  grandExchange?: { open: boolean };
   walk: WalkStatus;
   /** Recent game/system messages only; other players' chat is never included. */
   messages: GameMessage[];
@@ -203,6 +205,10 @@ export type GameAction =
   | { op: 'drop'; slot: number }
   | { op: 'shop_buy'; itemId: number; amount: 1 | 5 | 10 | 50 }
   | { op: 'shop_close' }
+  /** Buy offer at the guide price +30%, then collect into the inventory (the GE must be open). */
+  | { op: 'ge_buy'; name: string; quantity: number }
+  | { op: 'ge_collect' }
+  | { op: 'ge_close' }
   | { op: 'toggle_run'; enabled: boolean }
   /** Combat tab style button 0-3 (e.g. bows: 0 accurate, 1 rapid, 2 longrange). */
   | { op: 'attack_style'; index: number }
@@ -230,6 +236,7 @@ export type CandidateKind =
   | 'equipment'
   | 'bank_item'
   | 'shop_item'
+  | 'ge_item'
   | 'dialogue'
   | 'production'
   | 'destination';
