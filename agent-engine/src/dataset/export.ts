@@ -32,12 +32,27 @@ export interface Example {
   step: number;
 }
 
+/**
+ * An attack on a monster the sub-goal never mentions ("Guard (level 21): Attack" while the
+ * sub-goal hunts imps). It "succeeds" (the fight starts) but is the wrong choice, so it must not
+ * become a label. The engine stopped offering these on 2026-10-01; older logs still hold them.
+ */
+export function strayAttack(r: StepRecord): boolean {
+  const m = /^(.+?)(?: \(level \d+\))?: Attack\b/.exec(r.chosen?.label ?? '');
+  if (!m) return false;
+  const name = m[1]!.toLowerCase();
+  const text = r.subgoal.toLowerCase();
+  // "Imp" matches "imps"; "Cow calf" matches "cow".
+  return !text.includes(name) && !text.includes(name.split(' ')[0]!);
+}
+
 export function toExample(r: StepRecord, includeDone = false): Example | null {
   if (!r.questions || !r.chosen || !r.state) return null;
   if (r.source !== 'model' && r.source !== 'escalation') return null;
   const acted = r.outcome !== undefined;
   if (acted && !r.outcome!.success) return null;
   if (!acted && !(includeDone && r.chosen.op === 'done')) return null;
+  if (strayAttack(r)) return null;
 
   const labels: Record<string, string> = {};
   if (r.questions.op) labels.op = r.chosen.op;

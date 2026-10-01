@@ -105,6 +105,9 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
       // Random-event NPCs are dismissed by a reflex, never engaged.
       if (lc(action) === 'dismiss' || npc.actions.some((x) => lc(x) === 'dismiss') && npc.interactingWithPlayer) continue;
       if (lc(action) === 'attack' && attackers.size > 0 && !attackers.has(npc.index)) continue;
+      // Only fight what the sub-goal names (hunting imps, the model attacked guards, cows and a
+      // White Knight in passing); whatever is already attacking us stays fair game.
+      if (lc(action) === 'attack' && goal.targets?.length && !matchesAny(npc.name, goal.targets) && !attackers.has(npc.index)) continue;
       if (lc(action) === 'attack' && goal.maxTargetLevel !== undefined && npc.combatLevel > goal.maxTargetLevel) continue;
       if (!admit(`npc|${npc.name}|${action}`)) continue;
       const hint = kb ? npcHint(kb, ctx, npc.name, npc.id, action) : { text: '', unmet: [] };

@@ -458,3 +458,10 @@ test('reflexes: low HP and no food while something else attacks -> walk away fro
   // Fighting the sub-goal's own target is not fled from.
   assert.equal(checkReflexes(s, undefined, { text: 'kill knights', targets: ['Black Knight'] }), null);
 });
+
+test('attack is offered only on the monsters the sub-goal names (or ones attacking us)', async () => {
+  const { goblin } = await import('./support/fixtures.ts');
+  const s = snapshot({ npcs: [goblin({ index: 1, name: 'Imp', combatLevel: 2 }), goblin({ index: 2, name: 'Guard', combatLevel: 21 }), goblin({ index: 3, name: 'Cow', combatLevel: 2 })] });
+  const attacks = buildCandidates(s, null, { text: 'kill imps for beads', targets: ['Imp', 'Red bead'], actions: ['Attack', 'Take'] }).candidates.filter((c) => c.action === 'Attack');
+  assert.deepEqual(attacks.map((c) => c.name), ['Imp']);
+});

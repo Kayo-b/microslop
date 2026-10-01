@@ -348,3 +348,11 @@ test('agent: a sub-goal that is already complete every time it is issued ends th
     await server.close();
   }
 });
+
+test('dataset: attacks on monsters the sub-goal never names are not labels', async () => {
+  const { strayAttack } = await import('../src/dataset/export.ts');
+  const rec = (label: string) => ({ subgoal: 'Kill Imps around Port Sarim and pick up beads', chosen: { op: 'interact', label } }) as never;
+  assert.equal(strayAttack(rec('Guard (level 21): Attack (22 hp) - 3 tiles')), true);
+  assert.equal(strayAttack(rec('Imp (level 2): Attack (8 hp) - 13 tiles')), false);
+  assert.equal(strayAttack(rec('Bank booth: Bank - 2 tiles')), false);
+});
