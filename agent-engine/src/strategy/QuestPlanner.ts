@@ -57,6 +57,9 @@ export class QuestPlanner implements Planner {
       `Quest Helper's current step: ${status.stepText}`,
       ...(at ? [`The step takes place at (${at.x}, ${at.y}, floor ${at.plane}). To travel there, set the destination name to exactly "${STEP_PLACE}".`] : []),
       'Plan the next sub-goal toward this step only (gather the listed items, travel, talk to the named NPC, pick the dialogue options it names).',
+      ...(foodSupply(ctx.snapshot.inventory.items).count < 5
+        ? ['The player carries little or no food. If this step means fighting anything, first withdraw cooked food (e.g. Shrimps) from the nearest bank, or buy some.']
+        : []),
     ].join('\n');
     const step = await this.llm.next({ ...ctx, goal });
     // Quest places ("Lumbridge General Store") are often missing from the map database; the step's
