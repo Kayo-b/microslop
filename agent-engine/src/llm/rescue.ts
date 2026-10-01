@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { foldInventory } from '../engine/state.ts';
 import type { Planner, PlannerContext, PlanStep, SubGoalReport } from '../planner/types.ts';
 
-export type RescueTrigger = 'impossible' | 'stuck';
+export type RescueTrigger = 'impossible' | 'stuck' | 'loop';
 
 export interface RescueRequest {
   trigger: RescueTrigger;
@@ -21,6 +21,8 @@ export interface RescueRequest {
   reason: string;
   /** Name of the scripted planner that gave up. */
   planner: string;
+  /** Loop evidence (most frequent actions, positions, game messages). */
+  evidence?: string[];
 }
 
 /** Proposes one step that gets past a situation the scripted planner could not handle. */
@@ -115,6 +117,13 @@ export class RescuingPlanner implements Planner {
     }
 
     const last = ctx.reports.at(-1);
+    // The run-level loop detector: the agent has been going in circles across sub-goals.
+    if (last && ctx.reports.length > this.handledReports && last.result === 'blocked' && last.reason.startsWith('loop:')) {
+      this.handledReports = ctx.reports.length;
+      const evidence = last.trail.filter((t) => /^(most frequent|positions visited|game messages)/.test(t));
+      const step = await this.tryRescue(ctx, { trigger: 'loop', reason: last.reason, planner: this.inner.name, evidence });
+      if (step) return step;
+    }
     if (last && ctx.reports.length > this.handledReports && last.result === 'blocked' && WATCHDOG_STUCK.test(last.reason)) {
       this.handledReports = ctx.reports.length;
       const step = await this.tryRescue(ctx, { trigger: 'stuck', reason: last.reason, planner: this.inner.name });
@@ -127,7 +136,8 @@ export class RescuingPlanner implements Planner {
   }
 
   private async tryRescue(ctx: PlannerContext, req: RescueRequest): Promise<PlanStep | null> {
-    const key = `${req.trigger}|${req.reason.replace(/\d+/g, '#')}`;
+    // Loop verdicts differ in wording every time; they share one budget.
+    const key = req.trigger === 'loop' ? 'loop' : `${req.trigger}|${req.reason.replace(/\d+/g, '#')}`;
     if (this.used >= this.o.maxRescues || (this.perReason.get(key) ?? 0) >= this.o.maxPerReason) return null;
     this.used++;
     this.perReason.set(key, (this.perReason.get(key) ?? 0) + 1);

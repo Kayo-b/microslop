@@ -8,6 +8,7 @@ import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { PlannedSubGoal, Planner, SubGoalReport } from '../planner/types.ts';
 import { evaluate } from '../planner/conditions.ts';
 import type { GameAction, WorldPoint } from '../types.ts';
+import { LoopDetector, type LoopDetectorOptions } from './loopDetector.ts';
 import { ProgressWatchdog, type WatchdogOptions } from './watchdog.ts';
 
 export type AgentEvent =
@@ -38,6 +39,10 @@ export interface AgentOptions {
   waitMs?: number;
   /** Progress watchdog settings; see watchdog.ts. */
   watchdog?: WatchdogOptions;
+  /** Run-level loop detector (see loopDetector.ts); false turns it off. */
+  loop?: LoopDetectorOptions | false;
+  /** Loop verdicts before the run gives up (the first ones go to the planner, e.g. an LLM rescue). Default 3. */
+  maxLoops?: number;
   onEvent?: (e: AgentEvent) => void;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -92,6 +97,8 @@ export class Agent {
       return outcome;
     };
 
+    const loop = this.o.loop === false ? null : new LoopDetector(this.o.loop);
+    let loops = 0;
     try {
       // A walk started by an earlier run keeps going after that process exits; every engine
       // step would then just wait for it.
@@ -125,6 +132,8 @@ export class Agent {
             const s = await backend.snapshot();
             if (!s.loggedIn || evaluate(plan.until, s)) break;
           }
+          // Resting is not looping: start the clock again.
+          loop?.reset(await backend.snapshot().catch(() => undefined));
           continue;
         }
 
@@ -172,6 +181,19 @@ export class Agent {
             this.o.onEvent?.({ type: 'stuck', reason: stuck.reason, recovery: 'withheld target, cleared UI' });
             watchdog.reset();
             continue;
+          }
+          const looping = result.kind === 'blocked' ? null : loop?.observe(result);
+          if (looping) {
+            loops++;
+            this.o.onEvent?.({ type: 'stuck', reason: `loop: ${looping.reason}`, recovery: loops >= (this.o.maxLoops ?? 3) ? 'give up' : 'end sub-goal, ask the planner' });
+            const r: SubGoalReport = { subgoal: sg.text, result: 'blocked', reason: `loop: ${looping.reason}`, steps: n, trail: [...looping.evidence, ...trail(engine)] };
+            if (loops >= (this.o.maxLoops ?? 3)) {
+              this.o.onEvent?.({ type: 'report', report: r });
+              return finish('impossible', `stuck in a loop: ${looping.reason}`);
+            }
+            report = r;
+            loop!.reset(result.kind === 'acted' ? result.outcome.after : result.snapshot);
+            break;
           }
           switch (result.kind) {
             case 'done':

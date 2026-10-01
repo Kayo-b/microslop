@@ -72,3 +72,24 @@ test('rescue: a rescuer error is logged and the scripted answer stands', async (
   const rec = log.records[0]!;
   assert.ok(rec.kind === 'rescue' && rec.proposal.kind === 'error' && /no credentials/.test((rec.proposal as { reason: string }).reason));
 });
+
+test('rescue: a loop report goes to the rescuer with its evidence; loops share one budget', async () => {
+  const seen: { trigger: string; evidence?: string[] }[] = [];
+  const rescuer: Rescuer = { name: 'r', rescue: async (_c, req) => (seen.push({ trigger: req.trigger, evidence: req.evidence }), walkAround) };
+  const p = new RescuingPlanner(new Fixed(chop), rescuer, new MemoryRescueLog(), { maxPerReason: 2 });
+  const loop = (n: number): SubGoalReport => ({ subgoal: 'take the poison', result: 'blocked', reason: `loop: ${n} min within 20 tiles`, steps: 40, trail: ['most frequent actions: 54x Trapdoor: Open -> changed: dialogue', 'game messages: The trapdoor is locked.', 'Trapdoor: Open -> changed: dialogue'] });
+  const reports: SubGoalReport[] = [loop(8)];
+  assert.deepEqual(await p.next(ctx(reports)), walkAround);
+  assert.equal(seen[0]!.trigger, 'loop');
+  assert.deepEqual(seen[0]!.evidence, ['most frequent actions: 54x Trapdoor: Open -> changed: dialogue', 'game messages: The trapdoor is locked.']);
+  reports.push({ subgoal: 'walk around the fence', result: 'done', reason: 'ok', steps: 3, trail: [] });
+  assert.deepEqual(await p.next(ctx(reports)), chop);
+  reports.push(loop(9));
+  assert.deepEqual(await p.next(ctx(reports)), walkAround);
+  reports.push({ subgoal: 'walk around the fence', result: 'done', reason: 'ok', steps: 3, trail: [] });
+  await p.next(ctx(reports));
+  reports.push(loop(11));
+  // Budget for loops used up: the scripted planner continues; the agent gives up on the next loop verdict.
+  assert.deepEqual(await p.next(ctx(reports)), chop);
+  assert.equal(seen.length, 2);
+});

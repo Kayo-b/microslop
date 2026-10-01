@@ -248,8 +248,18 @@ export class LlmRescuer implements Rescuer {
   }
 
   async rescue(ctx: PlannerContext, req: RescueRequest): Promise<PlanStep> {
-    const user = [plannerPrompt(ctx), '', `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`, 'Propose one sub-goal that gets past this.'].join('\n');
-    const res = await this.llm.structured({ system: RESCUE_SYSTEM, user, schema: PlanSchema, schemaName: 'plan', effort: 'medium' });
+    const user =
+      req.trigger === 'loop'
+        ? [
+            plannerPrompt(ctx),
+            '',
+            `LOOP DETECTED: ${req.reason.replace(/^loop: /, '')}.`,
+            ...(req.evidence ?? []),
+            '',
+            'The agent has been going in circles across several sub-goals. Work out what is actually happening (a locked door or trapdoor that needs a key or another route first, a quest step done out of order, a one-way door, an item that must be obtained elsewhere, a wrong place). Look up the quest or location if you can. Then propose ONE sub-goal that does something different and breaks the loop, or answer "impossible" if this goal cannot progress from here and should be abandoned.',
+          ].join('\n')
+        : [plannerPrompt(ctx), '', `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`, 'Propose one sub-goal that gets past this.'].join('\n');
+    const res = await this.llm.structured({ system: RESCUE_SYSTEM, user, schema: PlanSchema, schemaName: 'plan', effort: req.trigger === 'loop' ? 'high' : 'medium' });
     if (res.kind === 'refusal') return { kind: 'impossible', reason: `rescue request declined: ${res.reason}` };
     return planToStep(res.value);
   }

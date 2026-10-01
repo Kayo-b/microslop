@@ -124,6 +124,12 @@ checkpoint and set `DECISION_ENGINE=laya`; nothing else changes.
   checks are deterministic. The op question is dropped when only one op is possible, and walking
   isn't offered while a usable target is visible. Live Jev runs showed it is strong at "which
   option" (0.9 to 1.0 confidence) and weak at abstract "what now" questions.
+- **Two stuck detectors.** The per-sub-goal watchdog (`src/agent/watchdog.ts`) ends one sub-goal
+  that spins. The run-level loop detector (`src/agent/loopDetector.ts`) trips when, with no XP or
+  items gained, the player stays within 20 tiles for 8 minutes or the last 30 actions are three
+  clicks over and over, across sub-goals. With `--rescue`, its evidence (top actions, positions,
+  game messages) goes to the LLM to diagnose and break the loop or abandon the goal; the third
+  verdict ends the run, and the strategy remembers the failed phase.
 - **Exact instances.** Options address NPCs by client index and objects/items by id + tile, so the
   click lands on the entity the model chose, not the nearest one with that name.
 - **`keep` lists** stop drop/deposit options (including deposit-all) for tools the sub-goal
