@@ -15,6 +15,8 @@ export interface QuestHelperApi {
 
 const STEP_PLACE = 'quest step location';
 
+const coins = (ctx: PlannerContext) => ctx.snapshot.inventory.items.filter((i) => i.name === 'Coins').reduce((sum, i) => sum + i.quantity, 0);
+
 export class QuestPlanner implements Planner {
   readonly name: string;
   private readonly quest: string;
@@ -57,6 +59,7 @@ export class QuestPlanner implements Planner {
       `Quest Helper's current step: ${status.stepText}`,
       ...(at ? [`The step takes place at (${at.x}, ${at.y}, floor ${at.plane}). To travel there, set the destination name to exactly "${STEP_PLACE}".`] : []),
       'Plan the next sub-goal toward this step only (gather the listed items, travel, talk to the named NPC, pick the dialogue options it names).',
+      `The player carries ${coins(ctx)} coins. Prefer shops and gathering over the Grand Exchange (it costs the guide price +30%); if an item is unaffordable, get it another way or earn coins first.`,
       ...(foodSupply(ctx.snapshot.inventory.items).count < 5
         ? ['The player carries little or no food. If this step means fighting anything, first withdraw cooked food (e.g. Shrimps) from the nearest bank, or buy some.']
         : []),
