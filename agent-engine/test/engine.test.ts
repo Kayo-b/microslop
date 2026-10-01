@@ -391,3 +391,20 @@ test('engine: an active web walk is cancelled before clicking something else', a
     await server.close();
   }
 });
+
+test('engine: an /act that times out is a failed step, not a crash', async () => {
+  const s = snapshot();
+  const fetchImpl = (async (url: string) => {
+    if (String(url).includes('/act')) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    return new Response(JSON.stringify(s));
+  }) as unknown as typeof fetch;
+  const engine = new GameIntentEngine({
+    backend: new MicrobotBackend({ token: 't', fetchImpl }),
+    decisionEngine: new ScriptedDecisionEngine(),
+    logger: new MemoryStepLogger(),
+    verify: noSleep,
+  });
+  const r = await engine.step({ text: 'catch shrimp with the small net at the fishing spot', targets: ['Fishing spot'], actions: ['Small Net'], noTravel: true, isDone: () => false });
+  assert.equal(r.kind, 'acted');
+  assert.ok(r.kind === 'acted' && /did not answer/.test(r.outcome.effect));
+});

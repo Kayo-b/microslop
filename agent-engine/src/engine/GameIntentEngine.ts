@@ -8,10 +8,10 @@
  * gating: deterministic rules decide whenever a classifier is not needed (walking, animating,
  * level-up dialogs, eating), so model calls are spent only on real choices.
  */
-import type { GameBackend } from '../backend/MicrobotBackend.ts';
+import { type GameBackend, MicrobotApiError } from '../backend/MicrobotBackend.ts';
 import type { ChoiceAnswer, DecisionEngineAdapter, DecisionQuestion } from '../decision/types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
-import type { Candidate, Destination, GameAction, Snapshot, SubGoal } from '../types.ts';
+import type { ActResponse, Candidate, Destination, GameAction, Snapshot, SubGoal } from '../types.ts';
 import { buildCandidates, matchesAny, type CandidateOptions } from './candidates.ts';
 import type { DecisionSource, StepLogger, StepRecord } from './log.ts';
 import { checkReflexes, DEFAULT_REFLEXES, type ReflexConfig } from './reflexes.ts';
@@ -320,7 +320,12 @@ export class GameIntentEngine {
     if (snap.walk?.active && action.op !== 'walk' && action.op !== 'walk_cancel') {
       await this.o.backend.act({ op: 'walk_cancel' }).catch(() => undefined);
     }
-    const act = await this.o.backend.act(action);
+    // A click Microbot keeps retrying can outlast the HTTP timeout. The client is alive (snapshots
+    // retry), so this is one failed step, not the end of the run.
+    const act = await this.o.backend.act(action).catch((e: unknown) => {
+      if (e instanceof MicrobotApiError && e.status === undefined) return { success: false, reason: 'client did not answer in time', tick: snap.tick } as ActResponse;
+      throw e;
+    });
     this.lastActTick = act.tick;
     this.attackTarget =
       act.success && action.op === 'interact' && action.target.kind === 'npc' && action.action.toLowerCase() === 'attack'
