@@ -6,6 +6,7 @@
  */
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { WorldPoint } from '../types.ts';
+import { foodSupply } from '../kb/resources.ts';
 
 export interface QuestHelperApi {
   questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint }>;
@@ -30,6 +31,12 @@ export class QuestPlanner implements Planner {
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
+    // Quests send the player into fights (imps, the Lesser demon) with whatever food is carried;
+    // never start a step half dead with nothing to eat. HP regenerates about 1 per minute.
+    const hp = ctx.snapshot.player?.hp;
+    if (hp && hp.max > 0 && hp.current / hp.max < 0.5 && foodSupply(ctx.snapshot.inventory.items).count === 0) {
+      return { kind: 'wait', reason: `HP ${hp.current}/${hp.max} and no food: resting before the next quest step`, until: { hpAtLeast: 0.8 }, maxSeconds: 1200 };
+    }
     let status = await this.api.questHelperStatus();
     if (!status.selected || status.questName !== this.quest) {
       await this.api.questHelperStart(this.quest);

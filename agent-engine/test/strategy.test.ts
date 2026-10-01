@@ -118,3 +118,12 @@ test('quest planner gives an unresolvable destination the Quest Helper step loca
   assert.ok(/3212, 3246/.test(prompt));
   assert.ok(step.kind === 'subgoal' && step.subgoal.destination?.point?.x === 3212);
 });
+
+test('quest planner rests to 80% HP before a step when low and without food', async () => {
+  const api = { questHelperStatus: async () => ({ selected: true, questName: 'Imp Catcher', completed: false, stepText: 'Kill imps' }), questHelperStart: async () => {} };
+  const llm: Planner = { name: 'llm', next: async () => ({ kind: 'subgoal', subgoal: { text: 'kill imps', targets: ['Imp'] } }) };
+  const s = snapshot({ inventory: { freeSlots: 28, items: [] } });
+  s.player = { ...s.player!, hp: { current: 8, max: 33 } } as never;
+  const step = await new QuestPlanner('Imp Catcher', api, llm, 1).next({ goal: 'g', snapshot: s, kb: null, reports: [] });
+  assert.ok(step.kind === 'wait' && step.until.hpAtLeast === 0.8);
+});
