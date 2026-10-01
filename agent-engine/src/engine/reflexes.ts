@@ -2,7 +2,7 @@
  * Deterministic reflexes, checked before the decision engine every step. Survival and UI
  * housekeeping must not depend on a classifier's confidence.
  */
-import type { GameAction, Snapshot } from '../types.ts';
+import type { GameAction, Snapshot, SubGoal } from '../types.ts';
 
 export interface ReflexConfig {
   /** Eat when HP falls below this fraction of max (0-1). Default 0.5. */
@@ -22,7 +22,7 @@ export type ReflexResult =
 
 const LEVEL_UP = /congratulations|you've just advanced|you have reached level|level-up/i;
 
-export function checkReflexes(s: Snapshot, cfg: ReflexConfig = DEFAULT_REFLEXES): ReflexResult {
+export function checkReflexes(s: Snapshot, cfg: ReflexConfig = DEFAULT_REFLEXES, goal?: SubGoal): ReflexResult {
   const p = s.player;
   if (!p) return null;
 
@@ -40,6 +40,16 @@ export function checkReflexes(s: Snapshot, cfg: ReflexConfig = DEFAULT_REFLEXES)
         reason: `hp ${p.hp.current}/${p.hp.max} below ${Math.round(cfg.eatBelow * 100)}%`,
         action: { op: 'interact', target: { kind: 'inventory', slot: food.slot, id: food.id }, action: 'Eat' },
       };
+    }
+    // Attacked by something the sub-goal is not about (a Black Knight wandering through Draynor
+    // while hunting imps): retaliating with no food only ends in the halt below. Walk away from it.
+    const attacker = s.npcs.find((n) => n.interactingWithPlayer && n.combatLevel > 0 && !(goal?.targets ?? []).some((t) => t.toLowerCase() === n.name.toLowerCase()));
+    if (attacker && p.inCombat && !s.walk.active) {
+      const dx = p.position.x - attacker.position.x;
+      const dy = p.position.y - attacker.position.y;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const to = { x: Math.round(p.position.x + (dx / len) * 14), y: Math.round(p.position.y + (dy / len) * 14), plane: p.position.plane };
+      return { kind: 'act', reason: `hp ${p.hp.current}/${p.hp.max}, no food: flee from ${attacker.name}`, action: { op: 'walk', to, distance: 3 } };
     }
     // Only a fight makes low HP without food an emergency; out of combat the planner decides
     // (restock at a bank, or rest), and halting here would block even walking to that bank.

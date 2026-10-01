@@ -156,7 +156,7 @@ export class GameIntentEngine {
 
     if (goal.isDone?.(snap)) return { kind: 'done', reason: 'completion check passed', snapshot: snap };
 
-    const reflex = checkReflexes(snap, this.o.reflexes);
+    const reflex = checkReflexes(snap, this.o.reflexes, goal);
     if (reflex?.kind === 'halt') return { kind: 'blocked', reason: `halt: ${reflex.reason}`, snapshot: snap };
     if (reflex?.kind === 'act') {
       return this.execute(snap, goal, reflex.action, 'reflex', reflex.reason, started, { note: reflex.reason });
