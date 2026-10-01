@@ -75,3 +75,22 @@ test('watchdog: clicking through a long dialogue (new text each time) is progres
   w.observe(cont('same'));
   assert.ok(w.observe(cont('same')));
 });
+
+test('watchdog: going up and down a staircase on the same spot is not progress', () => {
+  let t = 0;
+  const w = new ProgressWatchdog({ windowMs: 60_000, repeatLimit: 100, now: () => t });
+  const at = (plane: number) => {
+    const s = snapshot();
+    s.player = { ...s.player!, position: { x: 3109, y: 3366, plane } };
+    return s;
+  };
+  for (let i = 0; i < 20; i++) {
+    t += 4000;
+    const v = w.observe(acted(at(i % 3), 'Staircase: Climb-up'));
+    if (t >= 60_000) {
+      assert.ok(v, 'trips once the window passes');
+      return;
+    }
+    assert.equal(v, null);
+  }
+});

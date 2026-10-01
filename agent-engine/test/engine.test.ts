@@ -465,3 +465,12 @@ test('attack is offered only on the monsters the sub-goal names (or ones attacki
   const attacks = buildCandidates(s, null, { text: 'kill imps for beads', targets: ['Imp', 'Red bead'], actions: ['Attack', 'Take'] }).candidates.filter((c) => c.action === 'Attack');
   assert.deepEqual(attacks.map((c) => c.name), ['Imp']);
 });
+
+test('the nearest-bank destination is only offered to banking sub-goals', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const kb = { findPlaces: () => [], nearestObjects: () => [], nearestSpawns: () => [], nearestBanks: () => [{ name: 'Falador deposit box', kind: 'deposit_box', point: { x: 3000, y: 3300, plane: 0 }, members: false }] } as never;
+  const quest = buildDestinations(snapshot(), kb, { text: 'take the Poison in Draynor Manor; do not walk to any bank', targets: ['Poison'] }, 5);
+  assert.equal(quest.length, 0);
+  const banking = buildDestinations(snapshot(), kb, { text: 'go to the nearest bank and open it', targets: ['Bank booth'] }, 5);
+  assert.deepEqual(banking.map((d) => d.label.split(' (')[0]), ['Nearest bank: Falador deposit box']);
+});

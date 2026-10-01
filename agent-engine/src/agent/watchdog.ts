@@ -98,7 +98,8 @@ export class ProgressWatchdog {
     const pos = s.player?.position;
     const moved =
       !!pos && this.anchors.length > 0 &&
-      this.anchors.every((a) => pos.plane !== a.plane || Math.max(Math.abs(pos.x - a.x), Math.abs(pos.y - a.y)) > this.moveTiles);
+      // Floors do not count: climbing a staircase up and down (Draynor Manor) stays in one spot.
+      this.anchors.every((a) => Math.max(Math.abs(pos.x - a.x), Math.abs(pos.y - a.y)) > this.moveTiles);
     // A long NPC explanation is clicked through one line at a time: new text is progress.
     const talked = s.dialogue.inDialogue && dialogueKey(s) !== this.dialogue;
     if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || talked || result.kind === 'done') {

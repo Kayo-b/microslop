@@ -528,7 +528,10 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     if (reachable) push(`Nearest ${reachable.name}`, reachable.point);
     for (const p of kb.nearestSpawns(target, me, { limit: 1 })) push(`Nearest ${p.name}`, p.point);
   }
-  const bank = kb.nearestBanks(me, 1)[0];
+  // Only for banking sub-goals: offered everywhere, it was the classifier's pick whenever nothing
+  // else fit (walking out of Draynor Manor toward the Falador deposit box mid-quest).
+  const banking = /bank|deposit/i.test(`${goal.text} ${(goal.targets ?? []).join(' ')}`) && !/(do not|don't|never|avoid)[^.]*bank/i.test(goal.text);
+  const bank = banking ? kb.nearestBanks(me, 1)[0] : undefined;
   if (bank) push(`Nearest bank: ${bank.name}`, bank.point);
   return out.slice(0, max);
 }
