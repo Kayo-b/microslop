@@ -35,17 +35,21 @@ install -m 755 scripts/linux/bolt-microbot scripts/linux/microbot-run ~/.local/b
 Wayland the **Character** dropdown doesn't register a selection, and Play then fails with
 "please log in and select a character to play".
 
-### 3. Capture a Jagex game session
+### 3. Sign in to the Jagex account once
 
-1. `bolt-microbot`, click **Log in**, and finish the Jagex sign-in.
-2. Pick your character in the **Character** dropdown, choose RuneLite, and press **Play**.
-3. While that RuneLite window is open, run `microbot-run --capture`. This copies the
-   `JX_SESSION_ID` / `JX_CHARACTER_ID` / `JX_DISPLAY_NAME` session Bolt handed to RuneLite into
-   `~/.config/microbot-jx/session.env` (mode 600).
-4. Close that RuneLite window. Bolt starts official RuneLite, not Microbot.
+`bolt-microbot`, click **Log in**, finish the Jagex sign-in, then close Bolt. Picking a character
+and pressing Play are not needed.
 
-The session file is a login token. Delete it when you stop experimenting. Repeat step 3 when the
-auto-login starts failing (the session expired).
+Bolt keeps the game session in `~/.local/share/bolt-launcher/creds`. Before each launch
+`microbot-run` reads it, asks Jagex for the account's characters (the same call Bolt makes on
+startup) and writes `~/.config/microbot-jx/session.env` (mode 600). `microbot-run --refresh`
+does only that step; exit code 3 means the session expired and you need to sign in with Bolt
+again. With several characters, set `MICROBOT_CHARACTER=<display name>` (default: the last one
+used, else the first).
+
+Both files are login tokens. Log out in Bolt and delete `session.env` when you stop
+experimenting. `microbot-run --capture` (copy the session from a RuneLite window Bolt launched)
+still works as a fallback.
 
 ## Every session
 
@@ -112,7 +116,7 @@ the README's "Training data for Laya" section for how it maps onto Laya fine-tun
 | `Cannot reach Microbot agent server` | client not running, Agent Server off, or Stealth bind on |
 | `/snapshot` returns HTTP 500 about `java.util` | old build; pull and restart (fixed by avoiding `Collections.emptyList()`) |
 | Bolt login window closes without saving the account | old Bolt build; use `build-bolt.sh` (0.24) |
-| "please log in and select a character to play" | pick a character; if the dropdown won't hold it, start Bolt via `bolt-microbot` (XWayland) |
-| Game window is official RuneLite, no `[M]` plugins | Bolt launched RuneLite; capture the session and use `microbot-run` |
+| "please log in and select a character to play" | only with `--capture`: pick a character; if the dropdown won't hold it, start Bolt via `bolt-microbot` (XWayland) |
+| Game window is official RuneLite, no `[M]` plugins | Bolt launched RuneLite; close it and use `microbot-run` |
 | Gradle: "Cannot find a Java installation ... JVM version '17'" | `mise install java@temurin-17`; the scripts pick it up |
-| Client stuck on `LOGGING_IN` | session expired; recapture it (step 3) |
+| Client stuck on `LOGGING_IN`, or `microbot-run` exits 3 | session expired; sign in with `bolt-microbot` again (step 3) |

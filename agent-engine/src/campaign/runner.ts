@@ -13,7 +13,7 @@
  *      [--llm-model M] [--rescue] [--world 316] [--restart-client] [--dry-run]
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -261,10 +261,11 @@ function processDeps(cfg: CampaignConfig, dir: string, hasLlm: boolean, stop: { 
       }
     },
     relaunchClient: async () => {
-      const out = createWriteStream(path.join(os.homedir(), '.cache', 'microbot-run.log'), { flags: 'a' });
-      const child = spawn(process.env.MICROBOT_RUN ?? 'microbot-run', [], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
-      child.stdout?.pipe(out);
-      child.stderr?.pipe(out);
+      // The client writes straight to the log file: piping it through this process would keep the
+      // campaign alive for as long as the client runs.
+      const fd = openSync(path.join(os.homedir(), '.cache', 'microbot-run.log'), 'a');
+      const child = spawn(process.env.MICROBOT_RUN ?? 'microbot-run', [], { detached: true, stdio: ['ignore', fd, fd] });
+      closeSync(fd);
       child.unref();
     },
     runActivity: (a, minutes) =>
@@ -360,4 +361,5 @@ if (import.meta.main) {
   const results = await runCampaign(cfg, processDeps(cfg, dir, llm !== null, stop));
   const by = results.reduce<Record<string, number>>((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
   console.log(`[campaign] done: ${results.length} activities ${JSON.stringify(by)}; summary: ${path.join(dir, 'summary.jsonl')}`);
+  process.exit(0);
 }

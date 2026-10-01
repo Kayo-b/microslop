@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# One unattended data-gathering session, suitable for a systemd timer or cron:
+#   refresh the Jagex session from Bolt's creds -> campaign (starts the client, logs in, rotates
+#   activities) -> stop the client -> rebuild the Laya dataset -> desktop notification.
+#
+#   microbot-campaign [campaign args...]       e.g. microbot-campaign --hours 3 --only fish-shrimp
+#
+# Env: MICROBOT_CAMPAIGN_HOURS (default 3), MICROBOT_DIR (default ~/projects/Microbot),
+# MICROBOT_KEEP_CLIENT=1 leaves the client running afterwards, MICROBOT_CHARACTER (see microbot-run).
+# Exit 3: the Jagex session expired; sign in again with bolt-microbot (Play is not needed).
+set -uo pipefail
+ROOT="${MICROBOT_DIR:-$HOME/projects/Microbot}"
+ENGINE="$ROOT/agent-engine"
+LOCK="${XDG_RUNTIME_DIR:-/tmp}/microbot-campaign.lock"
+
+notify() { command -v notify-send >/dev/null && notify-send -a Microbot "$@" 2>/dev/null || true; }
+log() { echo "[microbot-campaign] $(date '+%F %T') $*"; }
+client_pid() { pgrep -f 'java .*net\.runelite\.client\.RuneLite' | head -1; }
+
+exec 9>"$LOCK"
+flock -n 9 || { log "another campaign is running"; exit 0; }
+
+"$ENGINE/scripts/linux/microbot-run" --refresh || {
+  code=$?
+  notify -u critical "Microbot campaign skipped" "Jagex session expired or unavailable: sign in with bolt-microbot."
+  exit "$code"
+}
+
+had_client="$(client_pid || true)"
+child=""
+stop() { [[ -n "$child" ]] && kill -TERM "$child" 2>/dev/null; }
+trap stop TERM INT
+
+log "campaign start"
+cd "$ENGINE" || exit 1
+# MICROBOT_RUN: relaunch through this checkout's script even when ~/.local/bin has an older copy.
+MICROBOT_RUN="$ENGINE/scripts/linux/microbot-run" \
+  node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/campaign/runner.ts \
+  --hours "${MICROBOT_CAMPAIGN_HOURS:-3}" --restart-client "$@" &
+child=$!
+wait "$child"; status=$?
+# A signal interrupts the first wait; wait again for the campaign to end its activity.
+while kill -0 "$child" 2>/dev/null; do wait "$child"; status=$?; done
+child=""
+log "campaign ended ($status)"
+
+if [[ -z "$had_client" && "${MICROBOT_KEEP_CLIENT:-0}" != 1 ]]; then
+  pid="$(client_pid || true)"
+  if [[ -n "$pid" ]]; then
+    log "logging out and stopping the client ($pid)"
+    token="$(cat "$HOME/.runelite/.agent-token" 2>/dev/null || true)"
+    curl -sf -m 30 -X POST -H "X-Agent-Token: $token" -H 'Content-Type: application/json' \
+      -d '{"wait":true}' 127.0.0.1:8081/logout >/dev/null || log "logout request failed"
+    kill -TERM "$pid"
+    for _ in $(seq 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+fi
+
+log "rebuilding the dataset"
+stats="$(node --disable-warning=ExperimentalWarning src/dataset/build.ts 2>&1 | tail -3)"
+echo "$stats"
+summary="$(ls -td logs/campaign/*/ 2>/dev/null | head -1)summary.jsonl"
+done_n="$( [[ -f "$summary" ]] && wc -l < "$summary" || echo 0)"
+notify "Microbot campaign finished" "$done_n activities. $(echo "$stats" | tail -1)"
+exit "$status"

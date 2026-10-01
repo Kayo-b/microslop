@@ -1,0 +1,17 @@
+# Unattended agent-engine campaign. Install: see agent-engine/docs/CAMPAIGN.md ("Scheduling").
+# Needs the desktop session (the client opens a window), so it runs as a user unit.
+[Unit]
+Description=Microbot agent-engine campaign (Laya training data)
+After=graphical-session.target network-online.target
+
+[Service]
+Type=exec
+ExecStart=%h/projects/Microbot/agent-engine/scripts/linux/microbot-campaign
+Environment=MICROBOT_CAMPAIGN_HOURS=3
+# SIGTERM goes to the wrapper only: it ends the current activity (cancelling any walk), stops the
+# client and rebuilds the dataset. Whatever is left (client, Gradle) is killed after the timeout.
+KillMode=mixed
+TimeoutStopSec=180
+# Hard cap: campaign hours + client start + dataset build.
+RuntimeMaxSec=5h
+Nice=5

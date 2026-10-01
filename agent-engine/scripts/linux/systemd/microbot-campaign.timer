@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Microbot agent-engine campaign
+
+[Timer]
+OnCalendar=*-*-* 14:00
+# Start at a different time each day, somewhere in 14:00-16:00.
+RandomizedDelaySec=2h
+Persistent=false
+
+[Install]
+WantedBy=timers.target

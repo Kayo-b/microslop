@@ -18,11 +18,40 @@ Each round: check the client (relaunch with `--restart-client`, log in to `--wor
   a row when there is another choice.
 - `quests` (and any activity marked `needsLlm`) runs only when an LLM is configured.
 - Three failed recoveries in a row stop the campaign: the Jagex session has probably expired;
-  re-capture it with Bolt (`microbot-run --capture`, see RUNNING.md).
+  sign in again with `bolt-microbot` (see RUNNING.md).
 - Ctrl+C ends the current activity (its walk is cancelled) and stops.
 
 Output: `logs/campaign/<id>/campaign.log`, one log per activity, `summary.jsonl`; every decision
 also lands in `logs/agent/` as usual, so `npm run dataset:build` picks it up.
+
+## Scheduling (unattended, no clicks)
+
+`scripts/linux/microbot-campaign [campaign args]` is one full session: refresh the Jagex session
+from Bolt's creds (no Bolt window, character pick or Play) -> campaign with `--restart-client`
+(starts Microbot, logs in through `/login`) -> stop the client it started -> `dataset:build` ->
+desktop notification. A lock keeps two sessions from overlapping.
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp scripts/linux/systemd/microbot-campaign.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now microbot-campaign.timer       # daily, 14:00-16:00
+systemctl --user start microbot-campaign                     # run one now
+journalctl --user -u microbot-campaign -f
+systemctl --user edit microbot-campaign    # e.g. Environment=MICROBOT_CAMPAIGN_HOURS=5
+```
+
+| Env | Default | |
+|---|---|---|
+| `MICROBOT_CAMPAIGN_HOURS` | 3 | also raise `RuntimeMaxSec` (5h) when going above ~4 |
+| `MICROBOT_CHARACTER` | last used | display name, for accounts with several characters |
+| `MICROBOT_KEEP_CLIENT` | 0 | 1 leaves the client running afterwards |
+
+It is a user unit because the client needs the desktop session: it only runs while you are
+logged in to the desktop. Exit code 3 plus a critical notification means the Jagex session
+expired: sign in with `bolt-microbot` once (closing Bolt afterwards is fine); the next run picks
+it up. Extra campaign flags go in `ExecStart=` (e.g. `--llm claude-code --rescue` to enable
+quests).
 
 ## LLM backends
 
