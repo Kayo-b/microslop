@@ -50,7 +50,8 @@ export class ProgressWatchdog {
   private lastProgressAt: number;
   private xp = -1;
   private inv = '';
-  private dialogue = '';
+  /** Dialogue lines seen since the last progress: only an unseen line is progress. */
+  private dialogues = new Set<string>();
   /** Recent progress points; returning to one of them (pacing) is not progress. */
   private anchors: WorldPoint[] = [];
   private repeats = new Map<string, { n: number; action: GameAction }>();
@@ -73,7 +74,7 @@ export class ProgressWatchdog {
   private baseline(s: Snapshot): void {
     this.xp = totalXp(s);
     this.inv = inventoryKey(s);
-    this.dialogue = dialogueKey(s);
+    this.dialogues = new Set([dialogueKey(s)]);
     const p = s.player?.position;
     if (p) this.anchors = [...this.anchors.slice(-5), p];
   }
@@ -100,10 +101,18 @@ export class ProgressWatchdog {
       !!pos && this.anchors.length > 0 &&
       // Floors do not count: climbing a staircase up and down (Draynor Manor) stays in one spot.
       this.anchors.every((a) => Math.max(Math.abs(pos.x - a.x), Math.abs(pos.y - a.y)) > this.moveTiles);
-    // A long NPC explanation is clicked through one line at a time: new text is progress.
-    const talked = s.dialogue.inDialogue && dialogueKey(s) !== this.dialogue;
-    if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || talked || result.kind === 'done') {
+    // A long NPC explanation is clicked through one line at a time: a line not seen yet is
+    // progress. The same line again ("The trapdoor is locked." after every Open) is not.
+    const line = dialogueKey(s);
+    const talked = s.dialogue.inDialogue && !this.dialogues.has(line);
+    if (talked) this.dialogues.add(line);
+    if (totalXp(s) > this.xp || inventoryKey(s) !== this.inv || moved || result.kind === 'done') {
       this.reset(s);
+      return null;
+    }
+    if (talked) {
+      this.lastProgressAt = this.now();
+      this.repeats.clear();
       return null;
     }
 

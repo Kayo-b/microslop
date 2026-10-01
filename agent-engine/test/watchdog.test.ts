@@ -94,3 +94,15 @@ test('watchdog: going up and down a staircase on the same spot is not progress',
     assert.equal(v, null);
   }
 });
+
+test('watchdog: the same dialogue line over and over (a locked trapdoor) is not progress', () => {
+  const w = new ProgressWatchdog({ repeatLimit: 4 });
+  const s = (text: string | null) => {
+    const x = snapshot();
+    x.dialogue = text ? { inDialogue: true, hasContinue: true, hasOptions: false, text, options: [] } : { inDialogue: false, hasContinue: false, hasOptions: false, options: [] };
+    return x;
+  };
+  let v = null;
+  for (let i = 0; i < 12 && !v; i++) v = w.observe(acted(s(i % 2 ? 'The trapdoor is locked.' : null), 'Trapdoor: Open'));
+  assert.ok(v, 'trips');
+});
