@@ -11,6 +11,12 @@
  * --log-dir logs/agent, --kb data/kb.sqlite, --max-subgoals 200.
  */
 import { existsSync } from 'node:fs';
+import { freshProfile, roadmap } from './goalplan/compiler.ts';
+import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
+import { llmReport } from './goalplan/report.ts';
+import { accountDir, loadPlan, type PlanSpec } from './goalplan/spec.ts';
+import { TutorialPlanner } from './goalplan/TutorialPlanner.ts';
+import { createTiers, GuardedLlm, HourlyBudget, jsonlCallLog, type LlmCallRecord, type LlmPurpose, TieredRescuer } from './llm/tiered.ts';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -25,7 +31,7 @@ import { buildDecisionState, relevantSkillsFor } from './engine/state.ts';
 import { KnowledgeBase } from './kb/KnowledgeBase.ts';
 import { describeSubGoal, LlmEscalator, LlmPlanner, LlmRescuer } from './llm/claude.ts';
 import { createLlmClient, type LlmClient } from './llm/providers.ts';
-import { JsonlRescueLog, RescuingPlanner } from './llm/rescue.ts';
+import { JsonlRescueLog, type Rescuer, type RescueOutcomeRecord, type RescueRecord, RescuingPlanner } from './llm/rescue.ts';
 import { BankMemory, buildProfile, level, readAccount, unmet } from './strategy/account.ts';
 import { MONEY, QUESTS, TRAINING } from './strategy/catalog.ts';
 import { QuestPlanner } from './strategy/QuestPlanner.ts';
@@ -68,6 +74,10 @@ const { values, positionals } = parseArgs({
     escalate: { type: 'boolean', default: false },
     rescue: { type: 'boolean', default: false },
     strategy: { type: 'string' },
+    plan: { type: 'string' },
+    account: { type: 'string' },
+    offline: { type: 'boolean', default: false },
+    f2p: { type: 'boolean', default: false },
     llm: { type: 'string' },
     'llm-model': { type: 'string' },
     skill: { type: 'string' },
@@ -100,6 +110,9 @@ function help(): void {
   npm run agent -- run --goal TEXT [--escalate]
   npm run agent -- strategy [--strategy level|money|quest]      (dry run: account profile and next phase)
   npm run agent -- run --strategy level [--skill S] [--level N] | money | quest [--quest NAME]
+  npm run agent -- plan show FILE [--offline [--f2p]]                 (roadmap, estimates, LLM coverage)
+  npm run agent -- run --plan FILE                                    (run a plan; LLM rescue on when a key is set)
+  npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
@@ -194,6 +207,46 @@ async function strategy(): Promise<void> {
   kb?.close();
 }
 
+function planPaths(spec: PlanSpec) {
+  return accountPaths(path.join(ROOT, accountDir(spec)));
+}
+
+/** Dry run of a plan: the compiled roadmap for the live account (or a fresh one with --offline). Never acts. */
+async function planShow(): Promise<void> {
+  const file = positionals[1] === 'show' ? positionals[2] : (positionals[1] ?? values.plan);
+  if (!file) throw new Error('plan show needs a plan file: npm run agent -- plan show plans/NAME.json');
+  const spec = loadPlan(file);
+  const paths = planPaths(spec);
+  let profile;
+  if (values.offline) {
+    profile = freshProfile(!values.f2p);
+  } else {
+    const backend = new MicrobotBackend();
+    profile = buildProfile(await readAccount(backend), await backend.snapshot(), new BankMemory(paths.bank));
+  }
+  const skip = recentFailures(paths.failures);
+  const r = roadmap(spec, profile, { skip, rates: observedRates(readJsonl<LedgerRecord>(paths.ledger)) });
+  console.log(`Plan "${spec.name}" for ${values.offline ? `a fresh ${values.f2p ? 'F2P' : 'members'} account` : 'the logged-in account'} (state: ${paths.dir})`);
+  if (skip.size) console.log(`Skipping phases that failed twice in the last 12 h: ${[...skip].join(', ')}`);
+  let total = 0;
+  r.milestones.forEach((m, i) => {
+    total += m.hours;
+    console.log(`${String(i + 1).padStart(3)}. ${m.coverage.padEnd(16)} ${m.hours.toFixed(1).padStart(5)} h  ${total.toFixed(0).padStart(4)} h  ${m.text}  (${m.why})`);
+  });
+  const by = new Map<string, number>();
+  for (const m of r.milestones) by.set(m.coverage, (by.get(m.coverage) ?? 0) + m.hours);
+  console.log(`\nEstimated ${r.hours.toFixed(0)} h: ${[...by].map(([c, h]) => `${c} ${Math.round((100 * h) / (r.hours || 1))}%`).join(', ')}`);
+  console.log(r.complete ? 'The roadmap reaches every goal.' : `Not reachable with the current catalog: ${r.blocked.join(', ') || 'milestone limit hit'}`);
+}
+
+function report(): void {
+  const dir = values.plan ? path.join(ROOT, accountDir(loadPlan(values.plan))) : values.account ? path.join(ROOT, 'data', 'accounts', values.account) : null;
+  if (!dir) throw new Error('llm-report needs --plan FILE or --account NAME');
+  const paths = accountPaths(dir);
+  const lines = llmReport(readJsonl<LlmCallRecord>(paths.llmCalls), readJsonl<RescueRecord | RescueOutcomeRecord>(paths.rescues), readJsonl<LedgerRecord>(paths.ledger));
+  console.log(`Account state: ${dir}\n${lines.join('\n')}`);
+}
+
 async function run(): Promise<void> {
   const kb = openKb();
   const backend = new MicrobotBackend();
@@ -202,6 +255,8 @@ async function run(): Promise<void> {
   let strategyFailed: ((phaseId: string) => void) | undefined;
   // Kept apart from `planner`: --rescue wraps it.
   let strategy: StrategyPlanner | null = null;
+  // Plan runs: tiered rescue (on whenever an LLM is configured) logged to the account's directory.
+  let planRescue: { rescuer: Rescuer; log: string } | null = null;
   if (values.task && COOK_PRESETS[values.task]) {
     planner = new CookingPlanner(COOK_PRESETS[values.task]!, values.task);
     goal = `${values.task} on fires until the bank has none left`;
@@ -258,6 +313,39 @@ async function run(): Promise<void> {
       maxSteps: values['max-steps'] ? Number(values['max-steps']) : 60,
     });
     goal = values.subgoal;
+  } else if (values.plan) {
+    const spec = loadPlan(values.plan);
+    const paths = planPaths(spec);
+    const failing = recentFailures(paths.failures);
+    if (failing.size) console.log(`[plan] skipping phases that failed twice in the last 12 h: ${[...failing].join(', ')}`);
+    strategyFailed = (id) => recordFailure(paths.failures, id);
+    const tiers = createTiers({ provider: values.llm, model: values['llm-model'] });
+    const callLog = jsonlCallLog(paths.llmCalls);
+    const budgets = { 1: new HourlyBudget(spec.policy.llm.tier1PerHour), 2: new HourlyBudget(spec.policy.llm.tier2PerHour) };
+    const guarded = (tier: 1 | 2, purpose: LlmPurpose) => new GuardedLlm(tier === 1 ? tiers!.tier1 : tiers!.tier2, { tier, purpose, budget: budgets[tier], log: callLog });
+    console.log(`[plan] ${spec.name}: state in ${paths.dir}; LLM ${tiers ? `tier 1 ${tiers.tier1.name}, tier 2 ${tiers.tier2.name}` : 'none (llm and quest phases are skipped)'}`);
+    planner = strategy = new StrategyPlanner(
+      { kind: 'plan', spec, rates: observedRates(readJsonl<LedgerRecord>(paths.ledger)) },
+      {
+        skip: failing,
+        account: backend,
+        kb,
+        bank: new BankMemory(paths.bank),
+        llmPlanner: () => (tiers ? new LlmPlanner({ llm: guarded(1, 'plan') }) : null),
+        questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') })) : null),
+        tutorialPlanner: () => new TutorialPlanner(backend),
+        onPhase: (phase, why) => {
+          console.log(`[plan] ${phase.text} [${phase.exec.kind}]: ${why}`);
+          if (why.startsWith('gave up')) strategyFailed?.(phase.id);
+        },
+        onPhaseEnd: (phase, end) => {
+          console.log(`[plan] phase ended (${end.outcome}, ${end.minutes.toFixed(0)} min): ${phase.text}`);
+          appendLedger(paths.ledger, { ts: new Date().toISOString(), plan: spec.name, phase: phase.id, text: phase.text, skill: phase.until?.skill, ...end });
+        },
+      },
+    );
+    if (tiers) planRescue = { rescuer: new TieredRescuer(new LlmRescuer({ llm: guarded(1, 'rescue') }), new LlmRescuer({ llm: guarded(2, 'rescue') })), log: paths.rescues };
+    goal = `plan ${spec.name}`;
   } else if (values.strategy) {
     const g = strategyGoal(values.strategy);
     const skipFile = path.join(ROOT, 'data', 'strategy-failures.json');
@@ -288,7 +376,11 @@ async function run(): Promise<void> {
   // and clicking next to the agent; quest phases re-select theirs with autoplay off.
   await backend.questHelperStop().catch(() => undefined);
 
-  if (values.rescue) {
+  if (planRescue) {
+    const log = new JsonlRescueLog(planRescue.log);
+    planner = new RescuingPlanner(planner, planRescue.rescuer, log);
+    console.log(`[agent] tiered LLM rescue on (${planRescue.rescuer.name}); rescues logged to ${log.file}`);
+  } else if (values.rescue) {
     if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();
     planner = new RescuingPlanner(planner, new LlmRescuer({ llm: llm()! }), log);
@@ -373,6 +465,8 @@ try {
   else if (command === 'inspect') await inspect();
   else if (command === 'strategy') await strategy();
   else if (command === 'run') await run();
+  else if (command === 'plan') await planShow();
+  else if (command === 'llm-report') report();
   else {
     help();
     process.exitCode = 2;

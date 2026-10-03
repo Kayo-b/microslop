@@ -125,6 +125,12 @@ export function expectedChanges(action: GameAction): Change[] {
       return ['inventory'];
     case 'ge_close':
       return ['ge'];
+    // Interface-only actions (Tutorial Island): the planner checks progress through varp 281.
+    case 'cast_on':
+      return ['xp', 'animation'];
+    case 'tab_open':
+    case 'widget_click':
+    case 'type_text':
     case 'wait':
     case 'done':
       return [];

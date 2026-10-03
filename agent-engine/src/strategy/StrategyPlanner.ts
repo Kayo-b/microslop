@@ -4,6 +4,9 @@
  * scripted yet). A phase ends when its planner completes, gives up, reaches its level bracket or
  * runs out of time; then the strategy picks the next phase from the catalog and the live profile.
  */
+import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
+import { nextMilestone } from '../goalplan/compiler.ts';
+import type { PlanSpec } from '../goalplan/spec.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { COOK_PRESETS, CookingPlanner } from '../planner/CookingPlanner.ts';
 import { SmithingPlanner } from '../planner/SmithingPlanner.ts';
@@ -11,13 +14,15 @@ import { compile } from '../planner/conditions.ts';
 import { NOT_BANKS, TaskTreePlanner, type CombatTask } from '../planner/TaskTreePlanner.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
-import { type AccountApi, BankMemory, buildProfile, level, type Profile, readAccount, unmet } from './account.ts';
-import { type Execution, inWilderness, MONEY, QUESTS, TRAINING, type TrainingMethod } from './catalog.ts';
+import { type AccountApi, BankMemory, buildProfile, level, type Profile, readAccount, TUTORIAL_DONE, unmet, VARP_TUTORIAL } from './account.ts';
+import { ACQUIRE, type Execution, inWilderness, MONEY, QUESTS, TRAINING, type TrainingMethod } from './catalog.ts';
 
 export type StrategyGoal =
   | { kind: 'level'; skill?: string; level?: number }
   | { kind: 'money'; minutesPerRoute?: number }
-  | { kind: 'quest'; quest?: string };
+  | { kind: 'quest'; quest?: string }
+  /** A plan file compiled into milestones (see goalplan/compiler.ts). */
+  | { kind: 'plan'; spec: PlanSpec; rates?: Map<string, number> };
 
 export interface Phase {
   id: string;
@@ -27,6 +32,17 @@ export interface Phase {
   until?: { skill: string; level: number };
   /** Stop the phase after this long (ms), then re-evaluate. */
   maxMs?: number;
+  /** Stop once the account holds this many coins (carried + banked). */
+  untilCoins?: number;
+}
+
+export interface PhaseEnd {
+  /** done: its planner completed or the phase target was reached; gave_up: impossible; over: time ran out. */
+  outcome: 'done' | 'gave_up' | 'over';
+  reason: string;
+  minutes: number;
+  /** XP gained per skill during the phase. */
+  xp: Record<string, number>;
 }
 
 export interface StrategyDeps {
@@ -37,7 +53,10 @@ export interface StrategyDeps {
   llmPlanner?: () => Planner | null;
   /** Runner for `quest` executions; null when questing is unavailable. */
   questPlanner?: (quest: string) => Planner | null;
+  /** Runner for the `tutorial` execution; null when unavailable. */
+  tutorialPlanner?: () => Planner | null;
   onPhase?: (phase: Phase, why: string) => void;
+  onPhaseEnd?: (phase: Phase, end: PhaseEnd) => void;
   now?: () => number;
   /** Phase ids to leave out from the start (ones that kept failing in earlier runs). */
   skip?: Iterable<string>;
@@ -49,6 +68,11 @@ const ROTATION = ['Melee', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting
 
 /** Picks the next phase for a goal; null when nothing fits (or the goal is reached). */
 export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): { phase: Phase; why: string } | { done: string } | null {
+  if (goal.kind === 'plan') {
+    const m = nextMilestone(goal.spec, p, { skip, rates: goal.rates });
+    if (!m || 'done' in m) return m;
+    return { phase: { id: m.id, text: m.text, exec: m.exec, until: m.until, untilCoins: m.untilCoins }, why: `${m.why} [${m.coverage}, ~${m.hours.toFixed(1)} h]` };
+  }
   const members = p.account.members;
   const fits = (m: { members: boolean; req?: TrainingMethod['req'] }) => (members || !m.members) && unmet(m.req, p).length === 0;
 
@@ -102,7 +126,7 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
     case 'preset':
       if (COOK_PRESETS[e.preset]) return new CookingPlanner(COOK_PRESETS[e.preset]!, e.preset);
       if (e.preset === 'smith-progression') return new SmithingPlanner({ untilLevel });
-      return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel });
+      return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {
       let area = e.area;
       const pos = s.player?.position;
@@ -117,6 +141,8 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
         loot: e.loot ?? ['Coins'],
         keep: [],
         skill: phase.until?.skill ?? 'Strength',
+        setStyle: MELEE_TRAINED.has(phase.until?.skill ?? ''),
+        style: e.style,
         untilLevel,
         area,
         buryAt: e.bury ? 5 : undefined,
@@ -128,8 +154,18 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       return deps.llmPlanner?.() ?? null;
     case 'quest':
       return deps.questPlanner?.(e.quest) ?? null;
+    case 'tutorial':
+      return deps.tutorialPlanner?.() ?? null;
+    case 'acquire': {
+      const price = ACQUIRE.find((a) => a.item === e.item)?.price ?? 0;
+      const bank = deps.bank;
+      return new AcquirePlanner({ item: e.item, count: e.count, price, source: e.source, bank: () => (bank?.seenAt ? bank.items : null) });
+    }
   }
 }
+
+/** Melee skills a phase trains by selecting the matching attack style. */
+const MELEE_TRAINED = new Set(['Attack', 'Strength', 'Defence']);
 
 export class StrategyPlanner implements Planner {
   readonly name: string;
@@ -138,7 +174,7 @@ export class StrategyPlanner implements Planner {
   private readonly bank: BankMemory;
   private readonly now: () => number;
   private readonly skip = new Set<string>();
-  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number } | null = null;
+  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number; xp: Map<string, number> } | null = null;
 
   constructor(goal: StrategyGoal, deps: StrategyDeps) {
     this.goal = goal;
@@ -155,23 +191,24 @@ export class StrategyPlanner implements Planner {
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
     this.bank.update(ctx.snapshot);
-    // Item requirements (tools, keys, supplies) can only be checked once the bank has been seen.
-    const survey = this.surveyBank(ctx);
+    // Item requirements (tools, keys, supplies) can only be checked once the bank has been seen;
+    // on Tutorial Island there is no bank to survey yet.
+    const survey = (await this.onTutorialIsland()) ? null : this.surveyBank(ctx);
     if (survey) return survey;
     for (let attempt = 0; attempt < 8; attempt++) {
-      if (this.current && this.phaseOver(ctx.snapshot)) this.current = null;
+      if (this.current && this.phaseOver(ctx.snapshot)) this.endPhase(ctx.snapshot, this.reachedTarget(ctx.snapshot) ? 'done' : 'over', 'phase target or time reached');
       if (!this.current) {
         const profile = buildProfile(await readAccount(this.deps.account), ctx.snapshot, this.bank);
         const choice = choosePhase(this.goal, profile, this.skip);
         if (!choice) return { kind: 'impossible', reason: `no ${this.goal.kind} activity fits this account right now` };
         if ('done' in choice) return { kind: 'complete', reason: choice.done };
-        const planner = plannerFor(choice.phase, ctx.snapshot, this.deps);
+        const planner = plannerFor(choice.phase, ctx.snapshot, { ...this.deps, bank: this.bank });
         if (!planner) {
           this.skip.add(choice.phase.id);
           this.deps.onPhase?.(choice.phase, 'skipped: cannot run here (needs an LLM key, Quest Helper, or a locatable spawn)');
           continue;
         }
-        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length };
+        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length, xp: new Map(ctx.snapshot.skills.map((k) => [k.name, k.xp])) };
         this.deps.onPhase?.(choice.phase, choice.why);
       }
       const cur = this.current;
@@ -182,7 +219,7 @@ export class StrategyPlanner implements Planner {
         this.skip.add(cur.phase.id);
         this.deps.onPhase?.(cur.phase, `gave up: ${step.reason}`);
       }
-      this.current = null;
+      this.endPhase(ctx.snapshot, step.kind === 'impossible' ? 'gave_up' : 'done', step.reason);
     }
     return { kind: 'impossible', reason: 'no phase could start after several attempts' };
   }
@@ -210,10 +247,39 @@ export class StrategyPlanner implements Planner {
     };
   }
 
+  private tutorialDone = false;
+
+  private async onTutorialIsland(): Promise<boolean> {
+    if (this.goal.kind !== 'plan' || this.tutorialDone) return false;
+    this.tutorialDone = ((await this.deps.account.varp(VARP_TUTORIAL)) ?? TUTORIAL_DONE) >= TUTORIAL_DONE;
+    return !this.tutorialDone;
+  }
+
+  private reachedTarget(s: Snapshot): boolean {
+    const ph = this.current!.phase;
+    const u = ph.until;
+    if (u && (s.skills.find((k) => k.name === u.skill)?.level ?? 1) >= u.level) return true;
+    if (ph.untilCoins !== undefined) {
+      const carried = s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
+      if (carried + (this.bank.items.get('Coins') ?? 0) >= ph.untilCoins) return true;
+    }
+    return false;
+  }
+
   private phaseOver(s: Snapshot): boolean {
     const cur = this.current!;
-    const u = cur.phase.until;
-    if (u && (s.skills.find((k) => k.name === u.skill)?.level ?? 1) >= u.level) return true;
-    return cur.phase.maxMs !== undefined && this.now() - cur.startedAt >= cur.phase.maxMs;
+    return this.reachedTarget(s) || (cur.phase.maxMs !== undefined && this.now() - cur.startedAt >= cur.phase.maxMs);
+  }
+
+  private endPhase(s: Snapshot, outcome: PhaseEnd['outcome'], reason: string): void {
+    const cur = this.current;
+    if (!cur) return;
+    this.current = null;
+    const xp: Record<string, number> = {};
+    for (const k of s.skills) {
+      const gained = k.xp - (cur.xp.get(k.name) ?? k.xp);
+      if (gained > 0) xp[k.name] = gained;
+    }
+    this.deps.onPhaseEnd?.(cur.phase, { outcome, reason, minutes: (this.now() - cur.startedAt) / 60_000, xp });
   }
 }

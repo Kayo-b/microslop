@@ -214,6 +214,14 @@ export type GameAction =
   | { op: 'attack_style'; index: number }
   /** Autocast a combat spell (needs a staff): WIND_STRIKE, WATER_STRIKE, EARTH_STRIKE, FIRE_STRIKE, ... */
   | { op: 'autocast'; spell: string; defensive?: boolean }
+  /** Open a side tab by InterfaceTab name (SETTINGS, INVENTORY, SKILLS, QUESTS, PRAYER, MAGIC, ...). */
+  | { op: 'tab_open'; tab: string }
+  /** Click an interface button by its visible text (character design "Confirm", ...). */
+  | { op: 'widget_click'; text: string; exact?: boolean }
+  /** Select a combat spell and cast it on an NPC (no staff needed). */
+  | { op: 'cast_on'; spell: string; target: TargetRef }
+  /** Type into the focused input (display name, amount prompts); `enter` submits it. */
+  | { op: 'type_text'; text: string; enter?: boolean }
   | { op: 'wait'; ticks: number }
   | { op: 'done' };
 

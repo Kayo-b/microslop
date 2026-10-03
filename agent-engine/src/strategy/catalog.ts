@@ -10,13 +10,20 @@
  *   - the LLM planner with a method description (`llm`) until someone scripts it,
  *   - the quest runner (`quest`), which follows Quest Helper's current step.
  */
+import type { CombatStyle } from '../planner/gear.ts';
 import type { WorldPoint } from '../types.ts';
 
 export type Execution =
   | { kind: 'preset'; preset: string; bank?: boolean }
-  | { kind: 'combat'; monster: string; area?: { name: string; point: WorldPoint }; loot?: string[]; bury?: boolean }
+  | { kind: 'combat'; monster: string; area?: { name: string; point: WorldPoint }; loot?: string[]; bury?: boolean; style?: CombatStyle }
   | { kind: 'llm'; goal: string }
-  | { kind: 'quest'; quest: string };
+  | { kind: 'quest'; quest: string }
+  /** Tutorial Island, driven by its progress varp. */
+  | { kind: 'tutorial' }
+  /** Buy an item at a shop or the Grand Exchange. */
+  | { kind: 'acquire'; item: string; count: number; source: AcquireSource };
+
+export type AcquireSource = { kind: 'shop'; name: string; keeper: string; point: WorldPoint } | { kind: 'ge' };
 
 export interface Requirement {
   skills?: Record<string, number>;
@@ -37,36 +44,47 @@ export interface TrainingMethod {
   name: string;
   exec: Execution;
   req?: Requirement;
+  /** Rough XP/hour at the bracket's start level (estimates only; the ledger's observed rate wins). */
+  xpHour?: number;
   notes?: string;
 }
 
 /** Skill -> methods, lowest level first. The first method whose level bracket and requirements fit is used. */
 export const TRAINING: TrainingMethod[] = [
   // Melee: monsters picked by combat stats, safest XP/hour without quests.
-  { skill: 'Melee', from: 1, to: 10, members: false, name: 'chickens and cows at Lumbridge', exec: { kind: 'preset', preset: 'kill-cows' } },
-  { skill: 'Melee', from: 10, to: 20, members: false, name: 'goblins east of Lumbridge', exec: { kind: 'preset', preset: 'kill-goblins' } },
-  { skill: 'Melee', from: 20, to: 30, members: false, name: 'barbarians in Barbarian Village', exec: { kind: 'preset', preset: 'kill-barbarians' } },
+  { skill: 'Melee', from: 1, to: 10, members: false, name: 'chickens and cows at Lumbridge', xpHour: 8000, exec: { kind: 'preset', preset: 'kill-cows' } },
+  { skill: 'Melee', from: 10, to: 20, members: false, name: 'goblins east of Lumbridge', xpHour: 12000, exec: { kind: 'preset', preset: 'kill-goblins' } },
+  { skill: 'Melee', from: 20, to: 30, members: false, name: 'barbarians in Barbarian Village', xpHour: 15000, exec: { kind: 'preset', preset: 'kill-barbarians' } },
   {
-    skill: 'Melee', from: 30, to: 45, members: false, name: 'flesh crawlers (Stronghold of Security, level 2)',
+    skill: 'Melee', from: 30, to: 45, members: false, name: 'flesh crawlers (Stronghold of Security, level 2)', xpHour: 20000,
     exec: { kind: 'llm', goal: 'go down the Stronghold of Security (Barbarian Village) to level 2, the Catacomb of Famine (around 1945, 5094), answering the door questions, then kill flesh crawlers and bank at Edgeville' },
     notes: 'aggressive, weak hits, dense; the Stronghold door questions are not scripted yet',
   },
   {
-    skill: 'Melee', from: 30, to: 50, members: false, name: 'hill giants (Edgeville Dungeon)',
+    skill: 'Melee', from: 30, to: 50, members: false, name: 'hill giants (Edgeville Dungeon)', xpHour: 22000,
     exec: { kind: 'combat', monster: 'Hill giant', area: { name: 'Edgeville Dungeon hill giants', point: { x: 3117, y: 9848, plane: 0 } }, loot: ['Big bones', 'Coins', 'Limpwurt root'], bury: true },
     req: { items: ['Brass key'] }, notes: 'big bones give good Prayer XP; the brass key is found west of Edgeville',
   },
   {
-    skill: 'Melee', from: 40, to: 60, members: false, name: 'moss giants (Varrock Sewers)',
+    skill: 'Melee', from: 40, to: 60, members: false, name: 'moss giants (Varrock Sewers)', xpHour: 28000,
     exec: { kind: 'combat', monster: 'Moss giant', area: { name: 'Varrock Sewers moss giants', point: { x: 3165, y: 9880, plane: 0 } }, loot: ['Big bones', 'Coins', 'Nature rune'], bury: true },
     req: { items: ['Knife'] }, notes: 'a knife or sharp weapon cuts the sewer web',
   },
-  { skill: 'Melee', from: 60, to: 99, members: false, name: 'ogresses at Corsair Cove', exec: { kind: 'llm', goal: 'train melee on Ogress Warriors in the Corsair Cove dungeon, banking at the Corsair Cove bank' }, req: { quests: ['The Corsair Curse'] } },
-  { skill: 'Melee', from: 20, to: 70, members: true, name: 'sand crabs (Hosidius coast)', exec: { kind: 'combat', monster: 'Sand crab', area: { name: 'Hosidius sand crabs', point: { x: 1760, y: 3470, plane: 0 } } }, notes: 'AFK; high HP, 1 max hit' },
+  { skill: 'Melee', from: 60, to: 99, members: false, name: 'ogresses at Corsair Cove', xpHour: 40000, exec: { kind: 'llm', goal: 'train melee on Ogress Warriors in the Corsair Cove dungeon, banking at the Corsair Cove bank' }, req: { quests: ['The Corsair Curse'] } },
+  { skill: 'Melee', from: 20, to: 70, members: true, name: 'sand crabs (Hosidius coast)', xpHour: 30000, exec: { kind: 'combat', monster: 'Sand crab', area: { name: 'Hosidius sand crabs', point: { x: 1760, y: 3470, plane: 0 } } }, notes: 'AFK; high HP, 1 max hit' },
 
   // Ranged and magic: no quests needed; kits are bought in Varrock (Lowe's, Zaff's, Aubury's).
-  { skill: 'Ranged', from: 1, to: 30, members: false, name: 'cows at Lumbridge with a shortbow', exec: { kind: 'preset', preset: 'range-cows' }, notes: 'buys a shortbow and bronze arrows at Lowe\'s; picks arrows back up' },
-  { skill: 'Magic', from: 1, to: 13, members: false, name: 'chickens with Wind Strike autocast', exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
+  { skill: 'Ranged', from: 1, to: 30, members: false, name: 'cows at Lumbridge with a shortbow', xpHour: 8000, exec: { kind: 'preset', preset: 'range-cows' }, notes: 'buys a shortbow and bronze arrows at Lowe\'s; picks arrows back up' },
+  { skill: 'Magic', from: 1, to: 13, members: false, name: 'chickens with Wind Strike autocast', xpHour: 6000, exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
+  // Members ranged/magic past the starter kits: the kit planner only knows a shortbow with bronze/iron
+  // arrows and Wind Strike, so these stay with the LLM until gear progression is scripted.
+  { skill: 'Ranged', from: 30, to: 70, members: true, name: 'sand crabs with the best bow and arrows', xpHour: 30000, exec: { kind: 'llm', goal: 'buy the best bow and arrows your Ranged level allows (maple shortbow at 30, yew at 40, magic at 50; adamant arrows) at the Grand Exchange, then kill Sand crabs on the Hosidius coast with Ranged, picking up arrows and banking at Hosidius' }, notes: 'bow/arrow upgrades are not scripted yet' },
+  { skill: 'Ranged', from: 70, to: 99, members: true, name: 'ammonite crabs with Ranged', xpHour: 70000, exec: { kind: 'llm', goal: 'kill Ammonite crabs on Fossil Island with the best bow and arrows your Ranged level allows, resetting aggression when they stop attacking' }, req: { quests: ['Bone Voyage'] } },
+  { skill: 'Magic', from: 13, to: 55, members: true, name: 'sand crabs autocasting the best strike/bolt spell', xpHour: 25000, exec: { kind: 'llm', goal: 'set autocast to the best strike or bolt spell your Magic level and runes allow (buy runes and a matching elemental staff at the Grand Exchange or Port Sarim/Varrock shops), then kill Sand crabs on the Hosidius coast' }, notes: 'only Wind Strike is scripted' },
+  { skill: 'Magic', from: 55, to: 99, members: false, name: 'High Level Alchemy', xpHour: 75000, exec: { kind: 'llm', goal: 'buy nature runes and an item that alchs at a small loss (or break-even) at the Grand Exchange, wield a staff of fire, then cast High Level Alchemy on them one by one' }, req: { items: ['Coins'] }, notes: 'costs money; profitable items need a live price feed' },
+
+  // Slayer: placeholder until the Slayer module (task masters, task table, required items) exists.
+  { skill: 'Slayer', from: 1, to: 99, members: true, name: 'Slayer tasks from the best master for the combat level', xpHour: 15000, exec: { kind: 'llm', goal: 'get a Slayer task from the best Slayer master your combat level allows (Turael in Burthorpe below combat 20, then Vannaka in Edgeville Dungeon, Chaeldar at 70), fetch any item the task needs (nose peg, earmuffs, light source), kill the assigned monster until the task is done, then get the next task' } },
 
   // Gathering.
   { skill: 'Fishing', from: 1, to: 20, members: false, name: 'net shrimps and anchovies at Draynor', exec: { kind: 'preset', preset: 'fish-shrimp', bank: true }, req: { items: ['Small fishing net'] } },
@@ -119,6 +137,10 @@ export interface QuestInfo {
   req?: Requirement;
   /** Why it is worth doing early: XP rewards, unlocks. */
   reward: string;
+  /** XP rewards, used to schedule quests that skip early training brackets. */
+  boosts?: Record<string, number>;
+  /** Rough hours to complete (estimates only). Default 0.5 (F2P) / 1 (members). */
+  hours?: number;
 }
 
 /**
@@ -131,13 +153,13 @@ export const QUESTS: QuestInfo[] = [
   { name: 'The Restless Ghost', members: false, reward: '1,125 Prayer XP' },
   { name: 'Romeo & Juliet', members: false, reward: '5 quest points' },
   { name: 'Rune Mysteries', members: false, reward: 'Runecraft access (air runes)' },
-  { name: 'Imp Catcher', members: false, reward: '875 Magic XP' },
-  { name: "Witch's Potion", members: false, reward: '325 Magic XP' },
+  { name: 'Imp Catcher', members: false, boosts: { Magic: 875 },  reward: '875 Magic XP' },
+  { name: "Witch's Potion", members: false, boosts: { Magic: 325 },  reward: '325 Magic XP' },
   { name: "Doric's Quest", members: false, req: { skills: { Mining: 15 } }, reward: '1,300 Mining XP; Doric\'s anvils' },
   { name: "The Knight's Sword", members: false, req: { skills: { Mining: 10 } }, reward: '12,725 Smithing XP' },
   { name: 'Goblin Diplomacy', members: false, reward: '200 Crafting XP' },
   { name: 'Ernest the Chicken', members: false, reward: '300 coins; 4 quest points' },
-  { name: 'Vampyre Slayer', members: false, reward: '4,825 Attack XP' },
+  { name: 'Vampyre Slayer', members: false, boosts: { Attack: 4825 },  reward: '4,825 Attack XP' },
   { name: 'Prince Ali Rescue', members: false, reward: 'free Al Kharid toll gate' },
   { name: "Pirate's Treasure", members: false, reward: '450 coins, emerald, gold ring' },
   { name: 'Misthalin Mystery', members: false, reward: '600 Crafting XP' },
@@ -146,17 +168,44 @@ export const QUESTS: QuestInfo[] = [
   { name: "Black Knights' Fortress", members: false, req: { qp: 12 }, reward: '2,500 coins' },
   { name: 'Demon Slayer', members: false, reward: 'Silverlight' },
   { name: 'Below Ice Mountain', members: false, req: { qp: 16 }, reward: 'Ruins of Camdozaal access' },
-  { name: 'Dragon Slayer I', members: false, req: { qp: 32 }, reward: '18,650 Strength and Defence XP; rune platebody' },
+  { name: 'Dragon Slayer I', members: false, boosts: { Strength: 18650, Defence: 18650 }, hours: 3,  req: { qp: 32 }, reward: '18,650 Strength and Defence XP; rune platebody' },
 
-  { name: 'Waterfall Quest', members: true, reward: '13,750 Attack and Strength XP (level 1 -> 30)' },
-  { name: 'Witch\'s House', members: true, reward: '6,325 Hitpoints XP' },
-  { name: 'Fight Arena', members: true, reward: '12,175 Attack XP; 2,175 Thieving XP' },
-  { name: 'Tree Gnome Village', members: true, reward: '11,450 Attack XP; spirit tree access' },
+  { name: 'Waterfall Quest', members: true, boosts: { Attack: 13750, Strength: 13750 },  reward: '13,750 Attack and Strength XP (level 1 -> 30)' },
+  { name: 'Witch\'s House', members: true, boosts: { Hitpoints: 6325 },  reward: '6,325 Hitpoints XP' },
+  { name: 'Fight Arena', members: true, boosts: { Attack: 12175 },  reward: '12,175 Attack XP; 2,175 Thieving XP' },
+  { name: 'Tree Gnome Village', members: true, boosts: { Attack: 11450 },  reward: '11,450 Attack XP; spirit tree access' },
   { name: 'Druidic Ritual', members: true, reward: 'Herblore unlocked' },
   { name: 'Priest in Peril', members: true, reward: '1,406 Prayer XP; Morytania access' },
   { name: 'Nature Spirit', members: true, req: { quests: ['Priest in Peril', 'The Restless Ghost'] }, reward: 'Mort Myre access; 3 x 2,000 XP' },
   { name: 'Lost City', members: true, req: { skills: { Crafting: 31, Woodcutting: 36 } }, reward: 'Zanaris; dragon longsword/dagger' },
+  { name: 'The Dig Site', members: true, req: { skills: { Agility: 10, Herblore: 10, Thieving: 25 }, quests: ['Druidic Ritual'] }, reward: 'Digsite pendant; Fossil Island access via Bone Voyage', hours: 2 },
+  { name: 'Bone Voyage', members: true, req: { quests: ['The Dig Site'] }, reward: 'Fossil Island (ammonite crabs); needs 100 Varrock Museum kudos', hours: 1 },
   { name: 'Monkey Madness I', members: true, req: { quests: ['The Grand Tree', 'Tree Gnome Village'] }, reward: 'dragon scimitar; big combat XP' },
+];
+
+export interface AcquireInfo {
+  item: string;
+  members: boolean;
+  /** Price per item (gp); the GE pays guide price +30%. */
+  price: number;
+  source: AcquireSource;
+  req?: Requirement;
+}
+
+const GE: AcquireSource = { kind: 'ge' };
+
+/**
+ * Items that training methods and quests require, and how to get them. Shops first: GE buying is
+ * the less reliable path (search/price entry is not verified live yet).
+ */
+export const ACQUIRE: AcquireInfo[] = [
+  { item: 'Knife', members: false, price: 10, source: GE },
+  { item: 'Small fishing net', members: false, price: 10, source: GE },
+  { item: 'Fly fishing rod', members: false, price: 10, source: GE },
+  { item: 'Feather', members: false, price: 4, source: GE },
+  { item: 'Lobster pot', members: false, price: 40, source: GE },
+  { item: 'Tinderbox', members: false, price: 5, source: GE },
+  { item: 'Barbarian rod', members: true, price: 50, source: GE },
 ];
 
 /** Areas never walked into by a strategy: the Wilderness (surface and dungeons). */

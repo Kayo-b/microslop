@@ -11,6 +11,9 @@ watchdog   ends sub-goals that stop making progress
 rescue     Claude proposes one sub-goal when a planner gives up or the watchdog trips
 ```
 
+For a whole build (target levels, quests, items) run from a fresh account, see
+[PLANS.md](PLANS.md): plan files compile into a roadmap of these phases.
+
 ## Commands
 
 ```bash

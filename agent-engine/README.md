@@ -34,7 +34,8 @@ Claude Sonnet.
 | `src/decision/` | `/v1/systemone` adapters (Jev hosted, Laya local) |
 | `src/engine/` | candidates, compact state, reflexes, verification, step log, `GameIntentEngine` |
 | `src/planner/` | task trees + gathering presets, declarative completion conditions |
-| `src/llm/` | Claude planner and escalator |
+| `src/llm/` | LLM planner, escalator, rescue, Haiku -> Sonnet tiers |
+| `src/strategy/`, `src/goalplan/` | strategies and catalog; plan files compiled into roadmaps ([docs/PLANS.md](docs/PLANS.md)) |
 | `src/agent/`, `src/cli.ts` | run loop and CLI |
 | `src/dataset/` | step logs → fine-tuning examples |
 

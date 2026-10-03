@@ -78,14 +78,16 @@ export class AnthropicClient implements LlmClient {
   }
 
   async structured<T>(req: StructuredRequest<T>): Promise<StructuredResult<T>> {
+    // Haiku 4.5 rejects `effort`, and the refusal fallback is for the 5.x models.
+    const small = /haiku/i.test(this.model);
+    const format = betaZodOutputFormat(req.schema as z.ZodType);
     const response = await this.client.beta.messages.parse({
       model: this.model,
       max_tokens: req.maxTokens ?? 16000,
-      betas: [FALLBACK_BETA],
       // Server-side refusal fallback: a declined request is retried on the recommended model.
-      fallbacks: 'default',
+      ...(small ? {} : { betas: [FALLBACK_BETA], fallbacks: 'default' as const }),
       system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
-      output_config: { effort: req.effort ?? 'medium', format: betaZodOutputFormat(req.schema as z.ZodType) },
+      output_config: small ? { format } : { effort: req.effort ?? 'medium', format },
       messages: [{ role: 'user', content: req.user }],
     });
     if (response.stop_reason === 'refusal') return { kind: 'refusal', reason: `declined (${response.stop_details?.category ?? 'no category'})` };

@@ -12,6 +12,9 @@ import type { Requirement } from './catalog.ts';
 /** VarPlayer ids (RuneLite VarPlayerID). */
 export const VARP_MEMBERSHIP_DAYS = 1780;
 export const VARP_QUEST_POINTS = 101;
+/** Tutorial Island progress (VarPlayerID.TUTORIAL); 1000 once the player reaches the mainland. */
+export const VARP_TUTORIAL = 281;
+export const TUTORIAL_DONE = 1000;
 
 export interface AccountApi {
   varp(id: number): Promise<number>;
@@ -23,11 +26,13 @@ export interface Account {
   questPoints: number;
   /** Quest display name -> NOT_STARTED | IN_PROGRESS | FINISHED. */
   quests: Map<string, string>;
+  /** Tutorial Island progress (varp 281); absent means finished. */
+  tutorial?: number;
 }
 
 export async function readAccount(api: AccountApi): Promise<Account> {
-  const [days, qp, states] = await Promise.all([api.varp(VARP_MEMBERSHIP_DAYS), api.varp(VARP_QUEST_POINTS), api.questStates()]);
-  return { members: days > 0, questPoints: qp, quests: new Map(states.map((q) => [q.displayName, q.state])) };
+  const [days, qp, states, tutorial] = await Promise.all([api.varp(VARP_MEMBERSHIP_DAYS), api.varp(VARP_QUEST_POINTS), api.questStates(), api.varp(VARP_TUTORIAL)]);
+  return { members: days > 0, questPoints: qp, quests: new Map(states.map((q) => [q.displayName, q.state])), tutorial };
 }
 
 /** Last bank contents seen, kept across runs. */
@@ -68,6 +73,8 @@ export interface Profile {
   combatLevel: number;
   /** Names of items carried, worn or last seen banked. */
   owned: Set<string>;
+  /** Coins carried plus coins last seen banked. */
+  coins: number;
   bankKnown: boolean;
 }
 
@@ -78,6 +85,7 @@ export function buildProfile(account: Account, s: Snapshot, bank: BankMemory): P
     levels: new Map(s.skills.map((k) => [k.name, k.level])),
     combatLevel: s.player?.combatLevel ?? 3,
     owned,
+    coins: s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0) + (bank.items.get('Coins') ?? 0),
     bankKnown: bank.seenAt !== null,
   };
 }

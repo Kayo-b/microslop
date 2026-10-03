@@ -28,6 +28,8 @@ export interface Activity {
   needsLlm?: boolean;
   /** Minutes before the activity is stopped. Default: the campaign's minutesPerActivity. */
   minutes?: number;
+  /** Ending complete or impossible ends the campaign (a plan run: reached, or nothing can progress). */
+  final?: boolean;
 }
 
 export interface CampaignConfig {
@@ -45,7 +47,14 @@ export interface CampaignConfig {
   rescue: boolean;
   llm?: string;
   llmModel?: string;
+  /** Run this plan file instead of the activity rotation (see docs/PLANS.md). */
+  plan?: string;
   activities: Activity[];
+}
+
+/** The single activity of a plan campaign: `run --plan` in 45-minute slices until reached. */
+export function planActivities(planFile: string): Activity[] {
+  return [{ name: 'plan', args: ['--plan', planFile], minutes: 45, final: true }];
 }
 
 export const DEFAULT_ACTIVITIES: Activity[] = [
@@ -192,6 +201,10 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
     d.log(`■ ${act.name}: ${status} - ${reason}`);
 
     for (const [k, v] of cooldowns) cooldowns.set(k, v - 1);
+    if (act.final && (status === 'complete' || status === 'impossible')) {
+      d.log(status === 'complete' ? `${act.name} reached: stopping` : `${act.name} cannot progress: stopping (see llm-report and the roadmap)`);
+      break;
+    }
     if (status === 'impossible' || status === 'error' || status === 'crashed') cooldowns.set(act.name, cfg.cooldownRounds);
     last = act.name;
 
@@ -326,6 +339,7 @@ if (import.meta.main) {
       world: { type: 'string' },
       'restart-client': { type: 'boolean', default: false },
       'dry-run': { type: 'boolean', default: false },
+      plan: { type: 'string' },
     },
   });
   const file = values.config ? (JSON.parse(readFileSync(values.config, 'utf8')) as Partial<CampaignConfig>) : {};
@@ -336,6 +350,8 @@ if (import.meta.main) {
   if (values.rescue) cfg.rescue = true;
   if (values.llm) cfg.llm = values.llm;
   if (values['llm-model']) cfg.llmModel = values['llm-model'];
+  if (values.plan) cfg.plan = values.plan;
+  if (cfg.plan) cfg.activities = planActivities(path.resolve(cfg.plan));
   if (values.only) {
     const only = new Set(values.only.split(',').map((x) => x.trim()));
     cfg.activities = cfg.activities.filter((a) => only.has(a.name));

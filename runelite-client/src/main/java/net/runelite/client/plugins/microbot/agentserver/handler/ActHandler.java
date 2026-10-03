@@ -16,11 +16,13 @@ import net.runelite.client.plugins.microbot.util.combat.Rs2Combat;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
 import net.runelite.client.plugins.microbot.util.magic.Rs2CombatSpells;
+import net.runelite.client.plugins.microbot.util.magic.Rs2Magic;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.util.dialogues.Rs2Dialogue;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
@@ -46,7 +48,7 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
  * Body: {@code {"op": "...", ...}} with ops
  * {@code interact, use_item_on, walk, walk_cancel, dialogue_continue, dialogue_select,
  * production_select, bank_open, bank_close, bank_deposit_all, bank_deposit, bank_withdraw, drop,
- * toggle_run}. See {@code agent-engine/src/types.ts} for the field shapes.
+ * toggle_run, attack_style, autocast, shop_*, ge_*, tab_open, widget_click, type_text, cast_on}. See {@code agent-engine/src/types.ts} for the field shapes.
  * <p>
  * The response only reports whether the interaction was dispatched ({@code success}) or why it could
  * not be ({@code reason}); callers verify effects from the next {@code /snapshot}.
@@ -63,7 +65,11 @@ public class ActHandler extends AgentHandler {
 	static final Set<String> OPS = new HashSet<>(Arrays.asList(
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
-			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_collect", "ge_close"));
+			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_collect", "ge_close",
+			"tab_open", "widget_click", "type_text", "cast_on"));
+
+	/** Longest text {@code type_text} accepts (display names are at most 12 characters). */
+	private static final int MAX_TYPED = 32;
 
 	private final Client client;
 
@@ -238,6 +244,46 @@ public class ActHandler extends AgentHandler {
 				}
 				// Needs a staff that can autocast, the magic level and the runes.
 				return Rs2Combat.setAutoCastSpell(spell, Boolean.TRUE.equals(body.get("defensive"))) ? Result.ok() : Result.fail("cannot_autocast");
+			}
+			case "cast_on": {
+				// Select a combat spell, then click the NPC with it (Tutorial Island's Wind Strike, no staff).
+				Rs2CombatSpells spell;
+				try {
+					spell = Rs2CombatSpells.valueOf(requireString(body, "spell"));
+				} catch (IllegalArgumentException e) {
+					throw new IllegalArgumentException("Unknown combat spell: " + body.get("spell"));
+				}
+				Rs2NpcModel npc = findNpc(requireMap(body, "target"));
+				if (npc == null) return Result.fail("target_not_found");
+				if (!Rs2Magic.cast(spell)) return Result.fail("cannot_cast");
+				if (!sleepUntil(() -> Microbot.getClientThread().runOnClientThreadOptional(client::isWidgetSelected).orElse(false), 2_000)) return Result.fail("spell_not_selected");
+				return npc.click("Cast") ? Result.ok() : Result.fail("click_failed");
+			}
+			case "tab_open": {
+				// Tutorial Island guides wait for a side tab to be opened (settings, inventory, skills...).
+				InterfaceTab tab;
+				try {
+					tab = InterfaceTab.valueOf(requireString(body, "tab"));
+				} catch (IllegalArgumentException e) {
+					throw new IllegalArgumentException("Unknown tab: " + body.get("tab"));
+				}
+				if (Rs2Tab.getCurrentTab() == tab) return Result.ok();
+				Rs2Tab.switchTo(tab);
+				return sleepUntil(() -> Rs2Tab.getCurrentTab() == tab, 2_000) ? Result.ok() : Result.fail("tab_not_opened");
+			}
+			case "widget_click": {
+				// Buttons on interfaces with no world target: character design "Confirm", name lookup, etc.
+				String text = requireString(body, "text");
+				boolean exact = Boolean.TRUE.equals(body.get("exact"));
+				if (!Rs2Widget.hasWidget(text)) return Result.fail("widget_not_found");
+				return Rs2Widget.clickWidget(text, exact) ? Result.ok() : Result.fail("click_failed");
+			}
+			case "type_text": {
+				String text = requireString(body, "text");
+				if (text.isEmpty() || text.length() > MAX_TYPED) throw new IllegalArgumentException("text must be 1-" + MAX_TYPED + " characters");
+				Rs2Keyboard.typeString(text);
+				if (Boolean.TRUE.equals(body.get("enter"))) Rs2Keyboard.enter();
+				return Result.ok();
 			}
 			default:
 				throw new IllegalArgumentException("Unknown op: " + op);

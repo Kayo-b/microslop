@@ -219,6 +219,10 @@ response only says whether the action was dispatched; verify effects from the ne
 | `bank_deposit` / `bank_withdraw` | `itemId`, `amount` (number or `"all"`) |
 | `drop` | `slot` |
 | `toggle_run` | `enabled` |
+| `tab_open` | `tab` (`InterfaceTab` name: `SETTINGS`, `INVENTORY`, `SKILLS`, `QUESTS`, `PRAYER`, `MAGIC`, ...) |
+| `widget_click` | `text` (visible widget text, e.g. `Confirm`), optional `exact` |
+| `cast_on` | `spell` (`Rs2CombatSpells` name, e.g. `WIND_STRIKE`), `target` (`{kind: npc, index}`) |
+| `type_text` | `text` (1-32 chars, e.g. a display name), optional `enter` |
 
 ```json
 {"op": "interact", "target": {"kind": "npc", "index": 1530}, "action": "Net"}

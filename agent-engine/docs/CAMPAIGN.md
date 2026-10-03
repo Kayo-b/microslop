@@ -8,6 +8,7 @@ npm run campaign -- --hours 4                      # scripted activities only
 npm run campaign -- --hours 6 --llm claude-code --rescue --restart-client
 npm run campaign -- --only fish-shrimp,range-cows --hours 1
 npm run campaign -- --config my-campaign.json      # override any field of DEFAULT_CONFIG
+npm run campaign -- --plan plans/NAME.json --hours 6 --restart-client   # one plan instead of the rotation (PLANS.md)
 ```
 
 Each round: check the client (relaunch with `--restart-client`, log in to `--world`, default 316)

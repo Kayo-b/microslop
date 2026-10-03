@@ -71,7 +71,12 @@ export interface CombatTask {
   lootValue?: number;
   /** Combat style; ranged and magic buy, carry and wear their kit (bow + arrows, staff + runes). Default melee. */
   style?: CombatStyle;
+  /** Melee only: select the attack style that trains `skill` (Attack, Strength or Defence) before fighting. */
+  setStyle?: boolean;
 }
+
+/** Combat tab button (varp 43) whose XP goes to each melee skill: Accurate, Aggressive, Defensive. */
+export const MELEE_STYLE: Record<string, number> = { Attack: 0, Strength: 1, Defence: 3 };
 
 /** What the combat planner has seen of the bank, and helpers it needs from the world. */
 export interface CombatContext {
@@ -223,6 +228,12 @@ function combatReadiness(task: CombatTask, s: Snapshot, cc: CombatContext): Plan
     return { kind: 'subgoal', subgoal: goal(`wield the ${wield.name} (better ${wield.slot})`, [wield.name], ['Wield', 'Wear'], { equipped: [wield.name] }, 10, keep) };
   }
 
+  // Melee XP goes to the skill of the selected style.
+  const styleIndex = task.setStyle && style === 'melee' ? MELEE_STYLE[task.skill] : undefined;
+  if (styleIndex !== undefined && s.player?.attackStyle !== undefined && s.player.attackStyle !== styleIndex && !s.player.inCombat) {
+    return { kind: 'act', action: { op: 'attack_style', index: styleIndex }, reason: `select the attack style that trains ${task.skill}` };
+  }
+
   // Top up before engaging: the in-fight reflex only eats below 50%.
   if (hpFrac < 0.6 && food.count > 0 && !s.player?.inCombat) {
     const edible = s.inventory.items.find((i) => i.actions.some((a) => a.toLowerCase() === 'eat'))!;
@@ -363,11 +374,15 @@ export class TaskTreePlanner implements Planner {
     this.name = name;
   }
 
-  static fromPreset(preset: string, opts: { bank?: boolean; untilLevel?: number } = {}): TaskTreePlanner {
+  /** `skill` + `setStyle` retarget a melee combat preset at Attack, Strength or Defence. */
+  static fromPreset(preset: string, opts: { bank?: boolean; untilLevel?: number; skill?: string; setStyle?: boolean } = {}): TaskTreePlanner {
     const gather = PRESETS[preset];
     if (gather) return new TaskTreePlanner({ kind: 'gather', ...gather, bank: opts.bank ?? false, untilLevel: opts.untilLevel }, preset);
     const combat = COMBAT_PRESETS[preset];
-    if (combat) return new TaskTreePlanner({ kind: 'combat', ...combat, untilLevel: opts.untilLevel }, preset);
+    if (combat) {
+      const retarget = opts.setStyle && !combat.style && opts.skill ? { skill: opts.skill, setStyle: true } : {};
+      return new TaskTreePlanner({ kind: 'combat', ...combat, ...retarget, untilLevel: opts.untilLevel }, preset);
+    }
     throw new Error(`Unknown task preset "${preset}". Available: ${[...Object.keys(PRESETS), ...Object.keys(COMBAT_PRESETS)].join(', ')}`);
   }
 
