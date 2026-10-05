@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { goalsFor, intentKey, parseOption, reverseFromRecord, rng } from '../src/dataset/reverse.ts';
 import { synthesize } from '../src/dataset/synth.ts';
 import { isEvalRun } from '../src/dataset/build.ts';
+import { toExample } from '../src/dataset/export.ts';
 import type { StepRecord } from '../src/engine/log.ts';
 
 test('reverse: option labels parse into name, action and product', () => {
@@ -58,4 +59,16 @@ test('build: eval split holds out whole runs deterministically', () => {
   assert.equal(isEvalRun('2026-09-29T10-23-15-389Z'), isEvalRun('2026-09-29T10-23-15-389Z'));
   const runs = Array.from({ length: 1000 }, (_, i) => `run-${i}`).filter((r) => isEvalRun(r)).length;
   assert.ok(runs > 60 && runs < 140, String(runs));
+});
+
+test('export: Laya runs give no labels, Jev runs do', () => {
+  const record = (engine: string) => ({
+    runId: 'r1', step: 1, subgoal: 'bury bones', engine, source: 'model',
+    state: { subgoal: 'bury bones' },
+    questions: { target: { type: 'choice', instructions: 'x', criteria: { 'inv:0#Bury': 'Inventory Bones: Bury' } } },
+    chosen: { op: 'interact', optionId: 'inv:0#Bury', confidence: 0.9 },
+    outcome: { success: true, effect: 'changed: inventory', ticks: 2, messages: [] },
+  }) as unknown as StepRecord;
+  assert.equal(toExample(record('jev'))?.labels.target, 'inv:0#Bury');
+  assert.equal(toExample(record('laya')), null);
 });

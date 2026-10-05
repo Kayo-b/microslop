@@ -49,6 +49,9 @@ export function strayAttack(r: StepRecord): boolean {
 export function toExample(r: StepRecord, includeDone = false): Example | null {
   if (!r.questions || !r.chosen || !r.state) return null;
   if (r.source !== 'model' && r.source !== 'escalation') return null;
+  // Laya's own choices are the student's output, not teacher labels: training on them would
+  // reinforce its mistakes.
+  if (r.source === 'model' && r.engine === 'laya') return null;
   const acted = r.outcome !== undefined;
   if (acted && !r.outcome!.success) return null;
   if (!acted && !(includeDone && r.chosen.op === 'done')) return null;
