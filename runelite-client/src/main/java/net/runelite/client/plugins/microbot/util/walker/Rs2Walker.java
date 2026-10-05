@@ -2069,6 +2069,14 @@ public class Rs2Walker {
                 }
             }
 
+            // Castle Wars lobby doors: on F2P worlds their only exit is back to Ferox Enclave, and the
+            // pathfinder only routes through them as that transport (blocked_edges.tsv), so accept it.
+            if (Rs2Dialogue.hasQuestion("Return to Ferox Enclave?")) {
+                log.info("Detected Castle Wars lobby door prompt, returning to Ferox Enclave");
+                Rs2Dialogue.clickOption("Yes");
+                sleepUntil(() -> !Rs2Dialogue.hasQuestion("Return to Ferox Enclave?"), 3000);
+            }
+
             // entering desert warning
             if (Rs2Widget.isWidgetVisible(565, 20) && Rs2Widget.clickWidget(565, 20)) {
                 sleepUntil(() -> {

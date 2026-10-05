@@ -364,3 +364,21 @@ from either side, so they keep the plain neighbour rule.
 
 **Where this applies:** `agentserver/handler/SnapshotHandler`, any reachability pre-check before
 `Rs2GameObject` interactions.
+
+## 18. A door the collision map lets through can still be a one-way exit on F2P worlds
+
+The Castle Wars lobby's Large doors (30387/30388) look like an ordinary passable wall door in the
+shipped collision data. On free-to-play worlds they never let the player out: opening them asks
+"Return to Ferox Enclave?", "Yes" teleports to Ferox and "No" leaves the player inside.
+
+**Why this matters:** an agent run walked to the Ferox Enclave bank, then left Ferox through the
+Castle Wars portal because the pathfinder believed the lobby doors led outside. The walker clicked
+the doors, answered "No" and clicked again for eight minutes until the loop detector ended the run.
+
+**Pattern to follow:** block the door edges in `blocked_edges.tsv` and model the door as the
+transport it really is (`teleportation_portals.tsv`: lobby tile -> Ferox Enclave), with the prompt
+answered in `Rs2Walker` next to the other transport warnings. Do not "fix" such a loop by teaching
+the caller to answer "No".
+
+**Where this applies:** `shortestpath/blocked_edges.tsv`, `shortestpath/teleportation_portals.tsv`,
+`Rs2Walker` prompt handling; any door whose interaction opens a destination prompt.

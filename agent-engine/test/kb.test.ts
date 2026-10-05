@@ -82,6 +82,8 @@ test('knowledge base resolves places, placements, spawns and multi-loc names', (
   assert.deepEqual(rocks[0]?.point, { x: 3285, y: 3368, plane: 0 });
   assert.equal(kb.nearestSpawns('goblin', from).length, 2);
   assert.ok(kb.nearestBanks(from).length > 0, 'Microbot BankLocation enum is imported');
+  const nearFerox = { x: 3134, y: 3600, plane: 0 };
+  assert.ok(kb.nearestBanks(nearFerox, 5).every((b) => !/ferox/i.test(b.name)), 'no Wilderness banks');
   kb.close();
 });
 

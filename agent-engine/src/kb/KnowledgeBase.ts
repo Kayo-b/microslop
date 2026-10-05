@@ -7,6 +7,7 @@
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { InventoryItem, EquipmentItem, SkillState, WorldPoint } from '../types.ts';
+import { inWilderness } from '../strategy/catalog.ts';
 
 export interface ResourceInfo {
   kind: 'npc' | 'object';
@@ -194,14 +195,16 @@ export class KnowledgeBase {
 
   /**
    * Nearest banks and deposit boxes. Banks Microbot marks as conditional (quest, PvP world,
-   * guild access) are skipped unless `includeConditional`.
+   * guild access) are skipped unless `includeConditional`. Wilderness banks (Ferox Enclave) never
+   * qualify: the walk there crosses PvP ground, and leaving Ferox by portal strands an F2P account
+   * in the Castle Wars lobby.
    */
   nearestBanks(from: WorldPoint, limit = 3, includeMembers = true, includeConditional = false): Place[] {
     const rows = this.stmt("SELECT name, kind, x, y, plane, members, requirement FROM places WHERE kind IN ('bank', 'deposit_box')")
       .all()
       .filter((r) => includeConditional || r.requirement == null)
       .map((r) => this.toPlace(r, from))
-      .filter((p) => includeMembers || !p.members);
+      .filter((p) => (includeMembers || !p.members) && !inWilderness(p.point));
     return sortAndLimit(rows, from, limit);
   }
 
