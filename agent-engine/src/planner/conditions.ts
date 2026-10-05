@@ -18,6 +18,8 @@ export interface DoneCondition {
   lacksItems?: string[];
   bankOpen?: boolean;
   shopOpen?: boolean;
+  /** The Grand Exchange interface is open (or closed). */
+  geOpen?: boolean;
   /** Current HP is at least this fraction of max (0-1). */
   hpAtLeast?: number;
   /** Every listed item is worn/wielded (case-insensitive substring). */
@@ -59,6 +61,7 @@ export function evaluate(cond: DoneCondition, s: Snapshot): boolean {
   if (cond.lacksItems?.length) clauses.push(cond.lacksItems.every((n) => count(s, n) === 0));
   if (cond.bankOpen !== undefined) clauses.push(s.bank.open === cond.bankOpen);
   if (cond.shopOpen !== undefined) clauses.push(s.shop.open === cond.shopOpen);
+  if (cond.geOpen !== undefined) clauses.push((s.grandExchange?.open ?? false) === cond.geOpen);
   if (cond.hpAtLeast !== undefined) {
     const hp = s.player?.hp;
     clauses.push(!!hp && hp.max > 0 && hp.current / hp.max >= cond.hpAtLeast);
@@ -115,6 +118,7 @@ export function describe(cond: DoneCondition | undefined): string {
   if (cond.lacksItems?.length) parts.push(`no ${cond.lacksItems.join('/')}`);
   if (cond.bankOpen !== undefined) parts.push(cond.bankOpen ? 'bank open' : 'bank closed');
   if (cond.shopOpen !== undefined) parts.push(cond.shopOpen ? 'shop open' : 'shop closed');
+  if (cond.geOpen !== undefined) parts.push(cond.geOpen ? 'Grand Exchange open' : 'Grand Exchange closed');
   if (cond.hpAtLeast !== undefined) parts.push(`HP >= ${Math.round(cond.hpAtLeast * 100)}%`);
   if (cond.equipped?.length) parts.push(`wearing ${cond.equipped.join(', ')}`);
   if (cond.dialogueOpen !== undefined) parts.push(cond.dialogueOpen ? 'dialogue open' : 'dialogue closed');

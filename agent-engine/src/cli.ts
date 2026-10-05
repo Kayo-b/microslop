@@ -42,6 +42,10 @@ import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from '
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
+import { activityNeeds, catalogReqFor } from './prereq/needs.ts';
+import { counts as prereqCounts, PrereqPlanner } from './prereq/PrereqPlanner.ts';
+import { resolveSetup } from './prereq/resolve.ts';
+import type { Execution } from './strategy/catalog.ts';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -88,6 +92,8 @@ const { values, positionals } = parseArgs({
     'max-subgoals': { type: 'string' },
     'log-dir': { type: 'string', default: path.join(ROOT, 'logs', 'agent') },
     kb: { type: 'string', default: path.join(ROOT, 'data', 'kb.sqlite') },
+    'no-prereq': { type: 'boolean', default: false },
+    'setup-budget': { type: 'string' },
     help: { type: 'boolean', short: 'h', default: false },
   },
 });
@@ -112,17 +118,45 @@ function help(): void {
   npm run agent -- run --strategy level [--skill S] [--level N] | money | quest [--quest NAME]
   npm run agent -- plan show FILE [--offline [--f2p]]                 (roadmap, estimates, LLM coverage)
   npm run agent -- run --plan FILE                                    (run a plan; LLM rescue on when a key is set)
+  npm run agent -- prereq --task PRESET [--setup-budget N]            (dry run: what the activity needs first)
   npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
 
-Flags: --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE
+Flags: --no-prereq  skip the prerequisites flow (tools, gear, food, coins, levels) before a run
+       --engine jev|laya  --min-confidence N  --max-subgoals N  --log-dir DIR  --kb FILE
        --rescue   let an LLM propose a sub-goal when a scripted planner gives up or gets stuck
                   (rescues logged to data/rescues.jsonl)
        --llm P    LLM backend: anthropic | claude-code | openai | openrouter | groq | together |
                   gemini | deepseek | mistral | xai | ollama | lmstudio (or LLM_PROVIDER; default:
                   the provider whose API key is set)   --llm-model M   model for that backend`);
+}
+
+async function prereqShow(): Promise<void> {
+  if (!values.task) throw new Error('prereq needs --task PRESET');
+  const kb = openKb();
+  const backend = new MicrobotBackend();
+  const snap = await backend.snapshot();
+  const bank = new BankMemory();
+  const needs = activityNeeds({ kind: 'preset', preset: values.task, bank: values.bank }, catalogReqFor({ kind: 'preset', preset: values.task, bank: values.bank }));
+  if (!needs) {
+    console.log(`${values.task}: nothing to check`);
+    return;
+  }
+  const profile = buildProfile(await readAccount(backend), snap, bank);
+  const pos = snap.player?.position;
+  const shop = (item: string) => {
+    const o = pos && kb ? kb.shopOffers(item, pos)[0] : undefined;
+    return o ? { source: { kind: 'shop' as const, name: o.shop, keeper: o.keeper, point: o.point }, price: o.price } : null;
+  };
+  const setup = resolveSetup(needs, { profile, counts: prereqCounts(snap, bank) }, { skip: recentFailures(path.join(ROOT, 'data', 'strategy-failures.json')), shop });
+  const budget = values['setup-budget'] ? Number(values['setup-budget']) : 30;
+  console.log(`${needs.name}: bank last seen ${bank.seenAt ?? 'never'}, ${profile.coins} coins`);
+  console.log(`needs: ${JSON.stringify({ req: needs.req, tools: needs.tools.map((t) => t.any), supplies: needs.supplies.map((x) => x.item), food: needs.food, gear: needs.gear, kit: needs.style, inputs: needs.inputs.map((i) => i.item) })}`);
+  if (setup.blocked.length) console.log(`blocked: ${setup.blocked.join('; ')}`);
+  setup.steps.forEach((st, i) => console.log(`${String(i + 1).padStart(2)}. ~${String(st.minutes).padStart(3)} min  ${st.phase.text}  (${st.why})`));
+  console.log(setup.steps.length ? `total ~${setup.minutes} min: ${setup.minutes > budget ? `over the ${budget}-min budget, the activity would be skipped` : 'runs before the activity'}` : 'prerequisites met');
 }
 
 async function inspect(): Promise<void> {
@@ -250,6 +284,23 @@ function report(): void {
 async function run(): Promise<void> {
   const kb = openKb();
   const backend = new MicrobotBackend();
+  // Prerequisites flow (src/prereq/): an activity's tools, gear, food, coins and levels are met
+  // before it starts; setups longer than --setup-budget minutes (default 30) skip the activity.
+  const withPrereq = (exec: Execution, inner: Planner, o: { bank?: BankMemory; skip?: Set<string>; onFailed?: (id: string) => void } = {}): Planner => {
+    if (values['no-prereq']) return inner;
+    const needs = activityNeeds(exec, catalogReqFor(exec));
+    if (!needs) return inner;
+    return new PrereqPlanner(inner, needs, {
+      account: backend,
+      kb,
+      bank: o.bank,
+      skip: o.skip,
+      budgetMinutes: values['setup-budget'] ? Number(values['setup-budget']) : 30,
+      log: (m) => console.log(m),
+      onSetupFailed: o.onFailed,
+    });
+  };
+  const skipFile = path.join(ROOT, 'data', 'strategy-failures.json');
   let planner: Planner;
   let goal: string;
   let strategyFailed: ((phaseId: string) => void) | undefined;
@@ -324,13 +375,15 @@ async function run(): Promise<void> {
     const budgets = { 1: new HourlyBudget(spec.policy.llm.tier1PerHour), 2: new HourlyBudget(spec.policy.llm.tier2PerHour) };
     const guarded = (tier: 1 | 2, purpose: LlmPurpose) => new GuardedLlm(tier === 1 ? tiers!.tier1 : tiers!.tier2, { tier, purpose, budget: budgets[tier], log: callLog });
     console.log(`[plan] ${spec.name}: state in ${paths.dir}; LLM ${tiers ? `tier 1 ${tiers.tier1.name}, tier 2 ${tiers.tier2.name}` : 'none (llm and quest phases are skipped)'}`);
+    const planBank = new BankMemory(paths.bank);
     planner = strategy = new StrategyPlanner(
       { kind: 'plan', spec, rates: observedRates(readJsonl<LedgerRecord>(paths.ledger)) },
       {
         skip: failing,
         account: backend,
         kb,
-        bank: new BankMemory(paths.bank),
+        bank: planBank,
+        prereq: (phase, inner) => withPrereq(phase.exec, inner, { bank: planBank, skip: failing, onFailed: (id) => recordFailure(paths.failures, id) }),
         llmPlanner: () => (tiers ? new LlmPlanner({ llm: guarded(1, 'plan') }) : null),
         questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') })) : null),
         tutorialPlanner: () => new TutorialPlanner(backend),
@@ -348,7 +401,6 @@ async function run(): Promise<void> {
     goal = `plan ${spec.name}`;
   } else if (values.strategy) {
     const g = strategyGoal(values.strategy);
-    const skipFile = path.join(ROOT, 'data', 'strategy-failures.json');
     const failing = recentFailures(skipFile);
     if (failing.size) console.log(`[strategy] skipping phases that failed twice in the last 12 h: ${[...failing].join(', ')}`);
     strategyFailed = (id) => recordFailure(skipFile, id);
@@ -356,6 +408,7 @@ async function run(): Promise<void> {
       skip: failing,
       account: backend,
       kb,
+      prereq: (phase, inner) => withPrereq(phase.exec, inner, { skip: failing, onFailed: (id) => recordFailure(skipFile, id) }),
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
       questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
       onPhase: (phase, why) => {
@@ -370,6 +423,10 @@ async function run(): Promise<void> {
     goal = values.goal;
   } else {
     throw new Error('run needs --task PRESET, --subgoal TEXT or --goal TEXT');
+  }
+
+  if (values.task) {
+    planner = withPrereq({ kind: 'preset', preset: values.task, bank: values.bank }, planner, { skip: recentFailures(skipFile), onFailed: (id) => recordFailure(skipFile, id) });
   }
 
   // A quest selected by an earlier run (or by hand) keeps Quest Helper's QuestScript walking
@@ -466,6 +523,7 @@ try {
   else if (command === 'strategy') await strategy();
   else if (command === 'run') await run();
   else if (command === 'plan') await planShow();
+  else if (command === 'prereq') await prereqShow();
   else if (command === 'llm-report') report();
   else {
     help();

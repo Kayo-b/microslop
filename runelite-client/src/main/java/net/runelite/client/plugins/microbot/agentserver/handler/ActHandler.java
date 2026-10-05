@@ -26,6 +26,7 @@ import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.plugins.microbot.util.grandexchange.Rs2GrandExchange;
 import net.runelite.client.plugins.microbot.util.shop.Rs2Shop;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.io.IOException;
@@ -65,7 +66,7 @@ public class ActHandler extends AgentHandler {
 	static final Set<String> OPS = new HashSet<>(Arrays.asList(
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
-			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_collect", "ge_close",
+			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_sell", "ge_collect", "ge_close",
 			"tab_open", "widget_click", "type_text", "cast_on"));
 
 	/** Longest text {@code type_text} accepts (display names are at most 12 characters). */
@@ -197,6 +198,24 @@ public class ActHandler extends AgentHandler {
 				Rs2GrandExchange.collectAllToInventory();
 				return Result.ok();
 			}
+			case "ge_sell": {
+				// Sell offer at 70% of the guide price so it fills at once, then collect the coins.
+				// Sells the carried items (noted or not) of that name; quantity defaults to all of them.
+				if (!Rs2GrandExchange.isOpen()) return Result.fail("ge_not_open");
+				String name = requireString(body, "name");
+				int held = Rs2Inventory.itemQuantity(name);
+				if (held <= 0) return Result.fail("item_not_in_inventory");
+				int quantity = Math.min(held, Math.max(1, optInt(body, "quantity", held)));
+				int guide = Microbot.getRs2ItemManager().getGEPrice(name);
+				if (guide <= 0) return Result.fail("no_ge_price");
+				int price = Math.max(1, (int) Math.floor(guide * 0.7));
+				if (Rs2GrandExchange.getAvailableSlots().length == 0) Rs2GrandExchange.collectAllToInventory();
+				if (Rs2GrandExchange.getAvailableSlots().length == 0) return Result.fail("no_free_ge_slot");
+				if (!Rs2GrandExchange.sellItem(name, quantity, price)) return Result.fail("offer_failed (item selection or price entry did not complete)");
+				sleepUntil(Rs2GrandExchange::hasSoldOffer, 10_000);
+				Rs2GrandExchange.collectAllToInventory();
+				return Result.ok();
+			}
 			case "ge_collect":
 				if (!Rs2GrandExchange.isOpen()) return Result.fail("ge_not_open");
 				return Rs2GrandExchange.collectAllToInventory() ? Result.ok() : Result.fail("nothing_to_collect");
@@ -214,8 +233,18 @@ public class ActHandler extends AgentHandler {
 				return Rs2Bank.depositAll() ? Result.ok() : Result.fail("deposit_failed");
 			case "bank_deposit":
 				return bankTransfer(true, requireInt(body, "itemId"), body.get("amount"));
-			case "bank_withdraw":
+			case "bank_withdraw": {
+				// Noted withdraws carry a whole stack of products to the Grand Exchange in one slot.
+				if (Rs2Bank.isOpen()) {
+					boolean noted = Boolean.TRUE.equals(body.get("noted"));
+					if (Rs2Bank.hasWithdrawAsNote() != noted) {
+						// The Note button toggles both ways (Rs2Bank.setWithdrawAsItem clicks another widget).
+						Rs2Widget.clickWidget(InterfaceID.Bankmain.NOTE);
+						if (!sleepUntil(() -> Rs2Bank.hasWithdrawAsNote() == noted, 2_000)) return Result.fail("note_toggle_failed");
+					}
+				}
 				return bankTransfer(false, requireInt(body, "itemId"), body.get("amount"));
+			}
 			case "drop": {
 				Rs2ItemModel item = Rs2Inventory.getItemInSlot(requireInt(body, "slot"));
 				if (item == null) return Result.fail("slot_empty");

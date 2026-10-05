@@ -216,7 +216,7 @@ response only says whether the action was dispatched; verify effects from the ne
 | `dialogue_continue` / `dialogue_select` | `option` (text) for select |
 | `production_select` | `option` (product name in the make-X interface) |
 | `bank_open` / `bank_close` / `bank_deposit_all` | none |
-| `bank_deposit` / `bank_withdraw` | `itemId`, `amount` (number or `"all"`) |
+| `bank_deposit` / `bank_withdraw` | `itemId`, `amount` (number or `"all"`); withdraw takes optional `noted: true` |
 | `drop` | `slot` |
 | `toggle_run` | `enabled` |
 | `tab_open` | `tab` (`InterfaceTab` name: `SETTINGS`, `INVENTORY`, `SKILLS`, `QUESTS`, `PRAYER`, `MAGIC`, ...) |

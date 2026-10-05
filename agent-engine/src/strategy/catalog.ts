@@ -21,7 +21,9 @@ export type Execution =
   /** Tutorial Island, driven by its progress varp. */
   | { kind: 'tutorial' }
   /** Buy an item at a shop or the Grand Exchange. */
-  | { kind: 'acquire'; item: string; count: number; source: AcquireSource };
+  | { kind: 'acquire'; item: string; count: number; source: AcquireSource; /** Price each; default: the ACQUIRE entry. */ price?: number }
+  /** Turn banked products into coins on the Grand Exchange. */
+  | { kind: 'sell'; items: string[] };
 
 export type AcquireSource = { kind: 'shop'; name: string; keeper: string; point: WorldPoint } | { kind: 'ge' };
 
@@ -195,16 +197,46 @@ export interface AcquireInfo {
 const GE: AcquireSource = { kind: 'ge' };
 
 /**
+ * Where F2P shopkeepers stand, keyed by the wiki shop name (no trailing period). The KB has every
+ * shop's stock and prices but no keeper locations; points are approximate, the keeper is found by
+ * name once in view. Shops not listed here are never chosen.
+ */
+export const SHOP_LOCATIONS: Record<string, { keeper: string; point: WorldPoint }> = {
+  "Horvik's Armour Shop": { keeper: 'Horvik', point: { x: 3229, y: 3437, plane: 0 } },
+  "Wayne's Chains! - Chainmail specialist": { keeper: 'Wayne', point: { x: 2972, y: 3312, plane: 0 } },
+  "Louie's Armoured Legs Bazaar": { keeper: 'Louie Legs', point: { x: 3316, y: 3175, plane: 0 } },
+  'Helmet Shop': { keeper: 'Peksa', point: { x: 3076, y: 3427, plane: 0 } },
+  "Cassie's Shield Shop": { keeper: 'Cassie', point: { x: 2976, y: 3383, plane: 0 } },
+  "Zeke's Superior Scimitars": { keeper: 'Zeke', point: { x: 3287, y: 3190, plane: 0 } },
+  "Lowe's Archery Emporium": { keeper: 'Lowe', point: { x: 3232, y: 3423, plane: 0 } },
+  "Zaff's Superior Staffs!": { keeper: 'Zaff', point: { x: 3203, y: 3434, plane: 0 } },
+  "Aubury's Rune Shop": { keeper: 'Aubury', point: { x: 3253, y: 3401, plane: 0 } },
+  "Bob's Brilliant Axes": { keeper: 'Bob', point: { x: 3230, y: 3203, plane: 0 } },
+  "Gerrant's Fishy Business": { keeper: 'Gerrant', point: { x: 3013, y: 3224, plane: 0 } },
+  'Lumbridge General Store': { keeper: 'Shop keeper', point: { x: 3212, y: 3246, plane: 0 } },
+};
+
+/** F2P shops that stock starter tools. Shops first: GE buying is the less reliable path. */
+export const TOOL_SHOPS = {
+  bob: { kind: 'shop', name: "Bob's Brilliant Axes", keeper: 'Bob', point: { x: 3230, y: 3203, plane: 0 } },
+  lumbridgeGeneral: { kind: 'shop', name: 'Lumbridge General Store', keeper: 'Shop keeper', point: { x: 3212, y: 3246, plane: 0 } },
+  gerrant: { kind: 'shop', name: "Gerrant's Fishy Business", keeper: 'Gerrant', point: { x: 3013, y: 3224, plane: 0 } },
+} satisfies Record<string, AcquireSource>;
+
+/**
  * Items that training methods and quests require, and how to get them. Shops first: GE buying is
  * the less reliable path (search/price entry is not verified live yet).
  */
 export const ACQUIRE: AcquireInfo[] = [
+  { item: 'Bronze axe', members: false, price: 16, source: TOOL_SHOPS.bob },
+  { item: 'Bronze pickaxe', members: false, price: 1, source: TOOL_SHOPS.bob },
+  { item: 'Hammer', members: false, price: 1, source: TOOL_SHOPS.lumbridgeGeneral },
+  { item: 'Tinderbox', members: false, price: 1, source: TOOL_SHOPS.lumbridgeGeneral },
+  { item: 'Small fishing net', members: false, price: 5, source: TOOL_SHOPS.gerrant },
+  { item: 'Fly fishing rod', members: false, price: 5, source: TOOL_SHOPS.gerrant },
+  { item: 'Feather', members: false, price: 2, source: TOOL_SHOPS.gerrant },
   { item: 'Knife', members: false, price: 10, source: GE },
-  { item: 'Small fishing net', members: false, price: 10, source: GE },
-  { item: 'Fly fishing rod', members: false, price: 10, source: GE },
-  { item: 'Feather', members: false, price: 4, source: GE },
   { item: 'Lobster pot', members: false, price: 40, source: GE },
-  { item: 'Tinderbox', members: false, price: 5, source: GE },
   { item: 'Barbarian rod', members: true, price: 50, source: GE },
 ];
 

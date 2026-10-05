@@ -21,7 +21,7 @@ export const SHOPS: Record<string, Shop> = {
 };
 
 /** Shop price (gp) and where to buy it. */
-const PRICES: Record<string, { price: number; shop: Shop }> = {
+export const KIT_PRICES: Record<string, { price: number; shop: Shop }> = {
   Shortbow: { price: 50, shop: SHOPS.lowe! },
   'Bronze arrow': { price: 1, shop: SHOPS.lowe! },
   'Iron arrow': { price: 3, shop: SHOPS.lowe! },
@@ -86,7 +86,7 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
   if (weapon) need.push({ name: weapon, count: 1 });
   else {
     const starter = STARTER_KIT[style].weapon;
-    const p = PRICES[starter]!;
+    const p = KIT_PRICES[starter]!;
     buy.push({ name: starter, count: 1, shop: p.shop });
     need.push({ name: starter, count: 1 });
     cost += p.price;
@@ -100,8 +100,8 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
       const ammo = STARTER_KIT.ranged.ammo!;
       const n = Math.min(maxBuy, Math.max(0, coins - cost));
       if (n > 0) {
-        buy.push({ name: ammo, count: n, shop: PRICES[ammo]!.shop });
-        cost += n * PRICES[ammo]!.price;
+        buy.push({ name: ammo, count: n, shop: KIT_PRICES[ammo]!.shop });
+        cost += n * KIT_PRICES[ammo]!.price;
       }
       need.push({ name: ammo, count: Math.min(n + count(s, kc.bank, ammo, 'all'), maxBuy) });
       return { need, buy, cost, supply: total + n };
@@ -112,7 +112,7 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
 
   const spell = SPELLS.filter((sp) => sp.magic <= level(s, 'Magic')).at(-1)!;
   const casts = Math.min(...Object.entries(spell.runes).map(([rune, per]) => Math.floor(count(s, kc.bank, rune, 'all') / per)));
-  const perCast = Object.entries(spell.runes).reduce((sum, [rune, per]) => sum + per * PRICES[rune]!.price, 0);
+  const perCast = Object.entries(spell.runes).reduce((sum, [rune, per]) => sum + per * KIT_PRICES[rune]!.price, 0);
   let target = casts;
   if (casts < minSupply) {
     const n = Math.min(maxBuy - casts, Math.floor(Math.max(0, coins - cost) / perCast));
@@ -120,8 +120,8 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
       const have = count(s, kc.bank, rune, 'all');
       const want = (casts + n) * per;
       if (want > have) {
-        buy.push({ name: rune, count: want - have, shop: PRICES[rune]!.shop });
-        cost += (want - have) * PRICES[rune]!.price;
+        buy.push({ name: rune, count: want - have, shop: KIT_PRICES[rune]!.shop });
+        cost += (want - have) * KIT_PRICES[rune]!.price;
       }
     }
     target = casts + n;

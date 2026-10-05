@@ -408,3 +408,51 @@ export function freshProfile(members: boolean): Profile {
     bankKnown: false,
   };
 }
+
+/**
+ * Milestones that meet one requirement (an activity's skills, quests, quest points, combat level,
+ * items) from the live account, in order; `blocked` names the parts nothing in the catalog reaches.
+ * Used by the prerequisites flow (src/prereq/) before an activity starts.
+ */
+export function requirementMilestones(req: Requirement, profile: Profile, o: { skip?: Set<string>; limit?: number } = {}): { milestones: Milestone[]; blocked: string[] } {
+  const sim = simulate(profile);
+  const ctx: Ctx = { spec: { name: 'setup', targets: {}, quests: [], items: [], policy: { boosterQuests: false, levelsPerPhase: 98, llm: { tier1PerHour: 0, tier2PerHour: 0 } } }, skip: o.skip ?? new Set(), rates: new Map() };
+  const milestones: Milestone[] = [];
+  for (let i = 0; i < (o.limit ?? 20); i++) {
+    const needs = needsOf(req, sim, ctx.skip, 0);
+    if (needs === null) return { milestones, blocked: [describeReq(req)] };
+    if (!needs.length) return { milestones, blocked: [] };
+    const m = forNeed(needs[0]!, sim, ctx, 'activity prerequisite', 0);
+    if (!m) return { milestones, blocked: [describeNeed(needs[0]!)] };
+    milestones.push(m);
+    apply(m, sim);
+  }
+  return { milestones, blocked: ['too many prerequisite steps'] };
+}
+
+function describeNeed(n: Need): string {
+  switch (n.kind) {
+    case 'skill':
+      return `${n.skill} ${n.level}`;
+    case 'quest':
+      return `quest ${n.quest.name}`;
+    case 'qp':
+      return `${n.qp} quest points`;
+    case 'combat':
+      return `combat ${n.level}`;
+    case 'item':
+      return `item ${n.item}`;
+    case 'coins':
+      return `${n.amount} coins`;
+  }
+}
+
+function describeReq(r: Requirement): string {
+  return [
+    ...Object.entries(r.skills ?? {}).map(([s, l]) => `${s} ${l}`),
+    ...(r.quests ?? []).map((q) => `quest ${q}`),
+    ...(r.items ?? []).map((i) => `item ${i}`),
+    r.qp ? `${r.qp} quest points` : '',
+    r.combat ? `combat ${r.combat}` : '',
+  ].filter(Boolean).join(', ') || 'requirement';
+}

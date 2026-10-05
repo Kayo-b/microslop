@@ -7,7 +7,7 @@
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { InventoryItem, EquipmentItem, SkillState, WorldPoint } from '../types.ts';
-import { inWilderness } from '../strategy/catalog.ts';
+import { inWilderness, SHOP_LOCATIONS } from '../strategy/catalog.ts';
 
 export interface ResourceInfo {
   kind: 'npc' | 'object';
@@ -239,6 +239,22 @@ export class KnowledgeBase {
       .all(page, from.x - radius, from.x + radius, from.y - radius, from.y + radius)
       .map((r) => ({ name: r.page as string, kind: 'spawn' as const, point: { x: r.x as number, y: r.y as number, plane: r.plane as number }, members: r.members === 1 }));
     return sortAndLimit(rows, from, opts.limit ?? 5);
+  }
+
+  /**
+   * Shops that sell `item` for coins, among the shops with a known keeper location
+   * (`SHOP_LOCATIONS`): cheapest first, then nearest.
+   */
+  shopOffers(item: string, from: WorldPoint): { shop: string; keeper: string; point: WorldPoint; price: number }[] {
+    const out: { shop: string; keeper: string; point: WorldPoint; price: number; distance: number }[] = [];
+    for (const r of this.stmt('SELECT shop, sell_price FROM shop_stock WHERE item = ? COLLATE NOCASE AND currency = ?').all(item, 'Coins')) {
+      const shop = String(r.shop).replace(/\.$/, '');
+      const loc = SHOP_LOCATIONS[shop];
+      const price = Number(r.sell_price);
+      if (!loc || !Number.isFinite(price) || price <= 0) continue;
+      out.push({ shop, keeper: loc.keeper, point: loc.point, price, distance: tileDistance(from, loc.point) });
+    }
+    return out.sort((a, b) => a.price - b.price || a.distance - b.distance).map(({ distance: _d, ...o }) => o);
   }
 
   shopsSelling(item: string): { shop: string; sellPrice: string | null; stock: string | null }[] {

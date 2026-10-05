@@ -36,6 +36,7 @@ Claude Sonnet.
 | `src/planner/` | task trees + gathering presets, declarative completion conditions |
 | `src/llm/` | LLM planner, escalator, rescue, Haiku -> Sonnet tiers |
 | `src/strategy/`, `src/goalplan/` | strategies and catalog; plan files compiled into roadmaps ([docs/PLANS.md](docs/PLANS.md)) |
+| `src/prereq/` | activity prerequisites: tools, gear, food, kit coins, levels met before a run ([docs/PREREQUISITES.md](docs/PREREQUISITES.md)) |
 | `src/agent/`, `src/cli.ts` | run loop and CLI |
 | `src/dataset/` | step logs → fine-tuning examples |
 

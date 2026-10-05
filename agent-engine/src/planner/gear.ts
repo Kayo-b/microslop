@@ -143,3 +143,37 @@ export const STARTER_KIT: Record<Exclude<CombatStyle, 'melee'>, { weapon: string
   ranged: { weapon: 'Shortbow', ammo: 'Bronze arrow' },
   magic: { weapon: 'Staff' },
 };
+
+const METALS: [string, number][] = [['Bronze', 1], ['Iron', 1], ['Steel', 5], ['Black', 10], ['Mithril', 20], ['Adamant', 30], ['Rune', 40]];
+const SLOT_TYPES: Partial<Record<GearSlot, string[]>> = {
+  weapon: ['scimitar', 'longsword', 'sword'],
+  shield: ['kiteshield', 'sq shield'],
+  head: ['full helm', 'med helm'],
+  body: ['platebody', 'chainbody'],
+  legs: ['platelegs', 'plateskirt'],
+};
+
+/** Armour (and melee weapon) slots worth filling before fighting in a style. */
+export function requiredSlots(style: CombatStyle): GearSlot[] {
+  if (style === 'melee') return ['weapon', 'head', 'body', 'legs', 'shield'];
+  // Bows are two-handed; the ranged/magic weapon and ammo come from the kit.
+  return style === 'ranged' ? ['head', 'body', 'legs'] : ['head', 'body', 'legs', 'shield'];
+}
+
+/** Items that fill a slot at these levels, best first (metal tier, then type). */
+export function gearCandidates(slot: GearSlot, levels: { attack: number; defence: number }): string[] {
+  const types = SLOT_TYPES[slot] ?? [];
+  const lvl = slot === 'weapon' ? levels.attack : levels.defence;
+  return METALS.filter(([, req]) => req <= lvl)
+    .reverse()
+    .flatMap(([metal]) => types.map((t) => `${metal} ${t}`));
+}
+
+/** Whether `name` fills `slot` for `style` and its level requirement is met. */
+export function fillsSlot(name: string, slot: GearSlot, style: CombatStyle, levels: { attack: number; defence: number; ranged: number; magic: number }): boolean {
+  const g = classifyGear(name, style);
+  if (!g || g.slot !== slot || g.score <= 0) return false;
+  const armour = slot !== 'weapon' && slot !== 'ammo';
+  const lvl = armour ? levels.defence : style === 'melee' ? levels.attack : style === 'ranged' ? levels.ranged : levels.magic;
+  return g.req <= lvl;
+}

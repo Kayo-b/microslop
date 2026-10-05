@@ -121,6 +121,7 @@ export function expectedChanges(action: GameAction): Change[] {
     case 'shop_close':
       return ['shop'];
     case 'ge_buy':
+    case 'ge_sell':
     case 'ge_collect':
       return ['inventory'];
     case 'ge_close':

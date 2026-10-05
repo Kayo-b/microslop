@@ -5,6 +5,7 @@
  * runs out of time; then the strategy picks the next phase from the catalog and the live profile.
  */
 import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
+import { SellPlanner } from '../goalplan/SellPlanner.ts';
 import { nextMilestone } from '../goalplan/compiler.ts';
 import type { PlanSpec } from '../goalplan/spec.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
@@ -60,6 +61,11 @@ export interface StrategyDeps {
   now?: () => number;
   /** Phase ids to leave out from the start (ones that kept failing in earlier runs). */
   skip?: Iterable<string>;
+  /**
+   * Wraps each phase's planner so its prerequisites (tools, gear, food, coins, levels) are met
+   * first; see src/prereq/. Returns the planner unchanged when the phase has nothing to check.
+   */
+  prereq?: (phase: Phase, planner: Planner) => Planner;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
@@ -95,6 +101,11 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
   }
 
   if (goal.kind === 'money') {
+    // Products earlier money phases banked are only worth something once sold.
+    const products = [...new Set(MONEY.flatMap((r) => r.products))].filter((n) => p.owned.has(n));
+    if (products.length && !skip.has('sell:products')) {
+      return { phase: { id: 'sell:products', text: `sell the ${products.join(', ')} on the Grand Exchange`, exec: { kind: 'sell', items: products } }, why: 'banked products from earlier money phases' };
+    }
     const route = MONEY.filter((r) => fits(r) && !skip.has(`money:${r.id}`)).sort((a, b) => b.gpHour - a.gpHour)[0];
     if (!route) return null;
     return {
@@ -157,11 +168,37 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
     case 'tutorial':
       return deps.tutorialPlanner?.() ?? null;
     case 'acquire': {
-      const price = ACQUIRE.find((a) => a.item === e.item)?.price ?? 0;
+      const price = e.price ?? ACQUIRE.find((a) => a.item === e.item)?.price ?? 0;
       const bank = deps.bank;
       return new AcquirePlanner({ item: e.item, count: e.count, price, source: e.source, bank: () => (bank?.seenAt ? bank.items : null) });
     }
+    case 'sell': {
+      const bank = deps.bank;
+      return new SellPlanner({ items: e.items, bank: () => (bank?.seenAt ? bank.items : null) });
+    }
   }
+}
+
+/** Opens the nearest bank once so item requirements can be checked against what the account owns. */
+export function surveyBankStep(s: Snapshot, kb: KnowledgeBase | null): PlanStep {
+  if (s.bank.open) {
+    return { kind: 'subgoal', subgoal: { text: 'close the bank', targets: ['Bank'], actions: ['Close'], doneWhen: { bankOpen: false }, isDone: compile({ bankOpen: false }), maxSteps: 5 } };
+  }
+  const pos = s.player?.position;
+  const bank = pos && kb ? kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
+  return {
+    kind: 'subgoal',
+    subgoal: {
+      text: `open the ${bank?.name ?? 'nearest bank'} to see what the account owns`,
+      targets: ['Bank booth', 'Banker'],
+      actions: ['Bank'],
+      destination: bank ? { name: bank.name, point: bank.point } : undefined,
+      avoid: NOT_BANKS,
+      doneWhen: { bankOpen: true },
+      isDone: compile({ bankOpen: true }),
+      maxSteps: 300,
+    },
+  };
 }
 
 /** Melee skills a phase trains by selecting the matching attack style. */
@@ -202,7 +239,8 @@ export class StrategyPlanner implements Planner {
         const choice = choosePhase(this.goal, profile, this.skip);
         if (!choice) return { kind: 'impossible', reason: `no ${this.goal.kind} activity fits this account right now` };
         if ('done' in choice) return { kind: 'complete', reason: choice.done };
-        const planner = plannerFor(choice.phase, ctx.snapshot, { ...this.deps, bank: this.bank });
+        const raw = plannerFor(choice.phase, ctx.snapshot, { ...this.deps, bank: this.bank });
+        const planner = raw && this.deps.prereq ? this.deps.prereq(choice.phase, raw) : raw;
         if (!planner) {
           this.skip.add(choice.phase.id);
           this.deps.onPhase?.(choice.phase, 'skipped: cannot run here (needs an LLM key, Quest Helper, or a locatable spawn)');
@@ -225,26 +263,7 @@ export class StrategyPlanner implements Planner {
   }
 
   private surveyBank(ctx: PlannerContext): PlanStep | null {
-    const s = ctx.snapshot;
-    if (this.bank.seenAt !== null) return null;
-    if (s.bank.open) {
-      return { kind: 'subgoal', subgoal: { text: 'close the bank', targets: ['Bank'], actions: ['Close'], doneWhen: { bankOpen: false }, isDone: compile({ bankOpen: false }), maxSteps: 5 } };
-    }
-    const pos = s.player?.position;
-    const bank = pos && this.deps.kb ? this.deps.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
-    return {
-      kind: 'subgoal',
-      subgoal: {
-        text: `open the ${bank?.name ?? 'nearest bank'} to see what the account owns`,
-        targets: ['Bank booth', 'Banker'],
-        actions: ['Bank'],
-        destination: bank ? { name: bank.name, point: bank.point } : undefined,
-        avoid: NOT_BANKS,
-        doneWhen: { bankOpen: true },
-        isDone: compile({ bankOpen: true }),
-        maxSteps: 300,
-      },
-    };
+    return this.bank.seenAt !== null ? null : surveyBankStep(ctx.snapshot, this.deps.kb ?? null);
   }
 
   private tutorialDone = false;

@@ -201,12 +201,15 @@ export type GameAction =
   | { op: 'bank_close' }
   | { op: 'bank_deposit_all' }
   | { op: 'bank_deposit'; itemId: number; amount: number | 'all' }
-  | { op: 'bank_withdraw'; itemId: number; amount: number | 'all' }
+  /** noted: withdraw as banknotes (whole stacks in one slot, e.g. to sell); default as items. */
+  | { op: 'bank_withdraw'; itemId: number; amount: number | 'all'; noted?: boolean }
   | { op: 'drop'; slot: number }
   | { op: 'shop_buy'; itemId: number; amount: 1 | 5 | 10 | 50 }
   | { op: 'shop_close' }
   /** Buy offer at the guide price +30%, then collect into the inventory (the GE must be open). */
   | { op: 'ge_buy'; name: string; quantity: number }
+  /** Sell offer at 70% of the guide price for the carried items of that name (default all), then collect the coins. */
+  | { op: 'ge_sell'; name: string; quantity?: number }
   | { op: 'ge_collect' }
   | { op: 'ge_close' }
   | { op: 'toggle_run'; enabled: boolean }
