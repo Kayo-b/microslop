@@ -1698,8 +1698,19 @@ public class Rs2GrandExchange {
         return Microbot.getVarbitValue(VarbitID.GE_NEWOFFER_QUANTITY);
     }
 
+    /**
+     * Price of the offer being set up, or -1 when the game no longer exposes it: varbit 4398
+     * (GE_NEWOFFER_PRICE) is missing from the current cache and reading it throws on the client
+     * thread. With -1 the caller always types the price, which is what an offer needs anyway.
+     */
     static int getOfferPrice() {
-        return Microbot.getVarbitValue(4398);
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            try {
+                return Microbot.getClient().getVarbitValue(VarbitID.GE_NEWOFFER_PRICE);
+            } catch (IndexOutOfBoundsException e) {
+                return -1;
+            }
+        }).orElse(-1);
     }
 
     public static void setChatboxValue(int value) {
