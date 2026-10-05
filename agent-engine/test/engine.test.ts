@@ -224,6 +224,26 @@ test('bank candidates follow wanted counts and the sub-goal actions', () => {
   assert.match(label, /you need 5 more/);
 });
 
+test('bank withdraws fit the free inventory slots', () => {
+  const bank = { open: true, items: [{ slot: 0, id: 440, name: 'Iron ore', quantity: 112 }, { slot: 1, id: 995, name: 'Coins', quantity: 500 }] };
+  const goal = { text: 'withdraw iron ore', targets: ['Iron ore', 'Coins'], actions: ['Withdraw'], want: [{ name: 'Iron ore', count: 26 }] };
+  const coins = { ...item(1, 995, 'Coins'), quantity: 240, stackable: true };
+  const full = snapshot({ inventory: { freeSlots: 0, items: [item(0, 440, 'Iron ore'), coins] }, bank });
+  const fullIds = buildCandidates(full, null, goal).candidates.map((c) => c.id);
+  assert.ok(!fullIds.some((id) => id.startsWith('bank:withdraw') && id.endsWith(':440')), 'no iron ore with 0 free slots');
+  assert.ok(fullIds.includes('bank:withdraw10:995'), 'a carried stack still takes more');
+  const junk = snapshot({ inventory: { freeSlots: 0, items: [item(0, 440, 'Iron ore'), item(1, 1265, 'Bronze pickaxe')] }, bank });
+  const junkIds = buildCandidates(junk, null, goal).candidates.map((c) => c.id);
+  assert.ok(junkIds.includes('bank:deposit:1265'), 'full: deposit what the sub-goal does not want');
+  assert.ok(!junkIds.includes('bank:deposit:440'), 'never deposit the wanted item');
+
+  const three = snapshot({ inventory: { freeSlots: 3, items: [item(0, 440, 'Iron ore')] }, bank });
+  const ids = buildCandidates(three, null, goal).candidates.map((c) => c.id);
+  assert.ok(ids.includes('bank:withdraw3:440') && ids.includes('bank:withdraw1:440'));
+  assert.ok(!ids.includes('bank:withdraw5:440') && !ids.includes('bank:withdraw10:440'), 'never more than fits');
+  assert.match(buildCandidates(three, null, goal).candidates.find((c) => c.id === 'bank:withdraw3:440')!.label, /3 free slots/);
+});
+
 test('smithing candidates queue no more than the sub-goal still needs', () => {
   const s = snapshot({ production: { open: true, interface: 'smithing', options: ['Bronze sword', 'Bronze mace'] } });
   s.inventory.items.push(item(3, 1321, 'Bronze sword'));

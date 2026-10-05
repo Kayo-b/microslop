@@ -406,7 +406,12 @@ function allowedAction(action: string, goal: SubGoal): boolean {
 }
 
 function bankCandidates(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
-  return bankCandidatesAll(s, goal, max * 2).filter((c) => allowedAction(c.action, goal)).slice(0, max);
+  // A full inventory blocks every withdraw: then depositing what the sub-goal does not want is
+  // the way forward even when it only names Withdraw.
+  const full = s.inventory.freeSlots === 0;
+  return bankCandidatesAll(s, goal, max * 2)
+    .filter((c) => allowedAction(c.action, goal) || (full && c.action === 'Deposit' && !matchesAny(c.name, goal.targets)))
+    .slice(0, max);
 }
 
 function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[] {
@@ -437,12 +442,22 @@ function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[]
   }
   // Only withdraw what the sub-goal asks for; a bank can hold hundreds of items.
   const wanted = s.bank.items.filter((b) => matchesAny(b.name, goal.targets));
+  const free = s.inventory.freeSlots;
   for (const b of wanted.slice(0, 4)) {
     const need = stillNeeded(s, goal, b.name);
     if (need === 0) continue;
-    const needText = need === null ? '' : `; you need ${need} more`;
-    for (const n of [1, 5, 10] as const) {
-      if (b.quantity >= n && (need === null || n <= need)) {
+    // A stack already carried takes no new slot. Otherwise every withdrawn item needs one (bank
+    // items carry no stackable flag; wanting more than an inventory holds marks a stackable).
+    const stacks = s.inventory.items.some((i) => i.id === b.id && i.stackable) || (need !== null && need > 28);
+    if (!stacks && free === 0) continue; // "You don't have enough inventory space": deposit first
+    const room = stacks ? Infinity : free;
+    const needText = (need === null ? '' : `; you need ${need} more`) + (stacks ? '' : `; ${free} free slots`);
+    const amounts: number[] = [1, 5, 10];
+    // Exactly what fits (or what is still needed) when neither is a stock amount.
+    const fill = Math.min(need ?? room, room, b.quantity);
+    if (Number.isFinite(fill) && fill > 1 && !amounts.includes(fill)) amounts.push(fill);
+    for (const n of amounts) {
+      if (b.quantity >= n && n <= room && (need === null || n <= need)) {
         out.push({ id: `bank:withdraw${n}:${b.id}`, kind: 'bank_item', name: b.name, action: `Withdraw-${n}`, label: `Withdraw ${n} ${b.name} (bank has ${b.quantity}${needText})`, gameAction: { op: 'bank_withdraw', itemId: b.id, amount: n } });
       }
     }
