@@ -78,3 +78,11 @@ test('kit: out of arrows with no coins anywhere stops instead of looping', () =>
   const step = nextKitStep('ranged', s, { bank: new Map() }, bank);
   assert.ok(step?.kind === 'impossible' && /out of arrows/.test(step.reason), JSON.stringify(step));
 });
+
+test('kit: coins for only a handful of arrows give up on ranged instead of shopping', () => {
+  const s = char({ inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 3, stackable: true })] }, equipment: [{ slot: 'WEAPON', id: 841, name: 'Shortbow' }] });
+  const kit = planKit('ranged', s, { bank: new Map() });
+  assert.equal(kit.supply, 2);
+  const step = nextKitStep('ranged', s, { bank: new Map() }, bank);
+  assert.ok(step?.kind === 'impossible' && /only cover 2 arrows/.test(step.reason), JSON.stringify(step));
+});

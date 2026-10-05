@@ -61,8 +61,13 @@ export interface KitPlan {
   /** What must be bought (not owned anywhere), with counts and total cost. */
   buy: { name: string; count: number; shop: Shop }[];
   cost: number;
+  /** Arrows or casts on hand (carried, worn, banked) once `buy` is done. */
+  supply: number;
   spell?: string;
 }
+
+/** Fewer arrows or casts than this is not worth a shopping trip: they are gone in one fight. */
+export const MIN_VIABLE_SUPPLY = 20;
 
 /** What the style needs and what has to be bought, given the coins available. */
 export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: KitContext, opts: KitOptions = {}): KitPlan {
@@ -99,10 +104,10 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
         cost += n * PRICES[ammo]!.price;
       }
       need.push({ name: ammo, count: Math.min(n + count(s, kc.bank, ammo, 'all'), maxBuy) });
-    } else if (best) {
-      need.push({ name: best, count: Math.min(count(s, kc.bank, best, 'all'), maxBuy) });
+      return { need, buy, cost, supply: total + n };
     }
-    return { need, buy, cost };
+    if (best) need.push({ name: best, count: Math.min(count(s, kc.bank, best, 'all'), maxBuy) });
+    return { need, buy, cost, supply: total };
   }
 
   const spell = SPELLS.filter((sp) => sp.magic <= level(s, 'Magic')).at(-1)!;
@@ -122,7 +127,7 @@ export function planKit(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, kc: K
     target = casts + n;
   }
   for (const [rune, per] of Object.entries(spell.runes)) need.push({ name: rune, count: Math.min(target, maxBuy) * per });
-  return { need, buy, cost, spell: spell.spell };
+  return { need, buy, cost, supply: target, spell: spell.spell };
 }
 
 function sub(text: string, targets: string[], actions: string[], doneWhen: Parameters<typeof compile>[0], maxSteps: number, keep: string[], extra: object = {}): PlanStep {
@@ -159,6 +164,13 @@ export function nextKitStep(style: Exclude<CombatStyle, 'melee'>, s: Snapshot, k
     if (coinsNeeded > invCoins && (kc.bank?.get('Coins') ?? 0) > 0) want.push({ name: 'Coins', count: Math.min(coinsNeeded, invCoins + kc.bank!.get('Coins')!) });
     if (want.length) return sub(`withdraw ${want.map((w) => `${w.count} ${w.name}`).join(', ')} for ${style}`, want.map((w) => w.name), ['Withdraw'], { hasItems: want }, 30, keep, { want });
     return null;
+  }
+
+  // Restocking that cannot reach a usable supply (a broke account buys 1 arrow) only ends in
+  // attacking with an empty quiver: give up on the style instead.
+  if (kit.buy.length && kit.supply < MIN_VIABLE_SUPPLY) {
+    const what = style === 'ranged' ? 'arrows' : 'casts';
+    return { kind: 'impossible', reason: `${style}: coins only cover ${kit.supply} ${what} (need ${MIN_VIABLE_SUPPLY}+; ${invCoins} coins carried${kc.bank ? `, ${kc.bank.get('Coins') ?? 0} banked` : ''})` };
   }
 
   if (kit.buy.length) {
