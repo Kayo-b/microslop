@@ -23,6 +23,8 @@ export const ELLIS = { name: 'Al Kharid tannery', point: { x: 3273, y: 3192, pla
 
 const HIDE = 'Cowhide';
 const LEATHER = 'Leather';
+/** The tanner's name for the 1 gp cowhide -> leather option. */
+const TAN_OPTION = 'Soft leather';
 /** Coins kept back from hide purchases: tanning fees and the toll gate. */
 const RESERVE = 500;
 /** GE offers are placed at the guide price +30%; a little more covers price drift. */
@@ -93,7 +95,7 @@ export class TanningPlanner implements Planner {
 
     // The tanner's interface: tan every carried hide.
     if (s.production.open && s.production.interface === 'tanning') {
-      if (h.hides > 0) return { kind: 'act', action: { op: 'production_select', option: LEATHER }, reason: `tan ${h.hides} cowhides into leather` };
+      if (h.hides > 0) return { kind: 'act', action: { op: 'production_select', option: TAN_OPTION }, reason: `tan ${h.hides} cowhides into leather` };
       return step('bank the leather at the Al Kharid bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 200, { destination: AL_KHARID_BANK });
     }
 
@@ -126,7 +128,7 @@ export class TanningPlanner implements Planner {
     }
 
     if (h.hides > 0) {
-      return step(`trade with Ellis at the Al Kharid tannery and tan all ${h.hides} cowhides into leather`, ['Ellis', LEATHER], ['Trade', 'Tan All'], { lacksItem: HIDE }, 250, {
+      return step(`trade with Ellis at the Al Kharid tannery and tan all ${h.hides} cowhides into leather`, ['Ellis', TAN_OPTION], ['Trade', 'Tan All'], { lacksItem: HIDE }, 250, {
         destination: ELLIS,
         avoid: ['Tanning rack'],
       });

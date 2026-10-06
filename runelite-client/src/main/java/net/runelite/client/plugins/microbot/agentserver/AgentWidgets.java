@@ -1,11 +1,9 @@
 package net.runelite.client.plugins.microbot.agentserver;
 
 import net.runelite.api.Client;
-import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -96,18 +94,14 @@ public final class AgentWidgets
 		return Rs2Widget.isWidgetVisible(InterfaceID.TANNER, 0);
 	}
 
-	/** Leathers the tanner offers, by the name on their button ("Leather", "Hard leather", ...). */
+	/** Leathers the tanner offers, by the name under their picture ("Soft leather", "Hard leather", ...). */
 	public static List<String> tanningOptions(Client client)
 	{
 		List<String> names = new ArrayList<>();
 		Microbot.getClientThread().runOnClientThreadOptional(() -> {
-			for (Widget w : tanningButtons(client))
+			for (Object[] entry : tanningEntries(client))
 			{
-				String clean = Rs2UiHelper.stripColTags(w.getName()).trim();
-				if (!clean.isEmpty() && !names.contains(clean))
-				{
-					names.add(clean);
-				}
+				names.add((String) entry[0]);
 			}
 			return true;
 		});
@@ -115,70 +109,55 @@ public final class AgentWidgets
 	}
 
 	/**
-	 * Tans every carried hide of the leather named {@code option} (case-insensitive), through the
-	 * button's "Tan All" menu option. Returns false when the tanner lists no such leather.
+	 * Tans the hides of the leather named {@code option} (case-insensitive) by left-clicking its
+	 * picture, whose left-click option is "Tan All" (the menu ops are not exposed as widget actions,
+	 * so a menu invoke does nothing). Returns false when the tanner lists no such leather.
 	 */
 	public static boolean tanAll(Client client, String option)
 	{
 		String wanted = option.toLowerCase(Locale.ROOT);
-		Object[] hit = Microbot.getClientThread().runOnClientThreadOptional(() -> {
-			for (Widget w : tanningButtons(client))
+		Widget model = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			for (Object[] entry : tanningEntries(client))
 			{
-				if (!Rs2UiHelper.stripColTags(w.getName()).trim().toLowerCase(Locale.ROOT).equals(wanted))
+				if (((String) entry[0]).toLowerCase(Locale.ROOT).equals(wanted))
 				{
-					continue;
-				}
-				String[] actions = w.getActions();
-				for (int i = 0; i < actions.length; i++)
-				{
-					if (actions[i] != null && actions[i].equalsIgnoreCase("Tan All"))
-					{
-						return new Object[]{w.getId(), w.getIndex(), i + 1, w.getBounds(), w.getName()};
-					}
+					return (Widget) entry[1];
 				}
 			}
 			return null;
 		}).orElse(null);
-		if (hit == null)
-		{
-			return false;
-		}
-		NewMenuEntry entry = new NewMenuEntry()
-			.option("Tan All")
-			.target((String) hit[4])
-			.identifier((Integer) hit[2])
-			.type(MenuAction.CC_OP)
-			.param0((Integer) hit[1])
-			.param1((Integer) hit[0])
-			.forceLeftClick(false);
-		Microbot.doInvoke(entry, (java.awt.Rectangle) hit[3]);
-		return true;
+		return model != null && Rs2Widget.clickWidget(model);
 	}
 
-	private static List<Widget> tanningButtons(Client client)
+	/**
+	 * The tanner's entries as [name, picture widget]: each sits in its own layer with a MODEL (the
+	 * picture, clickable), a TEXT with the leather's name and a TEXT with the price in coins.
+	 */
+	private static List<Object[]> tanningEntries(Client client)
 	{
-		List<Widget> out = new ArrayList<>();
 		List<Widget> all = new ArrayList<>();
-		for (int child = 0; child < 128; child++)
+		for (int child = 0; child < 200; child++)
 		{
 			Widget w = client.getWidget(InterfaceID.TANNER, child);
-			if (w != null)
+			if (w != null && !w.isHidden())
 			{
-				collect(w, all, 0);
+				all.add(w);
 			}
 		}
-		for (Widget w : all)
+		List<Object[]> out = new ArrayList<>();
+		for (Widget model : all)
 		{
-			String[] actions = w.getActions();
-			if (w.isHidden() || w.getName() == null || w.getName().isEmpty() || actions == null)
+			if (model.getType() != net.runelite.api.widgets.WidgetType.MODEL)
 			{
 				continue;
 			}
-			for (String a : actions)
+			for (Widget text : all)
 			{
-				if (a != null && a.equalsIgnoreCase("Tan All"))
+				String t = text.getText() == null ? "" : Rs2UiHelper.stripColTags(text.getText()).trim();
+				if (text.getParentId() == model.getParentId() && text.getType() == net.runelite.api.widgets.WidgetType.TEXT
+					&& !t.isEmpty() && !t.toLowerCase(Locale.ROOT).endsWith("coins"))
 				{
-					out.add(w);
+					out.add(new Object[]{t, model});
 					break;
 				}
 			}

@@ -40,8 +40,8 @@ test('tanning: carried hides go to Ellis, whose interface tans them all', async 
   const p = planner({ Cowhide: 196 });
   const walk = await next(p, state([coins(5_000), ...hides(27)]));
   assert.ok(walk.kind === 'subgoal' && walk.subgoal.targets?.includes('Ellis') && walk.subgoal.doneWhen?.lacksItem === 'Cowhide', text(walk));
-  const open = state([coins(5_000), ...hides(27)], { production: { open: true, interface: 'tanning', options: ['Leather', 'Hard leather'] } } as Partial<Snapshot>);
-  assert.deepEqual(act(await next(p, open)), { op: 'production_select', option: 'Leather' });
+  const open = state([coins(5_000), ...hides(27)], { production: { open: true, interface: 'tanning', options: ['Soft leather', 'Hard leather'] } } as Partial<Snapshot>);
+  assert.deepEqual(act(await next(p, open)), { op: 'production_select', option: 'Soft leather' });
 });
 
 test('tanning: once the hides are tanned, the leather is withdrawn as notes and sold', async () => {
