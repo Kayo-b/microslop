@@ -98,7 +98,7 @@ public final class AgentTrade
 	 */
 	public static boolean offer(Client client, String itemName, String option)
 	{
-		String wantedItem = itemName.toLowerCase(Locale.ROOT);
+		String wantedItem = itemName.trim().toLowerCase(Locale.ROOT);
 		Object[] hit = Microbot.getClientThread().runOnClientThreadOptional(() -> {
 			Widget side = client.getWidget(InterfaceID.Tradeside.SIDE_LAYER);
 			Widget[] kids = side == null ? null : side.getDynamicChildren();
@@ -112,14 +112,14 @@ public final class AgentTrade
 				{
 					continue;
 				}
-				if (!Rs2UiHelper.stripColTags(w.getName()).toLowerCase(Locale.ROOT).equals(wantedItem))
+				if (!Rs2UiHelper.stripColTags(w.getName()).trim().toLowerCase(Locale.ROOT).equals(wantedItem))
 				{
 					continue;
 				}
 				String[] actions = w.getActions();
 				for (int i = 0; actions != null && i < actions.length; i++)
 				{
-					if (actions[i] != null && actions[i].equalsIgnoreCase(option))
+					if (actions[i] != null && Rs2UiHelper.stripColTags(actions[i]).trim().equalsIgnoreCase(option))
 					{
 						return new Object[]{w.getId(), w.getIndex(), i + 1, w.getBounds(), w.getItemId(), w.getName()};
 					}
