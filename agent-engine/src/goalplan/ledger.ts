@@ -39,6 +39,8 @@ export interface LedgerRecord {
   skill?: string;
   /** Coins gained (negative: spent) over the phase. */
   coins?: number;
+  /** Total worth gained (coins + items at GE prices); see PhaseEnd.worth. */
+  worth?: number;
 }
 
 export function appendLedger(file: string, rec: LedgerRecord): void {

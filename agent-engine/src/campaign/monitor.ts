@@ -83,13 +83,13 @@ export function monitorReport(m: MonitorInput): string[] {
 
   const gold = m.gold.filter((r) => Date.parse(r.ts) >= m.since);
   if (gold.length) {
-    out.push('', '== Gold phases (coins change carried + last seen banked):');
+    out.push('', '== Gold phases (worth change: coins + items at GE prices; coins only for older rows):');
     const byPhase = new Map<string, LedgerRecord[]>();
     for (const r of gold) byPhase.set(r.phase, [...(byPhase.get(r.phase) ?? []), r]);
     let coins = 0;
     let minutes = 0;
     for (const [phase, rs] of [...byPhase].sort()) {
-      const c = rs.reduce((n, r) => n + (r.coins ?? 0), 0);
+      const c = rs.reduce((n, r) => n + (r.worth ?? r.coins ?? 0), 0);
       const min = rs.reduce((n, r) => n + r.minutes, 0);
       coins += c;
       minutes += min;

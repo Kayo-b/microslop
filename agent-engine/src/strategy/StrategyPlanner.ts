@@ -55,6 +55,11 @@ export interface PhaseEnd {
   xp: Record<string, number>;
   /** Change in coins carried plus coins last seen banked over the phase. */
   coins: number;
+  /**
+   * Change in total worth: coins plus every carried and last-seen-banked item at its GE price.
+   * Unlike `coins`, buying stock for a trading loop is not a loss. Absent without GE prices.
+   */
+  worth?: number;
 }
 
 export interface StrategyDeps {
@@ -311,7 +316,7 @@ export class StrategyPlanner implements Planner {
   private readonly bank: BankMemory;
   private readonly now: () => number;
   private readonly skip = new Set<string>();
-  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number; xp: Map<string, number>; coins: number } | null = null;
+  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number; xp: Map<string, number>; coins: number; worth: number | null } | null = null;
 
   constructor(goal: StrategyGoal, deps: StrategyDeps) {
     this.goal = goal;
@@ -346,7 +351,7 @@ export class StrategyPlanner implements Planner {
           this.deps.onPhase?.(choice.phase, 'skipped: cannot run here (needs an LLM key, Quest Helper, or a locatable spawn)');
           continue;
         }
-        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length, xp: new Map(ctx.snapshot.skills.map((k) => [k.name, k.xp])), coins: this.coins(ctx.snapshot) };
+        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length, xp: new Map(ctx.snapshot.skills.map((k) => [k.name, k.xp])), coins: this.coins(ctx.snapshot), worth: this.worth(ctx.snapshot) };
         if (this.goal.kind === 'gold') (this.goal.lastRun ??= new Map()).set(choice.phase.id.split(':')[1]!, this.now());
         this.deps.onPhase?.(choice.phase, choice.why);
       }
@@ -394,6 +399,17 @@ export class StrategyPlanner implements Planner {
   }
 
   /** Coins carried plus coins last seen banked. */
+  /** Coins plus carried and last-seen-banked items at their GE price; null without prices. */
+  private worth(s: Snapshot): number | null {
+    const price = this.deps.gePrice;
+    if (!price) return null;
+    const items = new Map(this.bank.items);
+    for (const i of s.inventory.items) items.set(i.name, (items.get(i.name) ?? 0) + i.quantity);
+    let total = 0;
+    for (const [name, n] of items) total += name === 'Coins' ? n : (price(name) ?? 0) * n;
+    return total;
+  }
+
   private coins(s: Snapshot): number {
     const carried = s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
     return carried + (this.bank.items.get('Coins') ?? 0);
@@ -413,6 +429,6 @@ export class StrategyPlanner implements Planner {
       const gained = k.xp - (cur.xp.get(k.name) ?? k.xp);
       if (gained > 0) xp[k.name] = gained;
     }
-    this.deps.onPhaseEnd?.(cur.phase, { outcome, reason, minutes: (this.now() - cur.startedAt) / 60_000, xp, coins: this.coins(s) - cur.coins });
+    this.deps.onPhaseEnd?.(cur.phase, { outcome, reason, minutes: (this.now() - cur.startedAt) / 60_000, xp, coins: this.coins(s) - cur.coins, ...(cur.worth !== null ? { worth: (this.worth(s) ?? cur.worth) - cur.worth } : {}) });
   }
 }

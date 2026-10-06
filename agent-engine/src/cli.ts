@@ -477,7 +477,8 @@ async function run(): Promise<void> {
         if (why.startsWith('gave up')) strategyFailed?.(phase.id);
       },
       onPhaseEnd: (phase, end) => {
-        console.log(`[strategy] phase ended (${end.outcome}, ${end.minutes.toFixed(0)} min, ${end.coins >= 0 ? '+' : ''}${end.coins} coins): ${phase.text}`);
+        const sign = (n: number) => `${n >= 0 ? '+' : ''}${n}`;
+        console.log(`[strategy] phase ended (${end.outcome}, ${end.minutes.toFixed(0)} min, ${sign(end.coins)} coins${end.worth !== undefined ? `, ${sign(end.worth)} worth` : ''}): ${phase.text}`);
         if (g.kind === 'gold') appendLedger(GOLD_LEDGER, { ts: new Date().toISOString(), plan: 'gold', phase: phase.id, text: phase.text, ...end });
       },
     });

@@ -149,6 +149,25 @@ test('strategy gold: hides already bought are tanned before the rotation moves o
   assert.ok(tan && 'phase' in tan && tan.phase.id === 'gold:tan-hides' && /Cowhide already bought/.test(tan.why), JSON.stringify(tan));
 });
 
+test('strategy gold: a phase that buys stock logs a coin loss but no worth loss', async () => {
+  const api = { varp: async () => 0, questStates: async () => [] };
+  const ends: { coins: number; worth?: number }[] = [];
+  const bank = bankWith([]);
+  bank.items = new Map();
+  let now = 0;
+  const stub: Planner = { name: 'stub', next: async () => ({ kind: 'wait', reason: 'x', until: {}, maxSeconds: 1 }) as never };
+  const planner = new StrategyPlanner({ kind: 'gold', lastRun: new Map([['sell', Date.now()]]) }, {
+    account: api, bank, gePrice: (n) => (n === 'Cowhide' ? 130 : null), llmPlanner: () => stub, now: () => now,
+    onPhaseEnd: (_p, e) => ends.push(e),
+  });
+  const s0 = state({ Attack: 20 }, { inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 13_000, stackable: true })] } });
+  await planner.next({ goal: 'g', snapshot: s0, kb: null, reports: [] });
+  now = 30 * 60_000;
+  const s1 = state({ Attack: 20 }, { inventory: { freeSlots: 27, items: [item(0, 1740, 'Cowhide', { quantity: 100, noted: true, stackable: true })] } });
+  await planner.next({ goal: 'g', snapshot: s1, kb: null, reports: [] });
+  assert.deepEqual(ends[0] && { coins: ends[0].coins, worth: ends[0].worth }, { coins: -13_000, worth: 0 });
+});
+
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {
   const api = { varp: async (id: number) => (id === 101 ? 2 : 0), questStates: async () => [] };
   const phases: string[] = [];
