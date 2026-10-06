@@ -40,16 +40,16 @@ test('stringing: buys amulets, then as much wool, within the coins', async () =>
   assert.deepEqual(act(await next(p, state([coins(10_000), notes, wool], ge))), { op: 'ge_close' });
 });
 
-test('stringing: the GE bank turns notes into 14 + 14, then the wool is used on the amulets', async () => {
+test('stringing: the GE bank turns notes into 13 + 13 (coins take a slot), then the wool is used on the amulets', async () => {
   const p = new StringingPlanner({ price });
   const notes = item(1, 1700, 'Emerald amulet (u)', { noted: true, quantity: 68, stackable: true });
   assert.match(text(await next(p, state([coins(10_000), notes]))), /open the Grand Exchange bank/);
   assert.deepEqual(act(await next(p, bankOpen([coins(10_000), notes], []))), { op: 'bank_deposit', itemId: 1700, amount: 'all' });
   const stock = [{ id: 1699, name: 'Emerald amulet (u)', quantity: 68 }, { id: 1759, name: 'Ball of wool', quantity: 68 }];
-  assert.deepEqual(act(await next(p, bankOpen([coins(10_000)], stock))), { op: 'bank_withdraw', itemId: 1699, amount: 14 });
-  const amulets = Array.from({ length: 14 }, (_, i) => item(1 + i, 1699, 'Emerald amulet (u)'));
-  assert.deepEqual(act(await next(p, bankOpen([coins(10_000), ...amulets], stock))), { op: 'bank_withdraw', itemId: 1759, amount: 14 });
-  const wool = Array.from({ length: 14 }, (_, i) => item(15 + i, 1759, 'Ball of wool'));
+  assert.deepEqual(act(await next(p, bankOpen([coins(10_000)], stock))), { op: 'bank_withdraw', itemId: 1699, amount: 13 });
+  const amulets = Array.from({ length: 13 }, (_, i) => item(1 + i, 1699, 'Emerald amulet (u)'));
+  assert.deepEqual(act(await next(p, bankOpen([coins(10_000), ...amulets], stock))), { op: 'bank_withdraw', itemId: 1759, amount: 13 });
+  const wool = Array.from({ length: 13 }, (_, i) => item(14 + i, 1759, 'Ball of wool'));
   const string = await next(p, state([coins(10_000), ...amulets, ...wool]));
   assert.ok(string.kind === 'subgoal' && string.subgoal.targets?.includes('Ball of wool') && string.subgoal.doneWhen?.lacksItem === 'Emerald amulet (u)', text(string));
 });
@@ -72,5 +72,5 @@ test('stringing: gives up when nothing pays or coins are short', async () => {
   assert.match(text(await next(p, state([coins(60_000)]))), /no free-to-play amulet/);
   const q = new StringingPlanner({ price });
   await next(q, bankOpen([coins(5_000)], []));
-  assert.match(text(await next(q, state([coins(5_000)]))), /do not buy 14/);
+  assert.match(text(await next(q, state([coins(5_000)]))), /do not buy 13/);
 });

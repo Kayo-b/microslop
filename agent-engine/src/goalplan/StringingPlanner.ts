@@ -23,7 +23,8 @@ const RESERVE = 500;
 const OVERBID = 1.35;
 /** Amulets per GE purchase (20 inventories). */
 const MAX_BUY = 280;
-const PER_TRIP = 14;
+/** 13 amulets + 13 balls of wool: coins take a slot. */
+const PER_TRIP = 13;
 
 export interface StringingOptions {
   price: (item: string) => number | null;
@@ -105,7 +106,8 @@ export class StringingPlanner implements Planner {
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       for (const name of unstrung ? [unstrung, WOOL] : []) {
         const stack = s.bank.items.find((b) => b.name === name);
-        if (stack && count(name) < PER_TRIP) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount: Math.min(PER_TRIP - count(name), stack.quantity) }, reason: `withdraw ${name} to string` };
+        const amount = Math.min(PER_TRIP - count(name), stack?.quantity ?? 0, s.inventory.freeSlots);
+        if (stack && amount > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount }, reason: `withdraw ${name} to string` };
       }
       if (!unstrung || count(unstrung) === 0) {
         const strung = s.bank.items.find((b) => strungNames.includes(b.name));
