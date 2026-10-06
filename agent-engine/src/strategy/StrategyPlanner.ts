@@ -136,6 +136,15 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     if (sellable.length && !skip.has('gold:sell') && Date.now() - (last.get('sell') ?? 0) > 3_600_000) {
       return { phase: { id: 'gold:sell', text: `sell the ${sellable.join(', ')} on the Grand Exchange`, exec: { kind: 'sell', items: sellable } }, why: 'banked items are only worth something once sold' };
     }
+    // Stock bought for a trading loop (hides, unstrung amulets) is coins tied up: that loop runs
+    // before the rotation moves on (the rotation once went mining with ~250 hides in the bank).
+    const STOCK: [string, string[]][] = [['tan-hides', ['Cowhide']], ['string-amulets', AMULET_INPUTS]];
+    for (const [id, items] of STOCK) {
+      const r = GOLD.find((x) => x.id === id);
+      if (r && fits(r) && !skip.has(`gold:${id}`) && items.some((n) => p.owned.has(n))) {
+        return { phase: { id: `gold:${id}`, text: r.name, exec: r.exec, maxMs: (goal.minutesPerRoute ?? 25) * 60_000 }, why: `finish the ${items.filter((n) => p.owned.has(n)).join(', ')} already bought` };
+      }
+    }
     // Coins are for making more coins: gear is smithed, not bought. Until the steel platebody is
     // made, every other turn levels Smithing and smiths (and wears) each piece it unlocks.
     const lastRoute = Math.max(0, ...[...last].filter(([id]) => id !== 'gear' && id !== 'sell').map(([, t]) => t));
@@ -280,6 +289,9 @@ export function surveyBankStep(s: Snapshot, kb: KnowledgeBase | null): PlanStep 
     },
   };
 }
+
+/** Unstrung amulets the stringing loop buys. */
+const AMULET_INPUTS = ['Gold', 'Sapphire', 'Emerald', 'Ruby', 'Diamond'].map((g) => `${g} amulet (u)`);
 
 /** What smith-progression consumes; not sold while gear is still being smithed. */
 const SMITHING_MATERIALS = new Set(['Copper ore', 'Tin ore', 'Iron ore', 'Coal', 'Bronze bar', 'Iron bar', 'Steel bar']);

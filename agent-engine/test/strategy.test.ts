@@ -141,6 +141,14 @@ test('strategy gold: training falls back to a scripted method below the bracket,
   assert.deepEqual(moss.phase.until, { skill: 'Strength', level: 40 });
 });
 
+test('strategy gold: hides already bought are tanned before the rotation moves on', () => {
+  const s = state({ Attack: 40, Strength: 33, Defence: 30, Mining: 36 }, { player: { ...snapshot().player!, combatLevel: 43 } });
+  const p = buildProfile(account(false), s, bankWith(['Coins', 'Cowhide']));
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['gear', Date.now() + 3_600_000], ['tan-hides', Date.now() - 60_000]]);
+  const tan = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(tan && 'phase' in tan && tan.phase.id === 'gold:tan-hides' && /Cowhide already bought/.test(tan.why), JSON.stringify(tan));
+});
+
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {
   const api = { varp: async (id: number) => (id === 101 ? 2 : 0), questStates: async () => [] };
   const phases: string[] = [];
