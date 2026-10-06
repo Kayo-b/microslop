@@ -15,6 +15,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
+import { BuyScale } from './buyScale.ts';
 import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
 /** A tile inside the bank (the booths themselves cannot be stood on). */
@@ -68,6 +69,7 @@ export class TanningPlanner implements Planner {
   private readonly o: TanningOptions;
   /** The bank as this planner last saw it open. */
   private seen: Map<string, number> | null = null;
+  private readonly scale = new BuyScale();
 
   constructor(o: TanningOptions) {
     this.o = o;
@@ -103,9 +105,10 @@ export class TanningPlanner implements Planner {
       return step('bank the leather at the Al Kharid bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 200, { destination: AL_KHARID_BANK });
     }
 
+    const scale = this.scale.update(ctx.reports.at(-1));
     if (s.grandExchange?.open) {
       if (h.leather + h.leatherNotes > 0) return { kind: 'act', action: { op: 'ge_sell', name: LEATHER }, reason: `sell ${h.leather + h.leatherNotes} leather` };
-      const buy = this.affordable(h.coins);
+      const buy = Math.floor(this.affordable(h.coins) * scale);
       if (hidesAnywhere < MIN_BUY && buy >= MIN_BUY && margin > 0) {
         return { kind: 'act', action: { op: 'ge_buy', name: HIDE, quantity: buy }, reason: `buy ${buy} cowhides (~${Math.round(margin)} gp profit each)` };
       }
