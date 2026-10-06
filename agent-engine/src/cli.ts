@@ -88,6 +88,7 @@ const { values, positionals } = parseArgs({
     f2p: { type: 'boolean', default: false },
     llm: { type: 'string' },
     'llm-model': { type: 'string' },
+    'rescue-model': { type: 'string' },
     skill: { type: 'string' },
     level: { type: 'string' },
     quest: { type: 'string' },
@@ -466,8 +467,10 @@ async function run(): Promise<void> {
   } else if (values.rescue) {
     if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();
-    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: llm()! }), log);
-    console.log(`[agent] LLM rescue on (${llm()!.name}); rescues logged to ${log.file}`);
+    // Rescues can run on their own (cheaper, faster) model while planning keeps --llm-model.
+    const rescueLlm = values['rescue-model'] ? createLlmClient({ provider: values.llm, model: values['rescue-model'] })! : llm()!;
+    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: rescueLlm }), log);
+    console.log(`[agent] LLM rescue on (${rescueLlm.name}); rescues logged to ${log.file}`);
   }
   const logger = new JsonlStepLogger(values['log-dir']);
   const engine = new GameIntentEngine({

@@ -74,7 +74,8 @@ skip memory is holding back, and alerts:
 | N rescue calls errored | the `claude` CLI failed or timed out (model name, login, rate limits) |
 | campaign unit is inactive/failed | the campaign ended or crashed |
 
-Comparing rescue models: run the same campaign with `--llm-model haiku` (or another model) and
+Comparing rescue models: run the same campaign with `--rescue-model haiku` (rescues only; planning
+keeps `--llm-model`), or `--llm-model haiku` for everything, and
 read the per-model lines; each rescue records its `rescuer` (`claude-code:<model>`). Stop a
 campaign between activities by waiting for its `■` line in `campaign.log` before
 `systemctl --user stop microbot-jev-data` (stopping ends the running activity at once). Never

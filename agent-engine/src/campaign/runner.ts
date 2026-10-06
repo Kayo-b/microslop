@@ -10,7 +10,7 @@
  * session probably expired and needs Bolt).
  *
  * Run: npm run campaign -- [--hours 4] [--config campaign.json] [--only a,b] [--llm P]
- *      [--llm-model M] [--rescue] [--world 316] [--restart-client] [--dry-run]
+ *      [--llm-model M] [--rescue-model M] [--rescue] [--world 316] [--restart-client] [--dry-run]
  */
 import { type ChildProcess, spawn } from 'node:child_process';
 import { appendFileSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
@@ -47,6 +47,8 @@ export interface CampaignConfig {
   rescue: boolean;
   llm?: string;
   llmModel?: string;
+  /** Model for LLM rescues only (planning keeps llmModel). */
+  rescueModel?: string;
   /** Run this plan file instead of the activity rotation (see docs/PLANS.md). */
   plan?: string;
   activities: Activity[];
@@ -288,6 +290,7 @@ function processDeps(cfg: CampaignConfig, dir: string, hasLlm: boolean, stop: { 
         if (cfg.rescue && hasLlm) args.push('--rescue');
         if (cfg.llm) args.push('--llm', cfg.llm);
         if (cfg.llmModel) args.push('--llm-model', cfg.llmModel);
+        if (cfg.rescueModel) args.push('--rescue-model', cfg.rescueModel);
         const out = createWriteStream(path.join(dir, `${String(n).padStart(3, '0')}-${a.name}.log`));
         const child = spawn(process.execPath, args, { cwd: ENGINE_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
         stop.child = child;
@@ -335,6 +338,7 @@ if (import.meta.main) {
       only: { type: 'string' },
       llm: { type: 'string' },
       'llm-model': { type: 'string' },
+      'rescue-model': { type: 'string' },
       rescue: { type: 'boolean', default: false },
       world: { type: 'string' },
       'restart-client': { type: 'boolean', default: false },
@@ -350,6 +354,7 @@ if (import.meta.main) {
   if (values.rescue) cfg.rescue = true;
   if (values.llm) cfg.llm = values.llm;
   if (values['llm-model']) cfg.llmModel = values['llm-model'];
+  if (values['rescue-model']) cfg.rescueModel = values['rescue-model'];
   if (values.plan) cfg.plan = values.plan;
   if (cfg.plan) cfg.activities = planActivities(path.resolve(cfg.plan));
   if (values.only) {
