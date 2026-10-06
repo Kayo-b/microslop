@@ -29,8 +29,12 @@ const TAN_OPTION = 'Soft leather';
 const RESERVE = 500;
 /** GE offers are placed at the guide price +30%; a little more covers price drift. */
 const OVERBID = 1.35;
-/** Hides per GE purchase: enough for ~10 tanning trips, so a round trip to the GE pays off. */
-const MAX_BUY = 270;
+/**
+ * Hides per GE purchase (~37 tanning trips): a GE round trip from Al Kharid costs 3-4 minutes,
+ * so the more hides per visit the better, up to what the coins cover (the buy limit is 13,000
+ * every 4 hours).
+ */
+const MAX_BUY = 1000;
 /** Fewer hides than this are not worth the walk. */
 const MIN_BUY = 27;
 

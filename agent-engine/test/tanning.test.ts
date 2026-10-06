@@ -20,7 +20,7 @@ test('tanning: at the Grand Exchange, leather is sold and a stack of hides bough
   assert.deepEqual(act(await next(planner(), state([coins(40_000), item(1, 1742, 'Leather', { noted: true, quantity: 120, stackable: true })], ge))), { op: 'ge_sell', name: 'Leather' });
   // (40,000 - 500 reserve) / ceil(131 * 1.35) = 223 hides.
   assert.deepEqual(act(await next(planner(), state([coins(40_000)], ge))), { op: 'ge_buy', name: 'Cowhide', quantity: 223 });
-  assert.deepEqual(act(await next(planner(), state([coins(400_000)], ge))), { op: 'ge_buy', name: 'Cowhide', quantity: 270 }, 'capped per trip');
+  assert.deepEqual(act(await next(planner(), state([coins(400_000)], ge))), { op: 'ge_buy', name: 'Cowhide', quantity: 1000 }, 'capped per trip');
   assert.deepEqual(act(await next(planner({ Cowhide: 100 }), state([coins(40_000)], ge))), { op: 'ge_close' }, 'hides already banked');
 });
 
