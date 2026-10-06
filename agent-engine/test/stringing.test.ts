@@ -61,6 +61,7 @@ test('stringing: strung amulets are banked, then sold as notes', async () => {
   assert.deepEqual(act(await next(p, bankOpen([coins(10_000), ...strung], []))), { op: 'bank_deposit', itemId: 1696, amount: 'all' });
   assert.deepEqual(act(await next(p, bankOpen([coins(10_000)], [{ id: 1696, name: 'Emerald amulet', quantity: 68 }]))), { op: 'bank_withdraw', itemId: 1696, amount: 'all', noted: true });
   const notes = item(1, 1697, 'Emerald amulet', { noted: true, quantity: 68, stackable: true });
+  assert.deepEqual(act(await next(p, bankOpen([coins(10_000), notes], []))), { op: 'bank_close' }, 'notes withdrawn to sell stay carried');
   assert.match(text(await next(p, state([coins(10_000), notes]))), /Grand Exchange to sell/);
   assert.deepEqual(act(await next(p, state([coins(10_000), notes], { grandExchange: { open: true } } as Partial<Snapshot>))), { op: 'ge_sell', name: 'Emerald amulet' });
 });

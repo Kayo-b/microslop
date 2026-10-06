@@ -97,7 +97,11 @@ export class StringingPlanner implements Planner {
     const unstrung = c?.unstrung;
     if (s.bank.open) {
       const keepUnnoted = (name: string, noted: boolean) => !noted && (name === WOOL || name === unstrung);
-      const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !keepUnnoted(i.name, Boolean(i.noted)));
+      // Strung-amulet notes stay once nothing is left to string: they were withdrawn to be sold.
+      const inputsLeft = !!unstrung && (count(unstrung) > 0 || s.bank.items.some((b) => b.name === unstrung));
+      const junk = s.inventory.items.find(
+        (i) => i.name !== 'Coins' && !keepUnnoted(i.name, Boolean(i.noted)) && !(i.noted && !inputsLeft && strungNames.includes(i.name)),
+      );
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       for (const name of unstrung ? [unstrung, WOOL] : []) {
         const stack = s.bank.items.find((b) => b.name === name);
