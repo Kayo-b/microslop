@@ -72,7 +72,10 @@ export function bestRecipe(level: number, price: (item: string) => number | null
 }
 
 const RESERVE = 500;
-const OVERBID = 1.35;
+/** ge_buy offers the client's guide price +30%; a little more covers the wiki price differing. */
+const OVERBID = 1.32;
+/** A first batch smaller than a full trip still starts the loop (10k coins buys 26 guam). */
+const MIN_BUY = 10;
 /** Products per GE purchase (capped by coins; grimy herb buy limits are 13,000 per 4 h). */
 const MAX_BUY = 1000;
 
@@ -113,12 +116,12 @@ export class HerblorePlanner implements Planner {
       if (r) {
         const have = (n: string) => count(n) + (bank?.get(n) ?? 0);
         const stock = Math.min(...r.inputs.map(have));
-        if (stock < r.perTrip) {
+        if (stock < Math.min(MIN_BUY, r.perTrip)) {
           // Buy the first input, then top the others up to it.
           const lead = r.inputs[0]!;
-          if (have(lead) < r.perTrip) {
+          if (have(lead) < Math.min(MIN_BUY, r.perTrip)) {
             const n = Math.min(MAX_BUY, Math.floor((coins - RESERVE) / Math.ceil(r.cost * OVERBID)));
-            if (n >= r.perTrip) return { kind: 'act', action: { op: 'ge_buy', name: lead, quantity: n }, reason: `buy ${n} ${lead} (${r.id}, ~${r.profit} gp profit each)` };
+            if (n >= Math.min(MIN_BUY, r.perTrip)) return { kind: 'act', action: { op: 'ge_buy', name: lead, quantity: n }, reason: `buy ${n} ${lead} (${r.id}, ~${r.profit} gp profit each)` };
           } else {
             const short = r.inputs.find((i) => have(i) < have(lead));
             if (short) return { kind: 'act', action: { op: 'ge_buy', name: short, quantity: have(lead) - have(short) }, reason: `buy ${have(lead) - have(short)} ${short}` };
@@ -170,10 +173,11 @@ export class HerblorePlanner implements Planner {
       return step('open the Grand Exchange bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [...inputs, ...products], { destination: GRAND_EXCHANGE_BANK });
     }
     if (!r) return { kind: 'impossible', reason: `no herblore recipe pays at Herblore ${level} with current prices` };
-    if (Math.floor((coins + banked('Coins') - RESERVE) / Math.ceil(r.cost * OVERBID)) < r.perTrip) {
-      return { kind: 'impossible', reason: `coins (${coins + banked('Coins')}) do not buy ${r.perTrip} for ${r.id}` };
+    const batch = Math.min(MIN_BUY, r.perTrip);
+    if (Math.floor((coins + banked('Coins') - RESERVE) / Math.ceil(r.cost * OVERBID)) < batch) {
+      return { kind: 'impossible', reason: `coins (${coins + banked('Coins')}) do not buy ${batch} for ${r.id}` };
     }
-    if (Math.floor((coins - RESERVE) / Math.ceil(r.cost * OVERBID)) < r.perTrip) {
+    if (Math.floor((coins - RESERVE) / Math.ceil(r.cost * OVERBID)) < batch) {
       return step('open the Grand Exchange bank to take out coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [], { destination: GRAND_EXCHANGE_BANK });
     }
     return step(`open the Grand Exchange to buy ${r.inputs.join(' and ')}`, ['Grand Exchange Clerk'], ['Exchange'], { geOpen: true }, 300, [], { destination: GRAND_EXCHANGE });

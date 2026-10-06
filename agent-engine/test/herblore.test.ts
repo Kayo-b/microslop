@@ -40,8 +40,8 @@ test('herblore: the best recipe per hour for the level, from live prices', () =>
 test('herblore: cleaning loop - buy grimy herbs, withdraw 27, clean, bank, sell', async () => {
   const p = new HerblorePlanner({ price });
   await next(p, bankOpen(5, [coins(50_000)], []));
-  // (50,000 - 500) / ceil(229 * 1.35) = 159.
-  assert.deepEqual(act(await next(p, state(5, [coins(50_000)], { grandExchange: { open: true } } as Partial<Snapshot>))), { op: 'ge_buy', name: 'Grimy marrentill', quantity: 159 });
+  // (50,000 - 500) / ceil(229 * 1.32) = 163.
+  assert.deepEqual(act(await next(p, state(5, [coins(50_000)], { grandExchange: { open: true } } as Partial<Snapshot>))), { op: 'ge_buy', name: 'Grimy marrentill', quantity: 163 });
   const notes = item(1, 3002, 'Grimy marrentill', { noted: true, quantity: 160, stackable: true });
   assert.deepEqual(act(await next(p, bankOpen(5, [coins(13_000), notes], []))), { op: 'bank_deposit', itemId: 3002, amount: 'all' });
   assert.deepEqual(act(await next(p, bankOpen(5, [coins(13_000)], [{ id: 201, name: 'Grimy marrentill', quantity: 160 }]))), { op: 'bank_withdraw', itemId: 201, amount: 27 });
@@ -60,10 +60,10 @@ test('herblore: unfinished potions from grimy herbs - clean, then mix with vials
   const p = new HerblorePlanner({ price: (n) => (n === 'Harralander' ? 520 : price(n)) });
   await next(p, bankOpen(22, [coins(100_000)], []));
   const ge = { grandExchange: { open: true } } as Partial<Snapshot>;
-  // (100,000 - 500) / ceil((331 + 5) * 1.35) = 219.
-  assert.deepEqual(act(await next(p, state(22, [coins(100_000)], ge))), { op: 'ge_buy', name: 'Grimy harralander', quantity: 219 });
-  const herbNotes = item(1, 256, 'Grimy harralander', { noted: true, quantity: 219, stackable: true });
-  assert.deepEqual(act(await next(p, state(22, [coins(27_000), herbNotes], ge))), { op: 'ge_buy', name: 'Vial of water', quantity: 219 });
+  // (100,000 - 500) / ceil((331 + 5) * 1.32) = 224.
+  assert.deepEqual(act(await next(p, state(22, [coins(100_000)], ge))), { op: 'ge_buy', name: 'Grimy harralander', quantity: 224 });
+  const herbNotes = item(1, 256, 'Grimy harralander', { noted: true, quantity: 224, stackable: true });
+  assert.deepEqual(act(await next(p, state(22, [coins(27_000), herbNotes], ge))), { op: 'ge_buy', name: 'Vial of water', quantity: 224 });
   const grimy = Array.from({ length: 14 }, (_, i) => item(1 + i, 255, 'Grimy harralander', { actions: ['Clean'] }));
   const vials = Array.from({ length: 14 }, (_, i) => item(15 + i, 227, 'Vial of water'));
   assert.match(text(await next(p, state(22, [coins(1_000), ...grimy, ...vials]))), /clean all the grimy harralanders/);
@@ -75,7 +75,11 @@ test('herblore: unfinished potions from grimy herbs - clean, then mix with vials
 test('herblore: gives up without a paying recipe or the coins for a trip', async () => {
   const p = new HerblorePlanner({ price });
   await next(p, bankOpen(5, [coins(1_000)], []));
-  assert.match(text(await next(p, state(5, [coins(1_000)]))), /do not buy 27/);
+  assert.match(text(await next(p, state(5, [coins(1_000)]))), /do not buy 10/);
+  // 10,208 coins (the live account) is enough for a first, partial guam batch.
+  const r = new HerblorePlanner({ price });
+  await next(r, bankOpen(3, [coins(10_208)], []));
+  assert.deepEqual(act(await next(r, state(3, [coins(10_208)], { grandExchange: { open: true } } as Partial<Snapshot>))), { op: 'ge_buy', name: 'Grimy guam leaf', quantity: 26 });
   const q = new HerblorePlanner({ price });
   await next(q, bankOpen(2, [coins(50_000)], []));
   assert.match(text(await next(q, state(2, [coins(50_000)]))), /no herblore recipe pays at Herblore 2/);
