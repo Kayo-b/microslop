@@ -356,3 +356,17 @@ test('dataset: attacks on monsters the sub-goal never names are not labels', asy
   assert.equal(strayAttack(rec('Imp (level 2): Attack (8 hp) - 13 tiles')), false);
   assert.equal(strayAttack(rec('Bank booth: Bank - 2 tiles')), false);
 });
+
+test('gathering: a bag full of something else (regular logs while chopping willows) is banked, and lookalike trees are avoided', () => {
+  const task = { ...PRESETS['chop-willows']!, bank: true } as never;
+  const wc = (s: ReturnType<typeof snapshot>) => ((s.skills = s.skills.map((k) => (k.name === 'Woodcutting' ? { ...k, level: 34 } : k))), s);
+  const logs = Array.from({ length: 27 }, (_, i) => item(1 + i, 1511, 'Logs'));
+  const full = wc(snapshot({ inventory: { freeSlots: 0, items: [item(0, 1351, 'Bronze axe'), ...logs] }, objects: [tree(), tree({ id: 10819, name: 'Willow tree' })] }));
+  const toBank = nextGatherStep(task, full);
+  assert.ok(toBank.kind === 'subgoal' && toBank.subgoal.doneWhen?.bankOpen === true, JSON.stringify(toBank));
+  const atBank = { ...full, bank: { open: true, items: [] } } as never;
+  const deposit = nextGatherStep(task, atBank);
+  assert.ok(deposit.kind === 'subgoal' && deposit.subgoal.doneWhen?.lacksItems?.includes('Logs') && !deposit.subgoal.targets?.includes('Bronze axe'), JSON.stringify(deposit));
+  const chop = nextGatherStep(task, wc(snapshot({ inventory: { freeSlots: 27, items: [item(0, 1351, 'Bronze axe')] }, objects: [tree(), tree({ id: 10819, name: 'Willow tree' })] })));
+  assert.ok(chop.kind === 'subgoal' && chop.subgoal.avoid?.includes('Tree') && !chop.subgoal.avoid.includes('Willow tree'), JSON.stringify(chop));
+});

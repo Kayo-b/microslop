@@ -298,6 +298,10 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
   const product = task.product.toLowerCase();
   const hasProduct = s.inventory.items.some((i) => i.name.toLowerCase().includes(product));
   const full = s.inventory.freeSlots === 0;
+  // What a full inventory is full of need not be the product (regular logs while chopping
+  // willows): everything but the kept tools goes, or "chop until full" completes at once, forever.
+  const kept = (name: string) => task.keep.some((k) => name.toLowerCase().includes(k.toLowerCase()));
+  const junk = [...new Set(s.inventory.items.map((i) => i.name))].filter((n) => !kept(n) && !/^coins$/i.test(n));
 
   const tool = task.keep[0];
   const hasTool = !tool || [...s.inventory.items, ...s.equipment].some((i) => isTool(i.name, tool));
@@ -308,6 +312,9 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
         kind: 'subgoal',
         subgoal: goal(`deposit all ${task.product} items into the bank, keeping the ${task.keep.join(' and ')}`, [task.product], ['Deposit'], { lacksItem: task.product }, 10, task.keep),
       };
+    }
+    if (full && junk.length) {
+      return { kind: 'subgoal', subgoal: goal(`deposit the ${junk.join(', ')}, keeping the ${task.keep.join(' and ')}`, junk, ['Deposit'], { lacksItems: junk }, 15, task.keep) };
     }
     if (!hasTool) {
       const banked = s.bank.items.find((b) => isTool(b.name, tool));
@@ -326,16 +333,17 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
     };
   }
 
-  if (full && hasProduct) {
+  if (full && (hasProduct || junk.length)) {
     if (task.bank) {
       return {
         kind: 'subgoal',
         subgoal: { ...goal('go to the nearest bank and open it', BANK_TARGETS, ['Bank'], { bankOpen: true }, 300, task.keep), avoid: NOT_BANKS },
       };
     }
+    const drop = hasProduct ? [task.product] : junk;
     return {
       kind: 'subgoal',
-      subgoal: goal(`drop every ${task.product} item from the inventory, keeping the ${task.keep.join(' and ')}`, [task.product], ['Drop'], { lacksItem: task.product }, 40, task.keep),
+      subgoal: goal(`drop every ${drop.join(', ')} item from the inventory, keeping the ${task.keep.join(' and ')}`, drop, ['Drop'], hasProduct ? { lacksItem: task.product } : { lacksItems: junk }, 40, task.keep),
     };
   }
 
@@ -349,6 +357,9 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
       subgoal: { ...goal(`walk to the ${task.area.name}`, task.targets, actions, { near: { ...task.area.point, radius: 8 } }, 400, task.keep), destination: task.area },
     };
   }
+  // Lookalikes with the same action (regular trees next to willows) are off limits: the
+  // classifier chose "Tree" most of a willow trip and filled the bag with regular logs.
+  const lookalikes = [...new Set(s.objects.filter((o) => !task.targets.includes(o.name) && o.actions.some((a) => actions.includes(a))).map((o) => o.name))];
   // The area stays the destination so that, if the spots drift out of view mid-trip, the engine
   // travels back instead of clicking whatever is nearby (a Draynor poll booth, once).
   return {
@@ -356,6 +367,7 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
     subgoal: {
       ...goal(`${task.activity}: use "${task.action}" on the ${task.targets.join(' or ')}`, task.targets, actions, { inventoryFull: true }, 1200, task.keep),
       destination: task.area,
+      ...(lookalikes.length ? { avoid: lookalikes } : {}),
     },
   };
 }
