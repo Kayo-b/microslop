@@ -169,3 +169,21 @@ test('smithing planner: better gear already worn is never swapped for a smithed 
   assert.equal(isUpgrade(s, 'Steel chainbody', 'BODY'), true);
   assert.equal(isUpgrade(s, 'Bronze platebody', 'BODY'), false, 'iron chainbody (tier 2) beats bronze platebody');
 });
+
+test('smithing planner: XP filler smiths every carried bar in one go; an upgrade piece stays at one', async () => {
+  const p = new SmithingPlanner({ memoryFile: null });
+  const bars = withSmithing(24, [item(0, 2347, 'Hammer'), ...Array.from({ length: 20 }, (_, i) => item(1 + i, 2351, 'Iron bar'))]);
+  bars.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }, { slot: 'HEAD', id: 1153, name: 'Iron full helm' }];
+  const filler = await next(p, bars);
+  assert.ok(filler.kind === 'subgoal' && filler.subgoal.want === undefined && filler.subgoal.doneWhen?.lacksItem === 'Iron bar', text(filler));
+  assert.match(text(filler), /smith all the iron bars into Iron daggers/);
+
+  const { buildCandidates } = await import('../src/engine/candidates.ts');
+  bars.production = { open: true, interface: 'smithing', options: ['Iron dagger', 'Iron scimitar'] } as never;
+  const smithAll = buildCandidates(bars, null, filler.subgoal).candidates.find((c) => c.id === 'production:Iron dagger');
+  assert.deepEqual(smithAll?.gameAction, { op: 'production_select', option: 'Iron dagger' }, 'no amount: Smith All');
+
+  bars.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  const helm = await next(new SmithingPlanner({ memoryFile: null }), bars);
+  assert.ok(helm.kind === 'subgoal' && helm.subgoal.want?.[0]?.name === 'Iron full helm' && helm.subgoal.want[0].count === 1, text(helm));
+});

@@ -324,16 +324,15 @@ export class SmithingPlanner implements Planner {
     // 4. Smith while carrying bars and a hammer.
     if (bars > 0 && hasHammer) {
       const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
-      const item = target?.item ?? metal.filler;
-      const count = held(s, item) + 1;
       const anvil = route ? route.anvil : { name: metal.anvil.name, point: metal.anvil.point };
-      return sg(`smith a ${item} at the ${metal.anvil.name}`, [...metal.anvil.targets, item], ['Smith'], { hasItem: { name: item, count } }, {
-        destination: { name: anvil.name, point: anvil.point },
-        want: [{ name: item, count }],
-        avoid: metal.anvil.avoid,
-        avoidAt: this.retiredPoints(),
-        maxSteps: 500,
-      });
+      const at = { destination: { name: anvil.name, point: anvil.point }, avoid: metal.anvil.avoid, avoidAt: this.retiredPoints(), maxSteps: 500 };
+      if (target) {
+        // One upgrade piece: exactly one, so the anvil does not queue a batch onto the next item's bars.
+        const count = held(s, target.item) + 1;
+        return sg(`smith a ${target.item} at the ${metal.anvil.name}`, [...metal.anvil.targets, target.item], ['Smith'], { hasItem: { name: target.item, count } }, { ...at, want: [{ name: target.item, count }] });
+      }
+      // XP filler: every carried bar in one "Smith All" (no want), not one dagger per sub-goal.
+      return sg(`smith all the ${lc(metal.bar)}s into ${metal.filler}s at the ${metal.anvil.name}`, [...metal.anvil.targets, metal.filler], ['Smith'], { lacksItem: metal.bar }, at);
     }
 
     // 5. Out of materials. Mine when the bank (as last seen) cannot supply a batch.
