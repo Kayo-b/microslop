@@ -54,6 +54,10 @@ routes plus looting, coin drops, pickpocketing, wool and GE flipping) instead of
 best estimate, so the data covers many ways of earning and the ledger shows which ones pay.
 
 - Each run first sells banked products and `JUNK` on the Grand Exchange (at most once an hour).
+- Gear is smithed, never bought: coins only go into making more coins. Until Smithing 48 and a
+  steel platebody, every other turn is a `gold:gear` phase (`smith-progression`: mine, smelt and
+  smith bronze, then iron from Smithing 15, then steel from 35, wearing each piece it unlocks and
+  smithing daggers for XP in between; those are sold as junk).
 - Then the fitting route that ran least recently goes next (untried first, best estimate first),
   for 25 minutes. Two failures in 12 h drop a route (`data/strategy-failures.json`).
 - Every phase is appended to `data/gold-ledger.jsonl` with its outcome, minutes and coin change

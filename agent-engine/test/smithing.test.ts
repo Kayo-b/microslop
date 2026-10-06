@@ -137,3 +137,35 @@ test('an unreachable anvil is retired and the loop re-planned without it', async
   const second = await p.next(ctx([blocked] as never) as never);
   assert.ok(second.kind === 'subgoal' && second.subgoal.destination?.point?.x === good.x, 're-planned to the reachable anvil');
 });
+
+test('smithing planner: steel from 35 takes iron ore and twice the coal, mines whichever runs short', async () => {
+  const p = new SmithingPlanner({ memoryFile: null });
+  const bank = withSmithing(36);
+  bank.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  bank.bank = { open: true, items: [{ slot: 0, id: 440, name: 'Iron ore', quantity: 40 }, { slot: 1, id: 453, name: 'Coal', quantity: 30 }] };
+  assert.match(text(await next(p, bank)), /withdraw 8 Iron ore, 16 Coal/);
+
+  const ore = withSmithing(36, [item(0, 2347, 'Hammer'), ...Array.from({ length: 8 }, (_, i) => item(1 + i, 440, 'Iron ore')), ...Array.from({ length: 16 }, (_, i) => item(9 + i, 453, 'Coal'))]);
+  assert.match(text(await next(p, ore)), /smelt the iron ore and coal into steel bars/);
+
+  const bars = withSmithing(36, [item(0, 2347, 'Hammer'), item(1, 2353, 'Steel bar'), item(2, 2353, 'Steel bar')]);
+  bars.equipment = [{ slot: 'WEAPON', id: 1323, name: 'Iron scimitar' }];
+  assert.match(text(await next(p, bars)), /smith a Steel scimitar/);
+
+  // Plenty of iron, little coal: mine coal at the Al Kharid mine.
+  const noCoal = withSmithing(36);
+  noCoal.bank = { open: true, items: [{ slot: 0, id: 440, name: 'Iron ore', quantity: 100 }, { slot: 1, id: 453, name: 'Coal', quantity: 1 }] };
+  const q = new SmithingPlanner({ memoryFile: null });
+  await next(q, noCoal);
+  const mine = await next(q, withSmithing(36));
+  assert.ok(mine.kind === 'subgoal' && /mine coal at the Al Kharid mine/.test(mine.subgoal.text) && mine.subgoal.targets?.includes('Coal rocks'), text(mine));
+});
+
+test('smithing planner: better gear already worn is never swapped for a smithed piece', async () => {
+  const { isUpgrade } = await import('../src/planner/SmithingPlanner.ts');
+  const s = withSmithing(40);
+  s.equipment = [{ slot: 'WEAPON', id: 1333, name: 'Rune scimitar' }, { slot: 'BODY', id: 1101, name: 'Iron chainbody' }];
+  assert.equal(isUpgrade(s, 'Steel scimitar', 'WEAPON'), false);
+  assert.equal(isUpgrade(s, 'Steel chainbody', 'BODY'), true);
+  assert.equal(isUpgrade(s, 'Bronze platebody', 'BODY'), false, 'iron chainbody (tier 2) beats bronze platebody');
+});

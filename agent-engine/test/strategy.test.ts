@@ -63,7 +63,8 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
   const sell = choosePhase({ kind: 'gold' }, p, new Set());
   assert.ok(sell && 'phase' in sell && sell.phase.id === 'gold:sell' && sell.phase.exec.kind === 'sell' && sell.phase.exec.items.includes('Iron dagger'), JSON.stringify(sell));
 
-  const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()]]);
+  // Gear smithing just ran (it alternates with the routes; tested below).
+  const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const first = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(first && 'phase' in first && first.phase.id === 'gold:iron-ore', 'untried routes first, best estimate among them');
   lastRun.set('iron-ore', Date.now()).set('cowhides', Date.now());
@@ -80,7 +81,7 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
 test('strategy gold: a fight below its recommended levels trains the weakest skill in its turn', () => {
   const s = state({ Attack: 40, Strength: 33, Defence: 24, Hitpoints: 35 }, { player: { ...snapshot().player!, combatLevel: 42 } });
   const p = buildProfile(account(false), s, bankWith(['Coins']));
-  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()]]);
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const moss = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(moss && 'phase' in moss && moss.phase.id === 'gold:moss-giants:train', JSON.stringify(moss));
   assert.deepEqual(moss.phase.until, { skill: 'Defence', level: 30 }, 'largest gap first, capped at its bracket');
@@ -106,6 +107,28 @@ test('strategy gold: a route whose sub-goals keep failing gives way to the next 
   await planner.next({ ...ctx, reports: [blocked, blocked, blocked] });
   assert.ok(log.some((l) => l.startsWith(`${first}: gave up: 3 sub-goals`)), log.join('\n'));
   assert.ok(planner.phase && planner.phase.id !== first, `moved on from ${first}: ${planner.phase?.id}`);
+});
+
+test('strategy gold: gear is smithed every other turn until the steel platebody, never bought', () => {
+  const s = state({ Attack: 40, Strength: 33, Defence: 28 }, { player: { ...snapshot().player!, combatLevel: 42 } });
+  s.skills.push({ name: 'Smithing', level: 24, boosted: 24, xp: 0 } as never);
+  const p = buildProfile(account(false), s, bankWith(['Coins']));
+  const keep = choosePhase({ kind: 'gold' }, buildProfile(account(false), s, bankWith(['Coins', 'Iron ore', 'Iron dagger'])), new Set());
+  assert.ok(keep && 'phase' in keep && keep.phase.exec.kind === 'sell' && keep.phase.exec.items.join() === 'Iron dagger', 'ore is kept for smithing');
+  const lastRun = new Map<string, number>([['sell', Date.now()]]);
+  const gear = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(gear && 'phase' in gear && gear.phase.id === 'gold:gear' && gear.phase.exec.kind === 'preset' && gear.phase.exec.preset === 'smith-progression', JSON.stringify(gear));
+
+  lastRun.set('gear', Date.now());
+  const route = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(route && 'phase' in route && route.phase.id !== 'gold:gear', 'a money route next');
+  lastRun.set((route as { phase: { id: string } }).phase.id.split(':')[1]!, Date.now() + 1);
+  const again = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(again && 'phase' in again && again.phase.id === 'gold:gear', 'then gear again');
+
+  s.skills = s.skills.map((k) => (k.name === 'Smithing' ? { ...k, level: 48 } : k));
+  const after = choosePhase({ kind: 'gold', lastRun: new Map([['sell', Date.now()]]) }, buildProfile(account(false), s, bankWith(['Coins', 'Steel platebody'])), new Set());
+  assert.ok(after && 'phase' in after && after.phase.id !== 'gold:gear', 'steel platebody made: no more gear phases');
 });
 
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {

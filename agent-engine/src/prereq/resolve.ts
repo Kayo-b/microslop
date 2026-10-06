@@ -20,8 +20,6 @@ export interface SetupStep {
   phase: Phase;
   minutes: number;
   why: string;
-  /** A gear upgrade: worth doing, but dropped first when the setup runs over its time budget. */
-  optional?: boolean;
 }
 
 export interface Setup {
@@ -161,42 +159,20 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
     else blocked.push(`no way to get ${s.item}`);
   }
 
-  // 4a. Gear: every required slot holds something usable for the style; otherwise buy the best
-  // tier that costs at most a third of the coins owned, or the cheapest when none does.
-  const upgrades: { step: SetupStep; cost: number; value: number }[] = [];
+  // 4a. Gear: every required slot holds something usable for the style; otherwise buy the
+  // cheapest piece that fills it. Coins are kept for making money: better gear is smithed
+  // (SmithingPlanner, the gold strategy's gear phase), never bought.
   if (needs.gear) {
     const levels = gearLevels(v);
-    const style = needs.gear.style;
-    let spare = v.profile.coins;
     for (const slot of needs.gear.slots) {
-      const owned = [...v.counts.keys()].filter((n) => fillsSlot(n, slot, style, levels)).map((n) => classifyGear(n, style)!.score);
-      if (!owned.length) {
-        const options = gearCandidates(slot, levels).map((item) => acquire(item, 1, `${needs.name}: nothing to wear in the ${slot} slot`)).filter((b) => b !== null);
-        const pick = options.find((b) => b.cost * 3 <= v.profile.coins) ?? options.sort((a, b) => a.cost - b.cost)[0];
-        if (pick) {
-          buys.push(pick);
-          spare -= pick.value;
-        }
-        continue;
-      }
-      // 4b. Upgrades: the levels allow a better tier than the best owned piece. Buy the best one
-      // that costs at most a third of the coins, from what is left after the required purchases;
-      // never earned first, and dropped when the setup runs over its time budget.
-      if (style !== 'melee') continue;
-      const best = Math.max(...owned);
-      const better = gearCandidates(slot, levels).filter((item) => (classifyGear(item, style)?.score ?? 0) >= best + 10);
-      for (const item of better) {
-        const b = acquire(item, 1, `${needs.name}: ${item} beats the ${slot} owned`);
-        if (!b || b.value * 3 > v.profile.coins || b.cost > spare) continue;
-        b.step.optional = true;
-        upgrades.push(b);
-        spare -= b.value;
-        break;
-      }
+      if ([...v.counts.keys()].some((n) => fillsSlot(n, slot, needs.gear!.style, levels))) continue;
+      const options = gearCandidates(slot, levels).map((item) => acquire(item, 1, `${needs.name}: nothing to wear in the ${slot} slot`)).filter((b) => b !== null);
+      const pick = options.sort((a, b) => a.value - b.value)[0];
+      if (pick) buys.push(pick);
     }
   }
 
-  // 4c. Ranged/magic kit: the activity's kit planner buys it; make sure the coins are there.
+  // 4b. Ranged/magic kit: the activity's kit planner buys it; make sure the coins are there.
   if (needs.style) coinsNeeded += kitCost(needs.style, v);
 
   // 5. Food: fish and cook shrimps (no coins needed beyond a net, axe and tinderbox).
@@ -244,15 +220,7 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
     if (earn) prefix.push(...earn);
     else blocked.push(`${coinsNeeded} coins (no money route fits this account)`);
   }
-  // Buying comes before the rest: fishing for food needs the net it buys. Upgrades only when
-  // nothing has to be earned first.
-  const extra: SetupStep[] = [];
-  // The GE overbid comes back once an offer fills, so the upgrades are paid at their value.
-  for (const u of prefix.length ? [] : upgrades) {
-    if (coinsNeeded + u.value > v.profile.coins) continue;
-    coinsNeeded += u.value;
-    extra.push(u.step);
-  }
-  const all = [...prefix, ...buys.map((b) => b.step), ...extra, ...steps];
+  // Buying comes before the rest: fishing for food needs the net it buys.
+  const all = [...prefix, ...buys.map((b) => b.step), ...steps];
   return { steps: all, blocked, minutes: all.reduce((s, x) => s + x.minutes, 0) };
 }

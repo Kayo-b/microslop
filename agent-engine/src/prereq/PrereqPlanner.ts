@@ -107,14 +107,8 @@ export class PrereqPlanner implements Planner {
       return o ? { source: { kind: 'shop' as const, name: o.shop, keeper: o.keeper, point: o.point }, price: o.price } : null;
     };
     const gePrice = this.d.gePrice ? await this.d.gePrice() : undefined;
-    let setup: Setup = resolveSetup(this.needs, { profile, counts: counts(s, this.bank) }, { skip: this.d.skip, shop, gePrice });
+    const setup: Setup = resolveSetup(this.needs, { profile, counts: counts(s, this.bank) }, { skip: this.d.skip, shop, gePrice });
     const budget = this.d.budgetMinutes ?? 30;
-    // Over budget: drop gear upgrades, least important (last) first, before giving up.
-    while (setup.minutes > budget && setup.steps.some((st) => st.optional)) {
-      const drop = setup.steps.findLastIndex((st) => st.optional);
-      const steps = setup.steps.filter((_, i) => i !== drop);
-      setup = { ...setup, steps, minutes: steps.reduce((n, st) => n + st.minutes, 0) };
-    }
     if (setup.blocked.length) return { kind: 'impossible', reason: `prerequisites for ${this.needs.name} cannot be met: ${setup.blocked.join('; ')}` };
     if (!setup.steps.length) {
       this.log(`${this.needs.name}: prerequisites met`);

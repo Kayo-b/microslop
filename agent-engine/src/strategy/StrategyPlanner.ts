@@ -10,7 +10,7 @@ import { nextMilestone } from '../goalplan/compiler.ts';
 import type { PlanSpec } from '../goalplan/spec.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { COOK_PRESETS, CookingPlanner } from '../planner/CookingPlanner.ts';
-import { SmithingPlanner } from '../planner/SmithingPlanner.ts';
+import { LAST_GEAR_LEVEL, SmithingPlanner } from '../planner/SmithingPlanner.ts';
 import { compile } from '../planner/conditions.ts';
 import { NOT_BANKS, TaskTreePlanner, type CombatTask } from '../planner/TaskTreePlanner.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
@@ -124,10 +124,21 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
 
   if (goal.kind === 'gold') {
     const last = goal.lastRun ?? new Map<string, number>();
-    // At most one sell phase an hour: an item the GE refuses stays "owned" and would loop.
-    const sellable = [...new Set([...GOLD.flatMap((r) => r.products), ...JUNK])].filter((n) => p.owned.has(n));
+    const gearDue = level(p, 'Smithing') < LAST_GEAR_LEVEL || !p.owned.has('Steel platebody');
+    // At most one sell phase an hour: an item the GE refuses stays "owned" and would loop. Ores,
+    // coal and bars stay while gear is still being smithed.
+    const sellable = [...new Set([...GOLD.flatMap((r) => r.products), ...JUNK])].filter((n) => p.owned.has(n) && !(gearDue && SMITHING_MATERIALS.has(n)));
     if (sellable.length && !skip.has('gold:sell') && Date.now() - (last.get('sell') ?? 0) > 3_600_000) {
       return { phase: { id: 'gold:sell', text: `sell the ${sellable.join(', ')} on the Grand Exchange`, exec: { kind: 'sell', items: sellable } }, why: 'banked items are only worth something once sold' };
+    }
+    // Coins are for making more coins: gear is smithed, not bought. Until the steel platebody is
+    // made, every other turn levels Smithing and smiths (and wears) each piece it unlocks.
+    const lastRoute = Math.max(0, ...[...last].filter(([id]) => id !== 'gear' && id !== 'sell').map(([, t]) => t));
+    if (gearDue && !skip.has('gold:gear') && (last.get('gear') ?? 0) <= lastRoute) {
+      return {
+        phase: { id: 'gold:gear', text: 'level Smithing and smith the next tier of gear, wearing each piece as it is made', exec: { kind: 'preset', preset: 'smith-progression' }, maxMs: (goal.minutesPerRoute ?? 25) * 60_000 },
+        why: `Smithing ${level(p, 'Smithing')}: gear is smithed up to the steel platebody (${LAST_GEAR_LEVEL}) instead of bought`,
+      };
     }
     const route = GOLD.filter((r) => fits(r) && !skip.has(`gold:${r.id}`))
       .sort((a, b) => (last.get(a.id) ?? 0) - (last.get(b.id) ?? 0) || b.gpHour - a.gpHour)[0];
@@ -255,6 +266,9 @@ export function surveyBankStep(s: Snapshot, kb: KnowledgeBase | null): PlanStep 
     },
   };
 }
+
+/** What smith-progression consumes; not sold while gear is still being smithed. */
+const SMITHING_MATERIALS = new Set(['Copper ore', 'Tin ore', 'Iron ore', 'Coal', 'Bronze bar', 'Iron bar', 'Steel bar']);
 
 /** Failed sub-goals in a row after which a gold route gives way to the next. */
 export const GOLD_MAX_BLOCKED = 3;
