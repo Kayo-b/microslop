@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Lean client launch for lower CPU/RAM: the shaded jar with java -jar (no Gradle processes),
+# a capped heap, a separate client home (its own .runelite: config, token, logs), and lean
+# mode (FPS cap, optional no-render). The normal microbot-run and ~/.runelite are not touched.
+#
+# Env: MICROBOT_DIR (default: this worktree), LEAN_HOME (default ~/.microbot-lean-home),
+#      LEAN_XMX (default 768m), LEAN_FPS (default 10), LEAN_NO_RENDER (default 1)
+# The Jagex session comes from the same Bolt session file as microbot-run.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="${MICROBOT_DIR:-$(cd "$HERE/../../.." && pwd)}"
+LEAN_HOME="${LEAN_HOME:-$HOME/.microbot-lean-home}"
+J17="$(mise where java@temurin-17)"
+
+# Same session refresh as microbot-run (it exits after --refresh).
+"$HERE/microbot-run" --refresh
+# shellcheck disable=SC1090
+source "$HOME/.config/microbot-jx/session.env"
+
+jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar 2>/dev/null | head -1 || true)"
+if [[ -z "$jar" || "${LEAN_REBUILD:-0}" == 1 ]]; then
+  # --no-daemon: no Gradle process stays behind next to the client.
+  (cd "$DIR" && JAVA_HOME="$J17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$J17")
+  jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar | head -1)"
+fi
+
+# First run: seed the lean home from the normal client home (settings, Microbot profiles, cache).
+if [[ ! -d "$LEAN_HOME/.runelite" ]]; then
+  mkdir -p "$LEAN_HOME"
+  cp -a --reflink=auto "$HOME/.runelite" "$LEAN_HOME/.runelite"
+  rm -rf "$LEAN_HOME/.runelite/logs"
+fi
+
+noRender=$([[ "${LEAN_NO_RENDER:-1}" == 1 ]] && echo true || echo false)
+exec "$J17/bin/java" \
+  -Duser.home="$LEAN_HOME" \
+  -Xmx"${LEAN_XMX:-768m}" -Xms128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k \
+  -Dfile.encoding=UTF-8 \
+  -Dmicrobot.lean=true -Dmicrobot.lean.fps="${LEAN_FPS:-10}" -Dmicrobot.lean.noRender="$noRender" \
+  -jar "$jar"
