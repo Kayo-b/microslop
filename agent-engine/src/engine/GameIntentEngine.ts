@@ -177,7 +177,10 @@ export class GameIntentEngine {
       const tk = targetKey(c.gameAction) ?? '';
       return (this.targetFailures.get(tk) ?? 0) < 2 && !this.badTargets.has(tk);
     });
-    const destinations = built.destinations;
+    const destinations = built.destinations.filter((d) => {
+      const tk = `walk:${d.to.x},${d.to.y},${d.to.plane}`;
+      return (this.targetFailures.get(tk) ?? 0) < 2 && !this.badTargets.has(tk);
+    });
     const state = buildDecisionState(snap, goal, this.history, kb, relevantSkillsFor(goal, kb));
 
     // A lone "click to continue" needs no classifier.
@@ -374,6 +377,9 @@ export class GameIntentEngine {
 
 /** Identity of the entity an action targets, ignoring which menu action was used. */
 function targetKey(a: GameAction): string | null {
+  // A walk is "targeted" at its tile: walking onto an object's own tile (a booth, a furnace) ends
+  // where the player stands, and the classifier picked it again and again.
+  if (a.op === 'walk') return `walk:${a.to.x},${a.to.y},${a.to.plane}`;
   if (a.op !== 'interact' && a.op !== 'use_item_on') return null;
   const t = a.target;
   switch (t.kind) {
