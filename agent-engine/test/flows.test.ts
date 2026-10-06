@@ -43,6 +43,11 @@ test('flows: a coin shortfall blocks the option instead of earning coins elsewhe
   assert.ok(guards.blocked.some((b) => /not earned inside this flow/.test(b)), JSON.stringify(guards));
 });
 
+test('flows: a trading loop does not demand a fixed coin sum as a prerequisite', () => {
+  const st = flowStatus(FLOWS.gold!, view({}, { ...gear, Coins: 3_000 }), { members: false });
+  assert.deepEqual(optionSetup(st, 'tan-hides'), { steps: [], blocked: [], minutes: 0 });
+});
+
 test('flows: a goal run takes the best option that can be set up', () => {
   const st = flowStatus(FLOWS.gold!, view({}, { ...gear, Coins: 50_000 }), { members: false });
   assert.equal(chooseOption(st, new Set())?.id, 'tan-hides');

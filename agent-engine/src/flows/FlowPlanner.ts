@@ -52,6 +52,10 @@ export const FLOWS: Record<string, FlowGoal> = {
 /** Everything an option needs: its execution's own needs plus its requirements and recommended levels. */
 export function optionNeeds(o: FlowOption): ActivityNeeds {
   const req: Requirement = { ...(catalogReqFor(o.phase.exec) ?? {}), ...(o.requires ?? {}) };
+  // "Coins" on a trading loop means "starts with some coins": the loop sizes its own batches and
+  // stops when they run out. As a prerequisite it demanded a fixed sum and blocked a herblore run
+  // whose coins were already in herbs.
+  if (req.items?.includes('Coins')) req.items = req.items.filter((i) => i !== 'Coins');
   const skills = { ...(req.skills ?? {}) };
   for (const [k, v] of Object.entries(o.recommend ?? {})) skills[k] = Math.max(skills[k] ?? 0, v);
   if (Object.keys(skills).length) req.skills = skills;
