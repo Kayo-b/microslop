@@ -467,6 +467,20 @@ test('an open Grand Exchange offers buying the wanted item, collecting and closi
   assert.deepEqual(candidates[0]!.gameAction, { op: 'ge_buy', name: 'Redberry pie', quantity: 1 });
 });
 
+test('banking walks to a tile inside the bank, not onto a booth (Al Kharid back wall)', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const s = snapshot();
+  s.player = { ...s.player!, position: { x: 3267, y: 3174, plane: 0 } };
+  const kb = {
+    findPlaces: () => [],
+    nearestObjects: () => [{ name: 'Bank booth', kind: 'object', point: { x: 3268, y: 3169, plane: 0 }, members: false }],
+    nearestSpawns: () => [{ name: 'Banker', kind: 'npc', point: { x: 3267, y: 3166, plane: 0 }, members: false }],
+    nearestBanks: () => [{ name: 'Al Kharid bank', kind: 'bank', point: { x: 3270, y: 3166, plane: 0 }, members: false }],
+  } as never;
+  const dests = buildDestinations(s, kb, { text: 'go to the nearest bank and open it', targets: ['Bank booth', 'Banker'] }, 5);
+  assert.deepEqual(dests.map((d) => d.to), [{ x: 3270, y: 3166, plane: 0 }]);
+});
+
 test('a Grand Exchange buy with no want takes the count from the sub-goal text, not one at a time', () => {
   const s = snapshot();
   s.grandExchange = { open: true };

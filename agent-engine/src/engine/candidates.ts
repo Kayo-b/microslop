@@ -576,15 +576,19 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
   if (goal.destination?.name && !goal.destination.point) {
     for (const p of kb.findPlaces(goal.destination.name, me, 2)) push(p.name, p.point);
   }
-  for (const target of goal.targets ?? []) {
-    const reachable = kb.nearestObjects(target, me, { limit: 4 }).find((p) => !isBlocked(p.point));
-    if (reachable) push(`Nearest ${reachable.name}`, reachable.point);
-    for (const p of kb.nearestSpawns(target, me, { limit: 1 })) push(`Nearest ${p.name}`, p.point);
-  }
   // Only for banking sub-goals: offered everywhere, it was the classifier's pick whenever nothing
   // else fit (walking out of Draynor Manor toward the Falador deposit box mid-quest).
   const banking = /bank|deposit/i.test(`${goal.text} ${(goal.targets ?? []).join(' ')}`) && !/(do not|don't|never|avoid)[^.]*bank/i.test(goal.text);
   const bank = banking ? kb.nearestBanks(me, 1)[0] : undefined;
+  // The bank's own point is a tile inside it. A booth or banker tile cannot be stood on, and the
+  // walker then stops at the closest tile by distance: outside Al Kharid bank's north wall, five
+  // tiles from the booths, with "walk to Nearest Bank booth" doing nothing forever.
   if (bank) push(`Nearest bank: ${bank.name}`, bank.point);
+  const nearBank = (p: WorldPoint) => bank !== undefined && tileDistance(p, bank.point) <= 12;
+  for (const target of goal.targets ?? []) {
+    const reachable = kb.nearestObjects(target, me, { limit: 4 }).find((p) => !isBlocked(p.point));
+    if (reachable && !nearBank(reachable.point)) push(`Nearest ${reachable.name}`, reachable.point);
+    for (const p of kb.nearestSpawns(target, me, { limit: 1 })) if (!nearBank(p.point)) push(`Nearest ${p.name}`, p.point);
+  }
   return out.slice(0, max);
 }

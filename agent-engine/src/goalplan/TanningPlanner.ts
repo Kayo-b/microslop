@@ -17,7 +17,8 @@ import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
-export const AL_KHARID_BANK = { name: 'Al Kharid bank', point: { x: 3269, y: 3167, plane: 0 } };
+/** A tile inside the bank (the booths themselves cannot be stood on). */
+export const AL_KHARID_BANK = { name: 'Al Kharid bank', point: { x: 3270, y: 3166, plane: 0 } };
 export const ELLIS = { name: 'Al Kharid tannery', point: { x: 3273, y: 3192, plane: 0 } };
 
 const HIDE = 'Cowhide';
