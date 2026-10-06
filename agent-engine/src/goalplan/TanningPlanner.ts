@@ -109,8 +109,11 @@ export class TanningPlanner implements Planner {
     }
 
     if (s.bank.open) {
-      // Everything but coins goes in: hide notes, leather, whatever the last activity left.
-      const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !(i.name === HIDE && !i.noted));
+      // Everything but coins goes in: hide notes, leather, whatever the last activity left. Except
+      // leather notes once no hides are left: those were just withdrawn to be sold (depositing them
+      // again looped withdraw/deposit at the end of the first batch).
+      const hidesLeft = h.hides > 0 || s.bank.items.some((b) => b.name === HIDE);
+      const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !(i.name === HIDE && !i.noted) && !(i.name === LEATHER && i.noted && !hidesLeft));
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       const hideStack = s.bank.items.find((b) => b.name === HIDE);
       if (h.hides === 0 && hideStack) {

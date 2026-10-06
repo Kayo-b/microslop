@@ -48,6 +48,9 @@ test('tanning: once the hides are tanned, the leather is withdrawn as notes and 
   const p = planner();
   const bankOpen = state([coins(5_000)], { bank: { open: true, items: [{ slot: 0, id: 1741, name: 'Leather', quantity: 223 }] } } as Partial<Snapshot>);
   assert.deepEqual(act(await next(p, bankOpen)), { op: 'bank_withdraw', itemId: 1741, amount: 'all', noted: true });
+  // The withdrawn notes stay carried: the bank closes and the leather goes to the GE.
+  const withNotes = state([coins(5_000), item(1, 1742, 'Leather', { noted: true, quantity: 223, stackable: true })], { bank: { open: true, items: [] } } as Partial<Snapshot>);
+  assert.deepEqual(act(await next(p, withNotes)), { op: 'bank_close' });
   const sell = await next(planner(), state([coins(5_000), item(1, 1742, 'Leather', { noted: true, quantity: 223, stackable: true })]));
   assert.match(text(sell), /Grand Exchange to sell the leather/);
 });
