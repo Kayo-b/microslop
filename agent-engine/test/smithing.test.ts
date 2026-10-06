@@ -187,3 +187,15 @@ test('smithing planner: XP filler smiths every carried bar in one go; an upgrade
   const helm = await next(new SmithingPlanner({ memoryFile: null }), bars);
   assert.ok(helm.kind === 'subgoal' && helm.subgoal.want?.[0]?.name === 'Iron full helm' && helm.subgoal.want[0].count === 1, text(helm));
 });
+
+test('smithing planner: smelt-only banks the bars instead of smithing them', async () => {
+  const p = new SmithingPlanner({ metal: 'steel', smeltOnly: true, memoryFile: null });
+  const bars = withSmithing(30, [item(0, 2347, 'Hammer'), item(1, 1265, 'Bronze pickaxe'), ...Array.from({ length: 8 }, (_, i) => item(2 + i, 2353, 'Steel bar'))]);
+  const go = await next(p, bars);
+  assert.match(text(go), /open the bank/, 'no anvil');
+  const atBank = withSmithing(30, [item(0, 2347, 'Hammer'), item(1, 1265, 'Bronze pickaxe'), ...Array.from({ length: 8 }, (_, i) => item(2 + i, 2353, 'Steel bar'))]);
+  atBank.bank = { open: true, items: [{ slot: 0, id: 440, name: 'Iron ore', quantity: 40 }, { slot: 1, id: 453, name: 'Coal', quantity: 80 }] };
+  const dep = await next(p, atBank);
+  assert.ok(dep.kind === 'subgoal' && dep.subgoal.doneWhen?.lacksItems?.includes('Steel bar'), text(dep));
+  assert.notEqual((await next(p, withSmithing(60))).kind, 'complete', 'no level target');
+});

@@ -6,6 +6,7 @@
  */
 import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
 import { SellPlanner } from '../goalplan/SellPlanner.ts';
+import { SmeltingPlanner } from '../goalplan/SmeltingPlanner.ts';
 import { StringingPlanner } from '../goalplan/StringingPlanner.ts';
 import { TanningPlanner } from '../goalplan/TanningPlanner.ts';
 import { nextMilestone } from '../goalplan/compiler.ts';
@@ -226,6 +227,7 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
         return new TanningPlanner({ bank: () => (bank?.seenAt ? bank.items : null), price: deps.gePrice });
       }
       if (e.preset === 'string-amulets') return deps.gePrice ? new StringingPlanner({ price: deps.gePrice }) : null;
+      if (e.preset === 'smelt-steel') return new SmeltingPlanner();
       return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {
       let area = e.area;

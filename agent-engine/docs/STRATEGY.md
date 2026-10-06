@@ -85,6 +85,35 @@ Scripted trading loops (coins in, more coins out; live GE prices from the OSRS W
    the levels allow, and the route's food (default 5) are owned, bought or cooked before the fight
    starts. Do not add a fight that skips it (`--no-prereq`).
 
+## Flows (strict option trees)
+
+A flow is a goal with a fixed tree of options; a flow run executes **one option and only the
+sub-flows its requirements trigger**. Nothing unrelated runs: no rotation, no money route to earn
+missing coins, no setup time cap (levelling Smithing 27 -> 30 for smelting is part of the flow).
+
+```bash
+npm run agent -- flow gold                            # the tree for the logged-in account
+npm run agent -- run --flow gold --option smelt-steel # strict: this option and its sub-flows
+npm run agent -- run --flow gold                      # the best option that can be set up
+```
+
+```
+make gold
+├─ tan-hides       needs coins                          -> ready
+├─ smelt-steel     needs Smithing 30, Mining 30         -> train Smithing (smith-progression)
+├─ moss-giants     needs combat 40; recommended Atk/Str 40, Def 35 -> train Strength, Defence
+└─ ...             (every free-to-play GOLD route)
+```
+
+- Options come from the catalog (`GOLD` for `make gold`, `src/flows/FlowPlanner.ts`); an option's
+  requirements are its `req` plus its `recommend` levels plus what its execution needs (tools,
+  gear, food).
+- Sub-flows come from the prerequisite resolver: missing levels become training phases (scripted
+  methods first, then a scripted method from a lower bracket, LLM methods last), missing items
+  purchases. A coin shortfall blocks the option (`not earned inside this flow`).
+- A goal run picks the best option per hour whose sub-flows can be set up, and sticks to it.
+- In a campaign: `{ "name": "smelt", "args": ["--flow", "gold", "--option", "smelt-steel"] }`.
+
 ## Execution kinds
 
 - `preset`: an existing scripted planner (gathering, combat, cooking, smithing).

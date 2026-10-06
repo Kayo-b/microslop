@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { freshProfile, roadmap } from './goalplan/compiler.ts';
 import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
+import { chooseOption, FlowPlanner, FLOWS, flowStatus } from './flows/FlowPlanner.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -59,6 +60,8 @@ const { values, positionals } = parseArgs({
     task: { type: 'string' },
     goal: { type: 'string' },
     since: { type: 'string' },
+    flow: { type: 'string' },
+    option: { type: 'string' },
     hours: { type: 'string' },
     subgoal: { type: 'string' },
     actions: { type: 'string' },
@@ -127,6 +130,8 @@ function help(): void {
   npm run agent -- run --plan FILE                                    (run a plan; LLM rescue on when a key is set)
   npm run agent -- prereq --task PRESET [--setup-budget N]            (dry run: what the activity needs first)
   npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
+  npm run agent -- flow [gold]                                          (a flow's option tree and the sub-flows each option needs)
+  npm run agent -- run --flow gold [--option ID]                      (strict: one option and only its own sub-flows)
   npm run agent -- monitor [--since ISO | --hours N]                  (running campaign: activity, rescues by model, gold, alerts)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
@@ -233,6 +238,27 @@ function llm(): LlmClient | null {
   return llmClient;
 }
 const hasLlm = () => llm() !== null;
+
+/** Dry run: a flow's option tree on the logged-in account, with the sub-flows each option triggers. */
+async function flowShow(): Promise<void> {
+  const id = positionals[1] ?? values.flow ?? 'gold';
+  const flow = FLOWS[id];
+  if (!flow) throw new Error(`unknown flow "${id}" (${Object.keys(FLOWS).join(', ')})`);
+  const backend = new MicrobotBackend();
+  const snap = await backend.snapshot();
+  const bank = new BankMemory();
+  const account = await readAccount(backend);
+  const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+  const skip = recentFailures(path.join(ROOT, 'data', 'strategy-failures.json'));
+  const status = flowStatus(flow, { profile: buildProfile(account, snap, bank), counts: prereqCounts(snap, bank) }, { members: account.members, skip, gePrice });
+  const best = chooseOption(status, skip);
+  console.log(`${flow.name} (bank last seen ${bank.seenAt ?? 'never'}); a goal run would take: ${best?.id ?? 'nothing'}`);
+  for (const { option, setup } of status.sort((a, b) => b.option.perHour - a.option.perHour)) {
+    const state = setup.blocked.length ? `blocked: ${setup.blocked.join('; ')}` : setup.steps.length ? `sub-flows first (~${setup.minutes} min)` : 'ready';
+    console.log(`\n${option.id.padEnd(18)} ~${String(Math.round(option.perHour / 1000)).padStart(3)}k/h  ${state}${skip.has(option.phase.id) ? ' [skipped: failed twice in 12 h]' : ''}`);
+    for (const st of setup.steps) console.log(`  -> ${st.phase.text} (~${st.minutes} min; ${st.why})`);
+  }
+}
 
 /** Dry run: the account profile and what each strategy would do next. Never acts. */
 async function strategy(): Promise<void> {
@@ -456,6 +482,29 @@ async function run(): Promise<void> {
       },
     });
     goal = `strategy ${values.strategy}${values.skill ? ` ${values.skill}` : ''}${values.level ? ` to ${values.level}` : ''}${values.quest ? ` ${values.quest}` : ''}`;
+  } else if (values.flow) {
+    const flow = FLOWS[values.flow];
+    if (!flow) throw new Error(`unknown flow "${values.flow}" (${Object.keys(FLOWS).join(', ')})`);
+    const failing = recentFailures(skipFile);
+    const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+    const bank = new BankMemory();
+    const strategyDeps = {
+      account: backend,
+      kb,
+      bank,
+      gePrice,
+      llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
+      questPlanner: (q: string) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
+    };
+    planner = new FlowPlanner(flow, values.option, {
+      view: async (ctx) => ({ profile: buildProfile(await readAccount(backend), ctx.snapshot, bank), counts: prereqCounts(ctx.snapshot, bank) }),
+      members: async () => (await readAccount(backend)).members,
+      strategy: strategyDeps,
+      prereq: { account: backend, kb, bank, skip: failing, gePrice: async () => gePrice, strategy: strategyDeps, log: (m) => console.log(m), onSetupFailed: (id) => recordFailure(skipFile, id) },
+      skip: failing,
+      log: (m) => console.log(m),
+    });
+    goal = `flow ${flow.name}${values.option ? `: ${values.option}` : ''}`;
   } else if (values.goal) {
     if (!hasLlm()) throw new Error('--goal needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     planner = new LlmPlanner({ llm: llm()! });
@@ -569,6 +618,7 @@ try {
   else if (command === 'plan') await planShow();
   else if (command === 'prereq') await prereqShow();
   else if (command === 'llm-report') report();
+  else if (command === 'flow') await flowShow();
   else if (command === 'monitor') {
     const since = values.since ? Date.parse(values.since) : values.hours ? Date.now() - Number(values.hours) * 3_600_000 : undefined;
     console.log(monitorReport(readMonitorInput(ROOT, { since })).join('\n'));

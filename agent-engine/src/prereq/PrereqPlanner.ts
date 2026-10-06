@@ -21,8 +21,12 @@ export interface PrereqDeps {
   bank?: BankMemory;
   /** Executors for setup phases (LLM/quest planners); defaults: none. */
   strategy?: Partial<StrategyDeps>;
-  /** Longest setup started automatically, in minutes. Default 30. */
+  /** Longest setup started automatically, in minutes. Default 30; Infinity for strict flows. */
   budgetMinutes?: number;
+  /** Check rounds before the activity starts anyway. Default 3; flows that level skills need more. */
+  maxChecks?: number;
+  /** See ResolveOptions.earnCoins. */
+  earnCoins?: boolean;
   /** Phase ids that kept failing. */
   skip?: Set<string>;
   log?: (msg: string) => void;
@@ -84,7 +88,7 @@ export class PrereqPlanner implements Planner {
         continue;
       }
       const step = await this.inner.next({ ...ctx, reports: ctx.reports.slice(this.activityReportsAt) });
-      if (step.kind === 'impossible' && FIXABLE.test(step.reason) && this.checks < MAX_CHECKS) {
+      if (step.kind === 'impossible' && FIXABLE.test(step.reason) && this.checks < (this.d.maxChecks ?? MAX_CHECKS)) {
         this.log(`activity gave up (${step.reason}); checking prerequisites again`);
         this.mode = 'check';
         continue;
@@ -107,7 +111,7 @@ export class PrereqPlanner implements Planner {
       return o ? { source: { kind: 'shop' as const, name: o.shop, keeper: o.keeper, point: o.point }, price: o.price } : null;
     };
     const gePrice = this.d.gePrice ? await this.d.gePrice() : undefined;
-    const setup: Setup = resolveSetup(this.needs, { profile, counts: counts(s, this.bank) }, { skip: this.d.skip, shop, gePrice });
+    const setup: Setup = resolveSetup(this.needs, { profile, counts: counts(s, this.bank) }, { skip: this.d.skip, shop, gePrice, earnCoins: this.d.earnCoins });
     const budget = this.d.budgetMinutes ?? 30;
     if (setup.blocked.length) return { kind: 'impossible', reason: `prerequisites for ${this.needs.name} cannot be met: ${setup.blocked.join('; ')}` };
     if (!setup.steps.length) {
@@ -120,8 +124,8 @@ export class PrereqPlanner implements Planner {
     if (setup.minutes > budget) {
       return { kind: 'impossible', reason: `setup for ${this.needs.name} takes ~${setup.minutes} min (budget ${budget}): ${plan}` };
     }
-    if (this.checks > MAX_CHECKS) {
-      this.log(`setup still incomplete after ${MAX_CHECKS} rounds (${plan}); starting ${this.needs.name} anyway`);
+    if (this.checks > (this.d.maxChecks ?? MAX_CHECKS)) {
+      this.log(`setup still incomplete after ${this.d.maxChecks ?? MAX_CHECKS} rounds (${plan}); starting ${this.needs.name} anyway`);
       this.mode = 'activity';
       this.activityReportsAt = ctx.reports.length;
       return null;

@@ -167,6 +167,8 @@ export interface SmithingPlannerOptions {
   untilLevel?: number;
   /** Force a metal instead of choosing by level. */
   metal?: 'bronze' | 'iron' | 'steel';
+  /** Only mine and smelt; bank the bars and never smith or stop at a level (smelting for profit). */
+  smeltOnly?: boolean;
   /** File that remembers unreachable placements across runs. Null disables. Default data/unusable-sites.json. */
   memoryFile?: string | null;
 }
@@ -175,6 +177,7 @@ export class SmithingPlanner implements Planner {
   readonly name = 'smith-progression';
   private readonly untilLevel: number;
   private readonly forced?: Metal;
+  private readonly smeltOnly: boolean;
   /** Last seen bank counts (item name -> quantity); null until the bank has been opened once. */
   private bank: Map<string, number> | null = null;
   /** Cheapest mine -> furnace -> anvil -> bank cycle per metal, chosen once from real path costs. */
@@ -248,7 +251,8 @@ export class SmithingPlanner implements Planner {
   private readonly memoryFile: string | null;
 
   constructor(opts: SmithingPlannerOptions = {}) {
-    this.untilLevel = opts.untilLevel ?? LAST_GEAR_LEVEL;
+    this.smeltOnly = opts.smeltOnly ?? false;
+    this.untilLevel = opts.smeltOnly ? 100 : (opts.untilLevel ?? LAST_GEAR_LEVEL);
     this.forced = opts.metal === 'bronze' ? BRONZE : opts.metal === 'iron' ? IRON : opts.metal === 'steel' ? STEEL : undefined;
     this.memoryFile = opts.memoryFile === undefined ? path.resolve('data/unusable-sites.json') : opts.memoryFile;
     if (this.memoryFile && existsSync(this.memoryFile)) {
@@ -322,7 +326,7 @@ export class SmithingPlanner implements Planner {
     }
 
     // 4. Smith while carrying bars and a hammer.
-    if (bars > 0 && hasHammer) {
+    if (bars > 0 && hasHammer && !this.smeltOnly) {
       const target = metal.gear.find((g) => g.level <= smithing && g.bars <= bars && isUpgrade(s, g.item, g.slot) && held(s, g.item) === 0);
       const anvil = route ? route.anvil : { name: metal.anvil.name, point: metal.anvil.point };
       const at = { destination: { name: anvil.name, point: anvil.point }, avoid: metal.anvil.avoid, avoidAt: this.retiredPoints(), maxSteps: 500 };
@@ -365,7 +369,8 @@ export class SmithingPlanner implements Planner {
   }
 
   private atBank(s: Snapshot, metal: Metal): PlanStep {
-    const keepRe = new RegExp(`hammer|pickaxe|coins|${[...metal.ores, metal.bar].map((n) => lc(n)).join('|')}`, 'i');
+    // Smelting for profit banks the bars; smithing keeps them for the anvil.
+    const keepRe = new RegExp(`hammer|pickaxe|coins|${[...metal.ores, ...(this.smeltOnly ? [] : [metal.bar])].map((n) => lc(n)).join('|')}`, 'i');
     const junk = s.inventory.items
       .map((i) => i.name)
       .filter((n, idx, all) => all.indexOf(n) === idx)
