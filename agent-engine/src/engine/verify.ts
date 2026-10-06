@@ -132,6 +132,10 @@ export function expectedChanges(action: GameAction): Change[] {
     case 'tab_open':
     case 'widget_click':
     case 'type_text':
+    case 'trade_player':
+    case 'trade_offer':
+    case 'trade_accept':
+    case 'trade_decline':
     case 'wait':
     case 'done':
       return [];
