@@ -50,7 +50,7 @@ prices move, so a live price feed (prices.runescape.wiki) is the next step for m
 ## Gold strategy
 
 `--strategy gold` makes coins by alternating between routes (`GOLD` in `catalog.ts`: the money
-routes plus looting, coin drops, pickpocketing, wool and GE flipping) instead of always taking the
+routes plus looting, coin drops, pickpocketing and wool) instead of always taking the
 best estimate, so the data covers many ways of earning and the ledger shows which ones pay.
 
 - Each run first sells banked products and `JUNK` on the Grand Exchange (at most once an hour).

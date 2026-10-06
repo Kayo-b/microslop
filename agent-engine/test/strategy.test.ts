@@ -67,15 +67,15 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
   const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const first = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(first && 'phase' in first && first.phase.id === 'gold:iron-ore', 'untried routes first, best estimate among them');
-  lastRun.set('iron-ore', Date.now()).set('cowhides', Date.now());
-  const flip = choosePhase({ kind: 'gold', lastRun }, p, new Set());
-  assert.ok(flip && 'phase' in flip && flip.phase.id === 'gold:ge-flip' && flip.phase.text.startsWith('at the Grand Exchange'), 'llm routes run with their full goal');
+  lastRun.set('iron-ore', Date.now()).set('cowhides', Date.now()).set('feathers', Date.now()).set('guard-coins', Date.now());
+  const wool = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(wool && 'phase' in wool && wool.phase.id === 'gold:wool' && wool.phase.text.startsWith('take shears'), 'llm routes run with their full goal');
 
   // Every fitting route tried: the oldest comes round again.
-  const order = ['cowhides', 'ge-flip', 'iron-ore', 'feathers', 'guard-coins', 'wool', 'pickpocket-men'];
+  const order = ['cowhides', 'iron-ore', 'feathers', 'guard-coins', 'wool', 'pickpocket-men'];
   order.forEach((id, i) => lastRun.set(id, Date.now() - (order.length - i) * 60_000));
   const again = choosePhase({ kind: 'gold', lastRun }, p, new Set(['gold:cowhides']));
-  assert.ok(again && 'phase' in again && again.phase.id === 'gold:ge-flip', JSON.stringify(again));
+  assert.ok(again && 'phase' in again && again.phase.id === 'gold:iron-ore', JSON.stringify(again));
 });
 
 test('strategy gold: a fight below its recommended levels trains the weakest skill in its turn', () => {

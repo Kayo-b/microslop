@@ -150,7 +150,6 @@ export const GOLD: MoneyRoute[] = [
   { id: 'guard-coins', name: 'kill Varrock guards for their coin drops', members: false, req: { combat: 30 }, recommend: { Attack: 30, Strength: 30, Defence: 25 }, gpHour: 15_000, products: [], exec: { kind: 'combat', monster: 'Guard', area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } }, loot: ['Coins'], food: 10 } },
   { id: 'pickpocket-men', name: 'pickpocket men for coins', members: false, gpHour: 8_000, products: [], exec: { kind: 'llm', goal: 'pickpocket men and women in Lumbridge for coins, eating food when hitpoints drop below half and banking when food runs out' } },
   { id: 'wool', name: 'shear sheep and spin balls of wool to sell', members: false, gpHour: 12_000, products: ['Ball of wool', 'Wool'], exec: { kind: 'llm', goal: 'take shears, shear sheep in the field north-east of Lumbridge, spin the wool into balls of wool on the Lumbridge Castle spinning wheel, and bank the balls of wool' } },
-  { id: 'ge-flip', name: 'flip cheap items on the Grand Exchange', members: false, req: { items: ['Coins'] }, gpHour: 20_000, products: [], exec: { kind: 'llm', goal: 'at the Grand Exchange, buy a commonly traded cheap item (runes, arrows, feathers or food) a little below its guide price with at most half the coins, then sell what was bought a little above the guide price, collecting from the offer slots in between' } },
 ];
 
 /** Banked items with no use to the account that the gold strategy turns into coins. */

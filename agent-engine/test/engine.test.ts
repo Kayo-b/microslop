@@ -467,6 +467,16 @@ test('an open Grand Exchange offers buying the wanted item, collecting and closi
   assert.deepEqual(candidates[0]!.gameAction, { op: 'ge_buy', name: 'Redberry pie', quantity: 1 });
 });
 
+test('a Grand Exchange buy with no want takes the count from the sub-goal text, not one at a time', () => {
+  const s = snapshot();
+  s.grandExchange = { open: true };
+  const text = 'talk to the Grand Exchange Clerk and place a buy offer for 3,000 Feather a little below guide price';
+  const { candidates } = buildCandidates(s, null, { text, targets: ['Grand Exchange Clerk', 'Feather'], actions: ['Exchange'] });
+  assert.deepEqual(candidates[0]!.gameAction, { op: 'ge_buy', name: 'Feather', quantity: 3000 });
+  const plain = buildCandidates(s, null, { text: 'buy a Knife at the Grand Exchange', targets: ['Grand Exchange Clerk', 'Knife'], actions: ['Exchange'] });
+  assert.deepEqual(plain.candidates[0]!.gameAction, { op: 'ge_buy', name: 'Knife', quantity: 1 });
+});
+
 test('reflexes: low HP and no food while something else attacks -> walk away from it', async () => {
   const { goblin } = await import('./support/fixtures.ts');
   const s = snapshot({ inventory: { freeSlots: 28, items: [] } });

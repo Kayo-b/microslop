@@ -471,6 +471,17 @@ function bankCandidatesAll(s: Snapshot, goal: SubGoal, max: number): Candidate[]
   return out.slice(0, max);
 }
 
+/**
+ * How many of an item a sub-goal without a `want` (no done count) asks for: a number written
+ * before the name ("buy 3000 Feather", "1,000 x feathers"), else 1. Without this a GE buy of
+ * 3000 feathers went one feather per offer.
+ */
+function textCount(goal: SubGoal, name: string): number {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(`(\\d[\\d,]*)\\s*(?:x\\s*)?${escaped}`, 'i').exec(goal.text);
+  return m ? Number(m[1]!.replace(/,/g, '')) : 1;
+}
+
 /** Not items: the sub-goal's targets also name the clerk and booth that opened the exchange. */
 const GE_FIXTURES = /grand exchange|clerk|booth|banker/i;
 
@@ -482,7 +493,7 @@ function geCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
   const out: Candidate[] = [];
   const wants = goal.want?.length
     ? goal.want.map((w) => ({ name: w.name, need: stillNeeded(s, goal, w.name) ?? w.count }))
-    : (goal.targets ?? []).filter((t) => !GE_FIXTURES.test(t)).map((name) => ({ name, need: 1 }));
+    : (goal.targets ?? []).filter((t) => !GE_FIXTURES.test(t)).map((name) => ({ name, need: textCount(goal, name) - heldCount(s, name) }));
   for (const w of wants.slice(0, 6)) {
     if (w.need <= 0) continue;
     out.push({ id: `ge:buy:${w.name}`, kind: 'ge_item', name: w.name, action: 'Buy', label: `Buy ${w.need} ${w.name} on the Grand Exchange`, gameAction: { op: 'ge_buy', name: w.name, quantity: w.need } });
