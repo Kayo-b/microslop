@@ -20,6 +20,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.agentserver.AgentTrade;
 import net.runelite.client.plugins.microbot.agentserver.AgentWidgets;
 import net.runelite.client.plugins.microbot.agentserver.GameMessageLog;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
@@ -134,6 +135,7 @@ public class SnapshotHandler extends AgentHandler {
 			.anyMatch(o -> o != null && (o.getState() == net.runelite.api.GrandExchangeOfferState.BOUGHT || o.getState() == net.runelite.api.GrandExchangeOfferState.SOLD
 				|| o.getState() == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY || o.getState() == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL))).orElse(false));
 		snapshot.put("grandExchange", ge);
+		snapshot.put("trade", AgentTrade.read(client));
 		snapshot.put("walk", WalkHandler.activeWalkStatus());
 		snapshot.put("messages", GameMessageLog.recent(maxMessages));
 

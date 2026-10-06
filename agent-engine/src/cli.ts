@@ -14,6 +14,7 @@ import { existsSync } from 'node:fs';
 import { freshProfile, roadmap } from './goalplan/compiler.ts';
 import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
 import { chooseOption, FlowPlanner, FLOWS, flowStatus } from './flows/FlowPlanner.ts';
+import { transferCoins } from './tools/transfer.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -62,6 +63,13 @@ const { values, positionals } = parseArgs({
     goal: { type: 'string' },
     since: { type: 'string' },
     flow: { type: 'string' },
+    'from-port': { type: 'string' },
+    'from-name': { type: 'string' },
+    'to-port': { type: 'string' },
+    'to-name': { type: 'string' },
+    'from-token': { type: 'string' },
+    'to-token': { type: 'string' },
+    'keep-coins': { type: 'string' },
     option: { type: 'string' },
     hours: { type: 'string' },
     subgoal: { type: 'string' },
@@ -133,6 +141,8 @@ function help(): void {
   npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
   npm run agent -- flow [gold]                                          (a flow's option tree and the sub-flows each option needs)
   npm run agent -- run --flow gold [--option ID]                      (strict: one option and only its own sub-flows)
+  npm run agent -- transfer --from-port P --from-name A --to-port P --to-name B [--from-token F] [--to-token F] [--keep-coins N]
+                                                                       (trade coins between the account's own characters at the GE)
   npm run agent -- monitor [--since ISO | --hours N]                  (running campaign: activity, rescues by model, gold, alerts)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
@@ -624,6 +634,18 @@ try {
   else if (command === 'prereq') await prereqShow();
   else if (command === 'llm-report') report();
   else if (command === 'flow') await flowShow();
+  else if (command === 'transfer') {
+    if (!values['from-name'] || !values['to-name'] || !values['from-port'] || !values['to-port']) {
+      throw new Error('transfer needs --from-port --from-name --to-port --to-name [--from-token F] [--to-token F] [--keep-coins N]');
+    }
+    const side = (port: string, name: string, tokenFile?: string) => ({ name, backend: new MicrobotBackend({ port: Number(port), tokenFile }) });
+    await transferCoins(
+      side(values['from-port'], values['from-name'], values['from-token']),
+      side(values['to-port'], values['to-name'], values['to-token']),
+      Number(values['keep-coins'] ?? 50_000),
+      (m) => console.log(`[transfer] ${m}`),
+    );
+  }
   else if (command === 'monitor') {
     const since = values.since ? Date.parse(values.since) : values.hours ? Date.now() - Number(values.hours) * 3_600_000 : undefined;
     console.log(monitorReport(readMonitorInput(ROOT, { since })).join('\n'));

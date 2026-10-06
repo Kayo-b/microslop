@@ -7,6 +7,7 @@ import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.agentserver.AgentTrade;
 import net.runelite.client.plugins.microbot.agentserver.AgentWidgets;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
@@ -312,6 +313,21 @@ public class ActHandler extends AgentHandler {
 				Rs2Tab.switchTo(tab);
 				return sleepUntil(() -> Rs2Tab.getCurrentTab() == tab, 2_000) ? Result.ok() : Result.fail("tab_not_opened");
 			}
+			case "trade_player": {
+				// Only the player the caller names (the account's own other character).
+				String name = requireString(body, "name");
+				return AgentTrade.tradePlayer(client, name) ? Result.ok() : Result.fail("player_not_found");
+			}
+			case "trade_offer": {
+				if (AgentTrade.stage() == null) return Result.fail("trade_not_open");
+				String name = requireString(body, "name");
+				String option = body.get("option") instanceof String ? (String) body.get("option") : "Offer-All";
+				return AgentTrade.offer(client, name, option) ? Result.ok() : Result.fail("item_not_offered");
+			}
+			case "trade_accept":
+				return AgentTrade.accept() ? Result.ok() : Result.fail("trade_not_open");
+			case "trade_decline":
+				return AgentTrade.decline() ? Result.ok() : Result.fail("trade_not_open");
 			case "widget_click": {
 				// Buttons on interfaces with no world target: character design "Confirm", name lookup, etc.
 				String text = requireString(body, "text");

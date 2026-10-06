@@ -172,6 +172,8 @@ export interface Snapshot {
   /** The Grand Exchange interface. */
   /** `collectable`: some offer is finished or cancelled and holds items or coins (absent: unknown). */
   grandExchange?: { open: boolean; collectable?: boolean };
+  /** Player trade screens: offer (first) or confirm (second); offers as items or text lines. */
+  trade?: { open: boolean; stage: 'offer' | 'confirm' | null; status?: string; mine?: unknown[]; theirs?: unknown[] };
   walk: WalkStatus;
   /** Recent game/system messages only; other players' chat is never included. */
   messages: GameMessage[];
@@ -226,6 +228,11 @@ export type GameAction =
   | { op: 'cast_on'; spell: string; target: TargetRef }
   /** Type into the focused input (display name, amount prompts); `enter` submits it. */
   | { op: 'type_text'; text: string; enter?: boolean }
+  /** Trade the named player (only the account's own other character). */
+  | { op: 'trade_player'; name: string }
+  | { op: 'trade_offer'; name: string; option?: string }
+  | { op: 'trade_accept' }
+  | { op: 'trade_decline' }
   | { op: 'wait'; ticks: number }
   | { op: 'done' };
 
