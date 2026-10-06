@@ -68,7 +68,8 @@ public class ActHandler extends AgentHandler {
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
 			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_sell", "ge_collect", "ge_close",
-			"tab_open", "widget_click", "type_text", "cast_on"));
+			"tab_open", "widget_click", "type_text", "cast_on",
+			"trade_player", "trade_offer", "trade_accept", "trade_decline"));
 
 	/** Longest text {@code type_text} accepts (display names are at most 12 characters). */
 	private static final int MAX_TYPED = 32;
