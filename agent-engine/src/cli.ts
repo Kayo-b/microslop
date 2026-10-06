@@ -12,6 +12,7 @@
  */
 import { existsSync } from 'node:fs';
 import { freshProfile, roadmap } from './goalplan/compiler.ts';
+import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
 import { accountDir, loadPlan, type PlanSpec } from './goalplan/spec.ts';
@@ -150,7 +151,8 @@ async function prereqShow(): Promise<void> {
     const o = pos && kb ? kb.shopOffers(item, pos)[0] : undefined;
     return o ? { source: { kind: 'shop' as const, name: o.shop, keeper: o.keeper, point: o.point }, price: o.price } : null;
   };
-  const setup = resolveSetup(needs, { profile, counts: prereqCounts(snap, bank) }, { skip: recentFailures(path.join(ROOT, 'data', 'strategy-failures.json')), shop });
+  const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+  const setup = resolveSetup(needs, { profile, counts: prereqCounts(snap, bank) }, { skip: recentFailures(path.join(ROOT, 'data', 'strategy-failures.json')), shop, gePrice });
   const budget = values['setup-budget'] ? Number(values['setup-budget']) : 30;
   console.log(`${needs.name}: bank last seen ${bank.seenAt ?? 'never'}, ${profile.coins} coins`);
   console.log(`needs: ${JSON.stringify({ req: needs.req, tools: needs.tools.map((t) => t.any), supplies: needs.supplies.map((x) => x.item), food: needs.food, gear: needs.gear, kit: needs.style, inputs: needs.inputs.map((i) => i.item) })}`);
@@ -308,6 +310,7 @@ async function run(): Promise<void> {
     return new PrereqPlanner(inner, needs, {
       account: backend,
       kb,
+      gePrice: () => loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')),
       bank: o.bank,
       skip: o.skip,
       budgetMinutes: values['setup-budget'] ? Number(values['setup-budget']) : 30,

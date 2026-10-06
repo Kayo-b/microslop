@@ -20,6 +20,8 @@ export interface SetupStep {
   phase: Phase;
   minutes: number;
   why: string;
+  /** A gear upgrade: worth doing, but dropped first when the setup runs over its time budget. */
+  optional?: boolean;
 }
 
 export interface Setup {
@@ -40,6 +42,8 @@ export interface ResolveOptions {
   skip?: Set<string>;
   /** Cheapest reachable shop for an item (KB stock + SHOP_LOCATIONS); used when ACQUIRE has none. */
   shop?: (item: string) => { source: AcquireSource; price: number } | null;
+  /** Grand Exchange price of an item; the GE is used when it is cheaper than the shops. */
+  gePrice?: (item: string) => number | null;
 }
 
 /** Cooked food to aim for when fishing for it. */
@@ -47,21 +51,28 @@ const FOOD_BATCH = 20;
 /** Minutes per shop trip (walk, trade, back). */
 const SHOP_MINUTES = 6;
 const SELL_MINUTES = 8;
+/** Minutes per GE purchase: several are bought on one visit. */
+const GE_MINUTES = 3;
 
 const a = (noun: string) => `${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun}`;
 
 const owns = (v: AccountView, suffix: string) => [...v.counts.keys()].some((n) => n.toLowerCase() === suffix || n.toLowerCase().endsWith(` ${suffix}`));
 
-function acquireStep(item: string, count: number, why: string, shop: ResolveOptions['shop']): { step: SetupStep; cost: number } | null {
+/** `cost`: coins to carry (a GE offer is placed 30% over the guide); `value`: what it really costs. */
+function acquireStep(item: string, count: number, why: string, o: ResolveOptions): { step: SetupStep; cost: number; value: number } | null {
   const a = ACQUIRE.find((x) => x.item === item) ?? (() => {
-    const s = shop?.(item);
+    const s = o.shop?.(item);
+    const ge = o.gePrice?.(item);
+    // GE offers are placed 30% over the guide price (the difference comes back when they fill).
+    if (ge && (!s || ge * 1.3 < s.price)) return { price: ge, source: { kind: 'ge' } as AcquireSource };
     return s ? { price: s.price, source: s.source } : undefined;
   })();
   if (!a) return null;
   const cost = Math.ceil(a.price * count * (a.source.kind === 'ge' ? 1.3 : 1));
   return {
     cost,
-    step: { phase: { id: `acquire:${item}`, text: `buy ${count} ${item}`, exec: { kind: 'acquire', item, count, source: a.source, price: a.price } }, minutes: SHOP_MINUTES, why },
+    value: a.price * count,
+    step: { phase: { id: `acquire:${item}`, text: `buy ${count} ${item}`, exec: { kind: 'acquire', item, count, source: a.source, price: a.price } }, minutes: a.source.kind === 'ge' ? GE_MINUTES : SHOP_MINUTES, why },
   };
 }
 
@@ -119,10 +130,10 @@ function coinSteps(amount: number, v: AccountView, skip: Set<string>, why: strin
 
 export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOptions = {}): Setup {
   const skip = o.skip ?? new Set<string>();
-  const acquire = (item: string, count: number, why: string) => acquireStep(item, count, why, o.shop);
+  const acquire = (item: string, count: number, why: string) => acquireStep(item, count, why, o);
   const steps: SetupStep[] = [];
   const blocked: string[] = [];
-  const buys: { step: SetupStep; cost: number }[] = [];
+  const buys: { step: SetupStep; cost: number; value: number }[] = [];
   let coinsNeeded = 0;
 
   // 1. Levels, quests, quest points, combat level, catalog items: the plan compiler's resolution.
@@ -152,17 +163,40 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
 
   // 4a. Gear: every required slot holds something usable for the style; otherwise buy the best
   // tier that costs at most a third of the coins owned, or the cheapest when none does.
+  const upgrades: { step: SetupStep; cost: number; value: number }[] = [];
   if (needs.gear) {
     const levels = gearLevels(v);
+    const style = needs.gear.style;
+    let spare = v.profile.coins;
     for (const slot of needs.gear.slots) {
-      if ([...v.counts.keys()].some((n) => fillsSlot(n, slot, needs.gear!.style, levels))) continue;
-      const options = gearCandidates(slot, levels).map((item) => acquire(item, 1, `${needs.name}: nothing to wear in the ${slot} slot`)).filter((b) => b !== null);
-      const pick = options.find((b) => b.cost * 3 <= v.profile.coins) ?? options.sort((a, b) => a.cost - b.cost)[0];
-      if (pick) buys.push(pick);
+      const owned = [...v.counts.keys()].filter((n) => fillsSlot(n, slot, style, levels)).map((n) => classifyGear(n, style)!.score);
+      if (!owned.length) {
+        const options = gearCandidates(slot, levels).map((item) => acquire(item, 1, `${needs.name}: nothing to wear in the ${slot} slot`)).filter((b) => b !== null);
+        const pick = options.find((b) => b.cost * 3 <= v.profile.coins) ?? options.sort((a, b) => a.cost - b.cost)[0];
+        if (pick) {
+          buys.push(pick);
+          spare -= pick.value;
+        }
+        continue;
+      }
+      // 4b. Upgrades: the levels allow a better tier than the best owned piece. Buy the best one
+      // that costs at most a third of the coins, from what is left after the required purchases;
+      // never earned first, and dropped when the setup runs over its time budget.
+      if (style !== 'melee') continue;
+      const best = Math.max(...owned);
+      const better = gearCandidates(slot, levels).filter((item) => (classifyGear(item, style)?.score ?? 0) >= best + 10);
+      for (const item of better) {
+        const b = acquire(item, 1, `${needs.name}: ${item} beats the ${slot} owned`);
+        if (!b || b.value * 3 > v.profile.coins || b.cost > spare) continue;
+        b.step.optional = true;
+        upgrades.push(b);
+        spare -= b.value;
+        break;
+      }
     }
   }
 
-  // 4b. Ranged/magic kit: the activity's kit planner buys it; make sure the coins are there.
+  // 4c. Ranged/magic kit: the activity's kit planner buys it; make sure the coins are there.
   if (needs.style) coinsNeeded += kitCost(needs.style, v);
 
   // 5. Food: fish and cook shrimps (no coins needed beyond a net, axe and tinderbox).
@@ -210,7 +244,15 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
     if (earn) prefix.push(...earn);
     else blocked.push(`${coinsNeeded} coins (no money route fits this account)`);
   }
-  // Buying comes before the rest: fishing for food needs the net it buys.
-  const all = [...prefix, ...buys.map((b) => b.step), ...steps];
+  // Buying comes before the rest: fishing for food needs the net it buys. Upgrades only when
+  // nothing has to be earned first.
+  const extra: SetupStep[] = [];
+  // The GE overbid comes back once an offer fills, so the upgrades are paid at their value.
+  for (const u of prefix.length ? [] : upgrades) {
+    if (coinsNeeded + u.value > v.profile.coins) continue;
+    coinsNeeded += u.value;
+    extra.push(u.step);
+  }
+  const all = [...prefix, ...buys.map((b) => b.step), ...extra, ...steps];
   return { steps: all, blocked, minutes: all.reduce((s, x) => s + x.minutes, 0) };
 }

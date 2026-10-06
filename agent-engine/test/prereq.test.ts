@@ -43,6 +43,20 @@ test('prereq: with coins, the best affordable armour tier is bought straight awa
   assert.deepEqual(ids(setup.steps), ['acquire:Iron chainbody'], 'iron (210) fits a third of 1000; steel (750) does not');
 });
 
+test('prereq: owned gear below what the levels allow is upgraded, from the GE when it is cheaper', () => {
+  const needs = activityNeeds({ kind: 'preset', preset: 'kill-barbarians' })!;
+  const ge = (item: string) => ({ 'Rune scimitar': 15_000, 'Mithril platebody': 3_000, 'Mithril full helm': 1_000, 'Mithril platelegs': 1_500, 'Mithril kiteshield': 1_200 } as Record<string, number>)[item] ?? null;
+  const geared = { ...fullMelee, 'Bronze chainbody': 1, Shrimps: 10 };
+  const setup = resolveSetup(needs, view({ levels: { Attack: 40, Defence: 28 }, counts: geared, coins: 55_000 }), { shop, gePrice: ge });
+  assert.deepEqual(ids(setup.steps), ['acquire:Rune scimitar', 'acquire:Mithril full helm', 'acquire:Mithril platebody', 'acquire:Mithril platelegs', 'acquire:Mithril kiteshield']);
+  assert.ok(setup.steps.every((st) => st.optional && st.phase.exec.kind === 'acquire' && st.phase.exec.source.kind === 'ge'));
+
+  // A third of the coins at most per piece, and never earned first.
+  const poor = resolveSetup(needs, view({ levels: { Attack: 40, Defence: 28 }, counts: geared, coins: 6_000 }), { shop, gePrice: ge });
+  assert.deepEqual(ids(poor.steps), ['acquire:Mithril full helm', 'acquire:Steel chainbody', 'acquire:Mithril platelegs', 'acquire:Mithril kiteshield'], 'the best tier within a third of the coins');
+  assert.deepEqual(ids(resolveSetup(needs, view({ levels: { Attack: 40, Defence: 28 }, counts: geared, coins: 100 }), { shop, gePrice: ge }).steps), []);
+});
+
 test('prereq: met needs give an empty setup', () => {
   const needs = activityNeeds({ kind: 'preset', preset: 'kill-barbarians' })!;
   const setup = resolveSetup(needs, view({ counts: { ...fullMelee, 'Bronze chainbody': 1, Shrimps: 10 } }), { shop });
@@ -101,6 +115,22 @@ test('prereq planner: setup longer than the budget skips the activity with the p
   const step = await p.next({ goal: 'x', snapshot: s, kb: null, reports: [] });
   assert.ok(step.kind === 'impossible' && /setup for chop-willows takes ~\d+ min \(budget 30\): train Woodcutting/.test(step.reason), JSON.stringify(step));
   assert.equal(inner.calls, 0);
+});
+
+test('prereq planner: gear upgrades are dropped, last first, to fit the time budget', async () => {
+  const needs = activityNeeds({ kind: 'preset', preset: 'kill-barbarians' })!;
+  const logs: string[] = [];
+  const inner: Planner = { name: 'inner', next: async (): Promise<PlanStep> => ({ kind: 'complete', reason: 'inner ran' }) };
+  const bank = new BankMemory(`/tmp/bank-${Math.random()}.json`);
+  bank.items = new Map(Object.entries({ ...fullMelee, 'Bronze chainbody': 1, Shrimps: 10, Coins: 55_000 }));
+  bank.seenAt = 'test';
+  const ge = async () => (item: string) => ({ 'Rune scimitar': 15_000, 'Mithril platebody': 3_000, 'Mithril full helm': 1_000, 'Mithril platelegs': 1_500, 'Mithril kiteshield': 1_200 } as Record<string, number>)[item] ?? null;
+  const s = snapshot();
+  s.skills = [{ name: 'Attack', level: 40, boosted: 40, xp: 0 }, { name: 'Defence', level: 28, boosted: 28, xp: 0 }] as never;
+  const p = new PrereqPlanner(inner, needs, { account: { varp: async () => 0, questStates: async () => [] }, bank, budgetMinutes: 7, gePrice: ge, log: (m) => logs.push(m) });
+  await p.next({ goal: 'x', snapshot: s, kb: null, reports: [] });
+  const line = logs.find((l) => l.includes('needs setup')) ?? '';
+  assert.ok(line.includes('Rune scimitar') && line.includes('Mithril full helm') && !line.includes('Mithril platebody'), line);
 });
 
 test('prereq planner: met prerequisites hand over to the activity', async () => {

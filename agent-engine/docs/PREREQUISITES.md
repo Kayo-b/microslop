@@ -20,7 +20,7 @@ Derived from the activity definition, so new presets need no extra table:
 | levels, quests, combat, quest points | catalog `Requirement`; gathering presets' lowest target level (oaks: Woodcutting 15) | account has them |
 | tools | preset `keep` (axe, pickaxe, net, rod), cooking (axe + tinderbox), smithing (hammer) | one is owned (carried, worn or banked) |
 | consumables | feathers for fly fishing | owned count >= min |
-| gear | fights against monsters that hit back: weapon, head, body, legs, shield per style | each slot has usable gear owned |
+| gear | fights against monsters that hit back: weapon, head, body, legs, shield per style | each slot has usable gear owned; melee slots are also upgraded (below) |
 | food | `minFood`, or 5 for monsters that hit back | cooked food owned >= that |
 | ranged/magic kit | combat style | coins cover bow/staff + 100 arrows/casts (the kit planner buys them) |
 | inputs | cooking presets (raw fish) | banked |
@@ -34,6 +34,14 @@ Setup phases have needs of their own (training Woodcutting buys an axe first).
 - **Purchases**: starter tools from `ACQUIRE`; anything else from the cheapest shop in the KB's
   stock tables whose keeper location is known (`SHOP_LOCATIONS` in `catalog.ts`). Gear: the best
   metal tier the levels allow that costs at most a third of the coins owned, else the cheapest.
+- **Gear upgrades** (melee): when the levels allow a tier at least one better than the best piece
+  owned for a slot, the best such piece costing at most a third of the coins is bought, from what
+  is left after required purchases. Upgrades are optional steps: never earned for first, and
+  dropped (last slot first) when the setup would run over its budget. The fight planner then
+  withdraws and wears them.
+- **Shop or GE**: GE prices come from the OSRS Wiki real-time API (`prices.runescape.wiki`, cached
+  6 h in `data/cache/ge-prices.json`). An item not in `ACQUIRE` is bought on the GE when its price
+  +30% (the `ge_buy` overbid, refunded on fill) beats the cheapest shop. Without the API, shops only.
 - **Coins**: when purchases cost more than the account owns, the best money route that needs
   nothing itself runs first (no missing tools, gear or food; fights need combat 15 above the
   route's requirement), then its products are sold on the Grand Exchange (`sell` phase,
