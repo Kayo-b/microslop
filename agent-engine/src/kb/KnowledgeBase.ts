@@ -189,7 +189,8 @@ export class KnowledgeBase {
   findPlaces(query: string, from?: WorldPoint, limit = 5): Place[] {
     const rows = this.stmt('SELECT name, kind, x, y, plane, members FROM places WHERE name LIKE ? COLLATE NOCASE')
       .all(`%${query}%`)
-      .map((r) => this.toPlace(r, from));
+      .map((r) => this.toPlace(r, from))
+      .filter((p) => safeFrom(p.point, from));
     return sortAndLimit(rows, from, limit);
   }
 
@@ -226,7 +227,8 @@ export class KnowledgeBase {
     )
       .all(name, from.x - radius, from.x + radius, from.y - radius, from.y + radius)
       .filter((r) => !opts.action || parse(r.actions).some((a) => a.toLowerCase() === opts.action!.toLowerCase()))
-      .map((r) => ({ name: r.name as string, kind: 'object' as const, point: { x: r.x as number, y: r.y as number, plane: r.plane as number }, members: false }));
+      .map((r) => ({ name: r.name as string, kind: 'object' as const, point: { x: r.x as number, y: r.y as number, plane: r.plane as number }, members: false }))
+      .filter((p) => safeFrom(p.point, from));
     return sortAndLimit(rows, from, opts.limit ?? 5);
   }
 
@@ -237,7 +239,8 @@ export class KnowledgeBase {
       'SELECT page, x, y, plane, members FROM spawns WHERE page = ? COLLATE NOCASE AND x BETWEEN ? AND ? AND y BETWEEN ? AND ?',
     )
       .all(page, from.x - radius, from.x + radius, from.y - radius, from.y + radius)
-      .map((r) => ({ name: r.page as string, kind: 'spawn' as const, point: { x: r.x as number, y: r.y as number, plane: r.plane as number }, members: r.members === 1 }));
+      .map((r) => ({ name: r.page as string, kind: 'spawn' as const, point: { x: r.x as number, y: r.y as number, plane: r.plane as number }, members: r.members === 1 }))
+      .filter((p) => safeFrom(p.point, from));
     return sortAndLimit(rows, from, opts.limit ?? 5);
   }
 
@@ -281,4 +284,13 @@ function sortAndLimit(rows: Place[], from: WorldPoint | undefined, limit: number
     rows.sort((a, b) => a.distance! - b.distance!);
   }
   return rows.slice(0, limit);
+}
+
+/**
+ * Wilderness points are never offered from outside it: "nearest Iron rocks" from Edgeville bank
+ * were the Wilderness rocks north of the ditch, and the account went mining among player killers.
+ * Inside the Wilderness everything stays available (the way out may lead through it).
+ */
+function safeFrom(p: WorldPoint, from?: WorldPoint): boolean {
+  return !inWilderness(p) || (from !== undefined && inWilderness(from));
 }

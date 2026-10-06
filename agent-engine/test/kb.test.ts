@@ -63,7 +63,7 @@ function fixtureKb(): KnowledgeBase {
     { id: 11364, name: 'Iron rocks', sizeX: 1, sizeY: 1, actions: ['Mine'] },
     { id: 900, sizeX: 1, sizeY: 1, actions: [], transforms: [-1, 11364] },
   ]);
-  jsonl('locations.jsonl', [[11364, 3285, 3368, 0, 10, 0], [900, 3300, 3300, 0, 10, 0]]);
+  jsonl('locations.jsonl', [[11364, 3285, 3368, 0, 10, 0], [900, 3300, 3300, 0, 10, 0], [11364, 3105, 3569, 0, 10, 0]]);
   jsonl('map_elements.jsonl', [{ name: 'Varrock', x: 3211, y: 3450, plane: 0, members: false }]);
   jsonl('wiki_locline.jsonl', [{ page_name: 'Goblin', coordinates: ['x:3242,y:3242', '3246,3235'], plane: 0 }]);
   jsonl('wiki_infobox_npc.jsonl', [{ page_name: 'Goblin', npc_id: ['3029'] }]);
@@ -78,12 +78,15 @@ test('knowledge base resolves places, placements, spawns and multi-loc names', (
   const from = { x: 3290, y: 3370, plane: 0 };
   assert.equal(kb.findPlaces('varrock')[0]?.name, 'Varrock');
   const rocks = kb.nearestObjects('Iron rocks', from, { action: 'mine' });
-  assert.equal(rocks.length, 2, 'unnamed multi-loc resolves to its named transform');
+  assert.equal(rocks.length, 2, 'unnamed multi-loc resolves to its named transform (the Wilderness rock is left out)');
   assert.deepEqual(rocks[0]?.point, { x: 3285, y: 3368, plane: 0 });
   assert.equal(kb.nearestSpawns('goblin', from).length, 2);
   assert.ok(kb.nearestBanks(from).length > 0, 'Microbot BankLocation enum is imported');
   const nearFerox = { x: 3134, y: 3600, plane: 0 };
   assert.ok(kb.nearestBanks(nearFerox, 5).every((b) => !/ferox/i.test(b.name)), 'no Wilderness banks');
+  const edgeville = { x: 3094, y: 3491, plane: 0 };
+  assert.ok(kb.nearestObjects('Iron rocks', edgeville).every((r) => r.point.y < 3520), 'no Wilderness rocks from outside it');
+  assert.deepEqual(kb.nearestObjects('Iron rocks', { x: 3105, y: 3568, plane: 0 })[0]?.point, { x: 3105, y: 3569, plane: 0 }, 'inside, everything stays');
   kb.close();
 });
 
