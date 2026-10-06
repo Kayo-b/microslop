@@ -54,6 +54,32 @@ expired: sign in with `bolt-microbot` once (closing Bolt afterwards is fine); th
 it up. Extra campaign flags go in `ExecStart=` (e.g. `--llm claude-code --rescue` to enable
 quests).
 
+## Monitoring a running campaign
+
+```bash
+npm run agent -- monitor              # since the latest campaign started
+npm run agent -- monitor --hours 1    # a recent window only
+```
+
+One screen, read-only: the systemd unit state, the current activity and its phase, LLM rescues
+(by model and trigger, success = the rescue's sub-goal ended `done`, recurring reasons, the latest
+five with their outcome), gold phases with coins and gp/h (`data/gold-ledger.jsonl`), the phases
+skip memory is holding back, and alerts:
+
+| Alert | Meaning / what to do |
+|---|---|
+| activity log silent 10+ min | agent hung: check `journalctl --user -u microbot-jev-data`, the client (`./microbot-cli state`) |
+| rescue never helps with "X" (3x+) | the LLM cannot get past X: fix it in code (planner, candidates, walker) |
+| rescue success under 30% | the rescue model is not coping; compare models by the per-model lines |
+| N rescue calls errored | the `claude` CLI failed or timed out (model name, login, rate limits) |
+| campaign unit is inactive/failed | the campaign ended or crashed |
+
+Comparing rescue models: run the same campaign with `--llm-model haiku` (or another model) and
+read the per-model lines; each rescue records its `rescuer` (`claude-code:<model>`). Stop a
+campaign between activities by waiting for its `■` line in `campaign.log` before
+`systemctl --user stop microbot-jev-data` (stopping ends the running activity at once). Never
+`systemctl kill -s STOP` the unit: the game client is in the same cgroup and freezes too.
+
 ## LLM backends
 
 Used by `--goal`, `--rescue`, `--escalate`, LLM strategy phases and quests.

@@ -12,6 +12,7 @@
  */
 import { existsSync } from 'node:fs';
 import { freshProfile, roadmap } from './goalplan/compiler.ts';
+import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -55,6 +56,8 @@ const { values, positionals } = parseArgs({
   options: {
     task: { type: 'string' },
     goal: { type: 'string' },
+    since: { type: 'string' },
+    hours: { type: 'string' },
     subgoal: { type: 'string' },
     actions: { type: 'string' },
     keep: { type: 'string' },
@@ -121,6 +124,7 @@ function help(): void {
   npm run agent -- run --plan FILE                                    (run a plan; LLM rescue on when a key is set)
   npm run agent -- prereq --task PRESET [--setup-budget N]            (dry run: what the activity needs first)
   npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
+  npm run agent -- monitor [--since ISO | --hours N]                  (running campaign: activity, rescues by model, gold, alerts)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
                        [--dest PLACE | --dest-at X,Y,PLANE] [--max-steps N]
@@ -550,6 +554,10 @@ try {
   else if (command === 'plan') await planShow();
   else if (command === 'prereq') await prereqShow();
   else if (command === 'llm-report') report();
+  else if (command === 'monitor') {
+    const since = values.since ? Date.parse(values.since) : values.hours ? Date.now() - Number(values.hours) * 3_600_000 : undefined;
+    console.log(monitorReport(readMonitorInput(ROOT, { since })).join('\n'));
+  }
   else {
     help();
     process.exitCode = 2;
