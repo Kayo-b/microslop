@@ -98,6 +98,15 @@ test('herblore: a purchase refused for coins (client guide price above the wiki)
   assert.ok(retry.quantity > 0 && retry.quantity <= Math.floor(163 * (50 / 80) * 0.95) + 1, `${retry.quantity}`);
 });
 
+test('herblore: a full inventory is processed as it is, never a withdraw into no free slot', async () => {
+  const p = new HerblorePlanner({ price });
+  const herbs = Array.from({ length: 14 }, (_, i) => item(1 + i, 255, 'Harralander'));
+  const vials = Array.from({ length: 13 }, (_, i) => item(15 + i, 227, 'Vial of water'));
+  const full = bankOpen(22, [coins(87_000), ...herbs, ...vials], [{ id: 255, name: 'Harralander', quantity: 157 }, { id: 227, name: 'Vial of water', quantity: 158 }]);
+  full.inventory.freeSlots = 0;
+  assert.deepEqual(act(await next(p, full)), { op: 'bank_close' });
+});
+
 test('herblore: gives up without a paying recipe or the coins for a trip', async () => {
   const p = new HerblorePlanner({ price });
   await next(p, bankOpen(5, [coins(1_000)], []));

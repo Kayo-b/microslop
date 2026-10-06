@@ -44,7 +44,7 @@ export interface HerbRecipe {
   output: string;
   /** clean: click Clean on each grimy herb; mix: use a vial of water on the herbs (Make All). */
   steps: ('clean' | 'mix')[];
-  /** Products per inventory trip (27 herbs to clean; 14 herbs + 14 vials to mix). */
+  /** Products per inventory trip (27 herbs to clean; 13 herbs + 13 vials to mix: coins take a slot). */
   perTrip: number;
   /** Rough products per hour, to compare recipes by profit per hour. */
   perHour: number;
@@ -52,8 +52,8 @@ export interface HerbRecipe {
 
 export const HERB_RECIPES: HerbRecipe[] = HERBS.flatMap(([clean, grimy, cleanLvl, unf, unfLvl]) => [
   { id: `clean:${clean}`, level: cleanLvl, inputs: [grimy], output: clean, steps: ['clean'], perTrip: 27, perHour: 1200 },
-  { id: `unf:${clean}`, level: Math.max(cleanLvl, unfLvl), inputs: [grimy, VIAL], output: unf, steps: ['clean', 'mix'], perTrip: 14, perHour: 900 },
-  { id: `mix:${clean}`, level: unfLvl, inputs: [clean, VIAL], output: unf, steps: ['mix'], perTrip: 14, perHour: 1800 },
+  { id: `unf:${clean}`, level: Math.max(cleanLvl, unfLvl), inputs: [grimy, VIAL], output: unf, steps: ['clean', 'mix'], perTrip: 13, perHour: 900 },
+  { id: `mix:${clean}`, level: unfLvl, inputs: [clean, VIAL], output: unf, steps: ['mix'], perTrip: 13, perHour: 1800 },
 ]);
 
 /** Profit per product after the GE tax; null when a price is missing. */
@@ -153,7 +153,9 @@ export class HerblorePlanner implements Planner {
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       for (const name of inputs) {
         const stack = s.bank.items.find((b) => b.name === name);
-        if (stack && count(name) < r!.perTrip) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount: Math.min(r!.perTrip - count(name), stack.quantity) }, reason: `withdraw ${name}` };
+        // Never more than the free slots: a full inventory refuses the withdraw (withdraw_failed).
+        const amount = Math.min(r!.perTrip - count(name), stack?.quantity ?? 0, s.inventory.freeSlots);
+        if (stack && amount > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount }, reason: `withdraw ${name}` };
       }
       if (!inputs.some((n) => count(n) > 0)) {
         const product = s.bank.items.find((b) => products.includes(b.name) && !inputs.includes(b.name));
