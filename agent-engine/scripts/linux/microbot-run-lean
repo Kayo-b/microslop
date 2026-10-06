@@ -4,7 +4,9 @@
 # mode (FPS cap, optional no-render). The normal microbot-run and ~/.runelite are not touched.
 #
 # Env: MICROBOT_DIR (default: this worktree), LEAN_HOME (default ~/.microbot-lean-home),
-#      LEAN_XMX (default 768m), LEAN_FPS (default 10), LEAN_NO_RENDER (default 1)
+#      LEAN_XMX (default 768m), LEAN_FPS (default 10), LEAN_NO_RENDER (default 1),
+#      LEAN_DISABLE (plugin class names to stop, comma-separated; default none: quest runs need
+#      QuestHelperPlugin)
 # The Jagex session comes from the same Bolt session file as microbot-run.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,4 +39,5 @@ exec "$J17/bin/java" \
   -Xmx"${LEAN_XMX:-768m}" -Xms128m -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -Xss512k \
   -Dfile.encoding=UTF-8 \
   -Dmicrobot.lean=true -Dmicrobot.lean.fps="${LEAN_FPS:-10}" -Dmicrobot.lean.noRender="$noRender" \
+  -Dmicrobot.lean.disable="${LEAN_DISABLE:-}" \
   -jar "$jar"
