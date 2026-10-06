@@ -6,6 +6,7 @@
  */
 import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
 import { SellPlanner } from '../goalplan/SellPlanner.ts';
+import { TanningPlanner } from '../goalplan/TanningPlanner.ts';
 import { nextMilestone } from '../goalplan/compiler.ts';
 import type { PlanSpec } from '../goalplan/spec.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
@@ -74,6 +75,8 @@ export interface StrategyDeps {
    * first; see src/prereq/. Returns the planner unchanged when the phase has nothing to check.
    */
   prereq?: (phase: Phase, planner: Planner) => Planner;
+  /** Grand Exchange prices, for scripted trading loops (tanning). */
+  gePrice?: (item: string) => number | null;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
@@ -127,7 +130,8 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     const gearDue = level(p, 'Smithing') < LAST_GEAR_LEVEL || !p.owned.has('Steel platebody');
     // At most one sell phase an hour: an item the GE refuses stays "owned" and would loop. Ores,
     // coal and bars stay while gear is still being smithed.
-    const sellable = [...new Set([...GOLD.flatMap((r) => r.products), ...JUNK])].filter((n) => p.owned.has(n) && !(gearDue && SMITHING_MATERIALS.has(n)));
+    // Cowhides are tanned (tan-hides), not sold raw.
+    const sellable = [...new Set([...GOLD.flatMap((r) => r.products), ...JUNK])].filter((n) => p.owned.has(n) && n !== 'Cowhide' && !(gearDue && SMITHING_MATERIALS.has(n)));
     if (sellable.length && !skip.has('gold:sell') && Date.now() - (last.get('sell') ?? 0) > 3_600_000) {
       return { phase: { id: 'gold:sell', text: `sell the ${sellable.join(', ')} on the Grand Exchange`, exec: { kind: 'sell', items: sellable } }, why: 'banked items are only worth something once sold' };
     }
@@ -203,6 +207,10 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
     case 'preset':
       if (COOK_PRESETS[e.preset]) return new CookingPlanner(COOK_PRESETS[e.preset]!, e.preset);
       if (e.preset === 'smith-progression') return new SmithingPlanner({ untilLevel });
+      if (e.preset === 'tan-hides') {
+        const bank = deps.bank;
+        return new TanningPlanner({ bank: () => (bank?.seenAt ? bank.items : null), price: deps.gePrice });
+      }
       return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {
       let area = e.area;

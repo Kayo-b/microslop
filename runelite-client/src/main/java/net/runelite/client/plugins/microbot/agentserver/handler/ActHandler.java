@@ -159,6 +159,8 @@ public class ActHandler extends AgentHandler {
 					String quantity = amount instanceof Number ? String.valueOf(((Number) amount).intValue()) : "All";
 					return AgentWidgets.smith(client, option, quantity) ? Result.ok() : Result.fail("option_not_found");
 				}
+				// The tanner always tans every carried hide of that leather ("Tan All").
+				if (AgentWidgets.isTanningOpen()) return AgentWidgets.tanAll(client, option) ? Result.ok() : Result.fail("option_not_found");
 				if (!Rs2Widget.isProductionWidgetOpen()) return Result.fail("production_not_open");
 				return Rs2Widget.handleProcessingInterface(option) ? Result.ok() : Result.fail("option_not_found");
 			}

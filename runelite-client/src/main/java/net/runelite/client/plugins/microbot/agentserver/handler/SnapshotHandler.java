@@ -475,6 +475,12 @@ public class SnapshotHandler extends AgentHandler {
 			p.put("options", AgentWidgets.smithingOptions(client));
 			return p;
 		}
+		if (AgentWidgets.isTanningOpen()) {
+			p.put("open", true);
+			p.put("interface", "tanning");
+			p.put("options", AgentWidgets.tanningOptions(client));
+			return p;
+		}
 		boolean open = Rs2Widget.isProductionWidgetOpen();
 		p.put("open", open);
 		p.put("interface", open ? "make" : null);

@@ -128,8 +128,8 @@ export interface BankState {
 /** The skilling "how many?" interface (cook, smelt, fletch...). */
 export interface ProductionState {
   open: boolean;
-  /** "make": skill-multi chatbox (cook, smelt, fletch); "smithing": the anvil grid. */
-  interface?: 'make' | 'smithing' | null;
+  /** "make": skill-multi chatbox (cook, smelt, fletch); "smithing": the anvil grid; "tanning": the tanner's leathers. */
+  interface?: 'make' | 'smithing' | 'tanning' | null;
   options: string[];
 }
 

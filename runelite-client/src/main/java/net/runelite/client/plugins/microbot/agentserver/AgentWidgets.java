@@ -1,9 +1,11 @@
 package net.runelite.client.plugins.microbot.agentserver;
 
 import net.runelite.api.Client;
+import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
@@ -14,9 +16,10 @@ import java.util.Locale;
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 
 /**
- * Anvil smithing interface (group 312) support for the agent endpoints. The skill-multi "make X"
- * chatbox (group 270) is already handled by {@link Rs2Widget#handleProcessingInterface}; smithing
- * uses its own grid of item buttons plus quantity toggles.
+ * Anvil smithing interface (group 312) and tanner interface (group 324) support for the agent
+ * endpoints. The skill-multi "make X" chatbox (group 270) is already handled by
+ * {@link Rs2Widget#handleProcessingInterface}; smithing uses its own grid of item buttons plus
+ * quantity toggles, and the tanner lists one button per leather with "Tan 1/5/10/X/All" options.
  */
 public final class AgentWidgets
 {
@@ -86,6 +89,101 @@ public final class AgentWidgets
 			sleep(300, 600);
 		}
 		return Rs2Widget.clickWidget(found[1]);
+	}
+
+	public static boolean isTanningOpen()
+	{
+		return Rs2Widget.isWidgetVisible(InterfaceID.TANNER, 0);
+	}
+
+	/** Leathers the tanner offers, by the name on their button ("Leather", "Hard leather", ...). */
+	public static List<String> tanningOptions(Client client)
+	{
+		List<String> names = new ArrayList<>();
+		Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			for (Widget w : tanningButtons(client))
+			{
+				String clean = Rs2UiHelper.stripColTags(w.getName()).trim();
+				if (!clean.isEmpty() && !names.contains(clean))
+				{
+					names.add(clean);
+				}
+			}
+			return true;
+		});
+		return names;
+	}
+
+	/**
+	 * Tans every carried hide of the leather named {@code option} (case-insensitive), through the
+	 * button's "Tan All" menu option. Returns false when the tanner lists no such leather.
+	 */
+	public static boolean tanAll(Client client, String option)
+	{
+		String wanted = option.toLowerCase(Locale.ROOT);
+		Object[] hit = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			for (Widget w : tanningButtons(client))
+			{
+				if (!Rs2UiHelper.stripColTags(w.getName()).trim().toLowerCase(Locale.ROOT).equals(wanted))
+				{
+					continue;
+				}
+				String[] actions = w.getActions();
+				for (int i = 0; i < actions.length; i++)
+				{
+					if (actions[i] != null && actions[i].equalsIgnoreCase("Tan All"))
+					{
+						return new Object[]{w.getId(), w.getIndex(), i + 1, w.getBounds(), w.getName()};
+					}
+				}
+			}
+			return null;
+		}).orElse(null);
+		if (hit == null)
+		{
+			return false;
+		}
+		NewMenuEntry entry = new NewMenuEntry()
+			.option("Tan All")
+			.target((String) hit[4])
+			.identifier((Integer) hit[2])
+			.type(MenuAction.CC_OP)
+			.param0((Integer) hit[1])
+			.param1((Integer) hit[0])
+			.forceLeftClick(false);
+		Microbot.doInvoke(entry, (java.awt.Rectangle) hit[3]);
+		return true;
+	}
+
+	private static List<Widget> tanningButtons(Client client)
+	{
+		List<Widget> out = new ArrayList<>();
+		List<Widget> all = new ArrayList<>();
+		for (int child = 0; child < 128; child++)
+		{
+			Widget w = client.getWidget(InterfaceID.TANNER, child);
+			if (w != null)
+			{
+				collect(w, all, 0);
+			}
+		}
+		for (Widget w : all)
+		{
+			String[] actions = w.getActions();
+			if (w.isHidden() || w.getName() == null || w.getName().isEmpty() || actions == null)
+			{
+				continue;
+			}
+			for (String a : actions)
+			{
+				if (a != null && a.equalsIgnoreCase("Tan All"))
+				{
+					out.add(w);
+					break;
+				}
+			}
+		}
+		return out;
 	}
 
 	private static List<Widget> smithingItemWidgets(Client client)

@@ -379,7 +379,7 @@ function productionCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
       kind: 'production' as const,
       name: option,
       action: 'Make',
-      label: smithing ? `Smith ${amount ?? 'all'}: ${option}` : `Make all: ${option}`,
+      label: smithing ? `Smith ${amount ?? 'all'}: ${option}` : s.production.interface === 'tanning' ? `Tan all: ${option}` : `Make all: ${option}`,
       gameAction: { op: 'production_select' as const, option, ...(smithing && amount ? { amount } : {}) },
       score: matchesAny(option, goal.targets) ? 1 : 0,
     };

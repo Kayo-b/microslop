@@ -42,6 +42,7 @@ import { recentFailures, recordFailure } from './strategy/skips.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
+import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
 import { activityNeeds, catalogReqFor } from './prereq/needs.ts';
@@ -334,6 +335,11 @@ async function run(): Promise<void> {
   if (values.task && COOK_PRESETS[values.task]) {
     planner = new CookingPlanner(COOK_PRESETS[values.task]!, values.task);
     goal = `${values.task} on fires until the bank has none left`;
+  } else if (values.task === 'tan-hides') {
+    const bank = new BankMemory();
+    const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+    planner = new TanningPlanner({ bank: () => (bank.seenAt ? bank.items : null), price: gePrice });
+    goal = 'buy cowhides, tan them at Ellis in Al Kharid and sell the leather';
   } else if (values.task === 'smith-progression') {
     const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
     planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
@@ -427,10 +433,12 @@ async function run(): Promise<void> {
     const failing = recentFailures(skipFile);
     if (failing.size) console.log(`[strategy] skipping phases that failed twice in the last 12 h: ${[...failing].join(', ')}`);
     strategyFailed = (id) => recordFailure(skipFile, id);
+    const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
     planner = strategy = new StrategyPlanner(g, {
       skip: failing,
       account: backend,
       kb,
+      gePrice,
       prereq: (phase, inner) => withPrereq(phase.exec, inner, { skip: failing, onFailed: (id) => recordFailure(skipFile, id) }),
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
       questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
