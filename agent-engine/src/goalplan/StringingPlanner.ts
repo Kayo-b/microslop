@@ -12,6 +12,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
+import { GE_DISTRACTIONS } from './HerblorePlanner.ts';
 import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
 const WOOL = 'Ball of wool';
@@ -119,7 +120,8 @@ export class StringingPlanner implements Planner {
     }
 
     if (unstrung && count(unstrung, false) > 0 && count(WOOL, false) > 0) {
-      return step(`use a ball of wool on a ${unstrung} and string them all`, [WOOL, unstrung], ['Use', 'Make'], { lacksItem: unstrung }, 80, [WOOL, unstrung]);
+      const scarcer = count(unstrung, false) <= count(WOOL, false) ? unstrung : WOOL;
+      return step(`use a ball of wool on a ${unstrung} and string them all`, [WOOL, unstrung], ['Use', 'Make'], { lacksItem: scarcer }, 80, [WOOL, unstrung], { avoid: GE_DISTRACTIONS });
     }
     // Only coins and strung amulet notes carried: off to sell them.
     const others = s.inventory.items.filter((i) => i.name !== 'Coins');

@@ -73,6 +73,10 @@ test('herblore: unfinished potions from grimy herbs - clean, then mix with vials
   const herbs = Array.from({ length: 14 }, (_, i) => item(1 + i, 255, 'Harralander'));
   const mix = await next(p, state(22, [coins(1_000), ...herbs, ...vials]));
   assert.ok(mix.kind === 'subgoal' && mix.subgoal.targets?.includes('Vial of water') && mix.subgoal.targets.includes('Harralander'), text(mix));
+  assert.ok(mix.kind === 'subgoal' && mix.subgoal.avoid?.includes('Poll booth'));
+  // 14 herbs, 13 vials: done when the vials are gone, not the herbs.
+  const uneven = await next(p, state(22, [coins(1_000), ...herbs, ...vials.slice(0, 13)]));
+  assert.ok(uneven.kind === 'subgoal' && uneven.subgoal.doneWhen?.lacksItem === 'Vial of water', JSON.stringify(uneven.kind === 'subgoal' && uneven.subgoal.doneWhen));
 });
 
 test('herblore: a level gained mid-run switches the recipe at the next purchase, not mid-batch', async () => {
