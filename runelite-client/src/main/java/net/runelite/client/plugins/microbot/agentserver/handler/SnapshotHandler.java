@@ -6,6 +6,8 @@ import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.CollisionData;
 import net.runelite.api.CollisionDataFlag;
+import net.runelite.api.GameObject;
+import net.runelite.api.Point;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.EquipmentInventorySlot;
@@ -303,7 +305,15 @@ public class SnapshotHandler extends AgentHandler {
 		// A GAME object (spinning wheel, booth, rock) is used from a tile beside it with no wall in
 		// between; doors and other WALL objects sit on the wall and work from either side.
 		if (model.getTileObjectType() == TileObjectType.GAME) {
-			putReachThroughWalls(m, reach, loc, comp.getSizeX(), comp.getSizeY());
+			// Multi-tile scenery: the exact footprint from the scene bounds. Its world location is not
+			// reliably the centre (a 2x3 Al Kharid furnace reports its south-west tile), and a ring
+			// around a guessed centre tested tiles inside the furnace and missed the ones beside it.
+			int[] fp = footprint(model);
+			if (fp != null) {
+				putReachThroughWallsFromCorner(m, reach, new WorldPoint(fp[0], fp[1], loc.getPlane()), fp[2], fp[3]);
+			} else {
+				putReachThroughWalls(m, reach, loc, comp.getSizeX(), comp.getSizeY());
+			}
 		} else {
 			putReach(m, reach, loc, comp.getSizeX(), comp.getSizeY());
 		}
@@ -354,22 +364,29 @@ public class SnapshotHandler extends AgentHandler {
 	 * a room's wall is not "reachable", and clicking it there fails with "I can't reach that!".
 	 */
 	private void putReachThroughWalls(Map<String, Object> m, Map<WorldPoint, Integer> reach, WorldPoint loc, int sizeX, int sizeY) {
-		int best = Integer.MAX_VALUE;
 		int halfX = Math.max(1, sizeX) / 2;
 		int halfY = Math.max(1, sizeY) / 2;
-		int[][] flags = collisionFlags(loc.getPlane());
-		for (int dx = -halfX - 1; dx <= halfX + 1; dx++) {
-			for (int dy = -halfY - 1; dy <= halfY + 1; dy++) {
-				boolean westOrEast = dx == -halfX - 1 || dx == halfX + 1;
-				boolean southOrNorth = dy == -halfY - 1 || dy == halfY + 1;
+		// Footprint guessed around loc as its centre, (2*half+1) tiles wide.
+		putReachThroughWallsFromCorner(m, reach, new WorldPoint(loc.getX() - halfX, loc.getY() - halfY, loc.getPlane()), 2 * halfX + 1, 2 * halfY + 1);
+	}
+
+	/** {@link #putReachThroughWalls} for a footprint known by its south-west tile and size. */
+	private void putReachThroughWallsFromCorner(Map<String, Object> m, Map<WorldPoint, Integer> reach, WorldPoint sw, int sizeX, int sizeY) {
+		int best = Integer.MAX_VALUE;
+		int[][] flags = collisionFlags(sw.getPlane());
+		int west = sw.getX() - 1, east = sw.getX() + sizeX, south = sw.getY() - 1, north = sw.getY() + sizeY;
+		for (int x = west; x <= east; x++) {
+			for (int y = south; y <= north; y++) {
+				boolean westOrEast = x == west || x == east;
+				boolean southOrNorth = y == south || y == north;
 				if (westOrEast && southOrNorth) continue;
-				WorldPoint tile = new WorldPoint(loc.getX() + dx, loc.getY() + dy, loc.getPlane());
+				WorldPoint tile = new WorldPoint(x, y, sw.getPlane());
 				Integer d = reach.get(tile);
 				if (d == null || d >= best) continue;
 				if (westOrEast || southOrNorth) {
-					int toward = dx == -halfX - 1 ? CollisionDataFlag.BLOCK_MOVEMENT_EAST
-						: dx == halfX + 1 ? CollisionDataFlag.BLOCK_MOVEMENT_WEST
-						: dy == -halfY - 1 ? CollisionDataFlag.BLOCK_MOVEMENT_NORTH
+					int toward = x == west ? CollisionDataFlag.BLOCK_MOVEMENT_EAST
+						: x == east ? CollisionDataFlag.BLOCK_MOVEMENT_WEST
+						: y == south ? CollisionDataFlag.BLOCK_MOVEMENT_NORTH
 						: CollisionDataFlag.BLOCK_MOVEMENT_SOUTH;
 					if (wallFlag(flags, tile, toward)) continue;
 				}
@@ -378,6 +395,18 @@ public class SnapshotHandler extends AgentHandler {
 		}
 		m.put("reachable", best != Integer.MAX_VALUE);
 		m.put("pathDistance", best == Integer.MAX_VALUE ? -1 : best);
+	}
+
+	/** [swX, swY, sizeX, sizeY] in world tiles for a GameObject from its scene bounds; null otherwise. */
+	private int[] footprint(Rs2TileObjectModel model) {
+		if (!(model.getTileObject() instanceof GameObject)) return null;
+		GameObject go = (GameObject) model.getTileObject();
+		Point min = go.getSceneMinLocation();
+		Point max = go.getSceneMaxLocation();
+		WorldView wv = client.getTopLevelWorldView();
+		if (min == null || max == null || wv == null) return null;
+		WorldPoint sw = WorldPoint.fromScene(wv, min.getX(), min.getY(), go.getPlane());
+		return new int[]{sw.getX(), sw.getY(), max.getX() - min.getX() + 1, max.getY() - min.getY() + 1};
 	}
 
 	private int[][] collisionFlags(int plane) {
