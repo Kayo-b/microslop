@@ -529,3 +529,20 @@ test('two carried items the sub-goal names can be used on each other', () => {
   assert.ok(use, JSON.stringify(c.map((x) => x.label)));
   assert.deepEqual(use!.gameAction, { op: 'use_item_on', itemSlot: 0, target: { kind: 'inventory', slot: 1, id: 272 } });
 });
+
+test('a slot-addressed action that finds its slot changed re-decides instead of counting a failure', async () => {
+  const s = snapshot({ inventory: { freeSlots: 26, items: [item(0, 199, 'Grimy guam leaf', { actions: ['Clean', 'Drop'] }), item(1, 199, 'Grimy guam leaf', { actions: ['Clean', 'Drop'] })] } });
+  const backend = {
+    snapshot: async () => s,
+    act: async () => ({ success: false, op: 'interact', tick: 1, reason: 'slot_changed' }),
+  } as never;
+  const decider = new ScriptedDecisionEngine((p) => {
+    const t = p.questions.target as { criteria: Record<string, string> };
+    return { op: { choice: 'interact' }, target: { choice: Object.keys(t.criteria).find((k) => k.includes('#Clean'))! } };
+  });
+  const engine = new GameIntentEngine({ backend, decisionEngine: decider, maxFailures: 3 });
+  for (let i = 0; i < 5; i++) {
+    const r = await engine.step({ text: 'clean all the grimy guam leafs', targets: ['Grimy guam leaf'], actions: ['Clean'] });
+    assert.equal(r.kind, 'waiting', `step ${i}: ${r.kind}`);
+  }
+});
