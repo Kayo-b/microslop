@@ -131,6 +131,16 @@ test('strategy gold: gear is smithed every other turn until the steel platebody,
   assert.ok(after && 'phase' in after && after.phase.id !== 'gold:gear', 'steel platebody made: no more gear phases');
 });
 
+test('strategy gold: training falls back to a scripted method below the bracket, never the Stronghold', () => {
+  const s = state({ Attack: 40, Strength: 33, Defence: 31, Hitpoints: 36 }, { player: { ...snapshot().player!, combatLevel: 43 } });
+  const p = buildProfile(account(false), s, bankWith(['Coins']));
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000], ['string-amulets', Date.now()]]);
+  const moss = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(moss && 'phase' in moss && moss.phase.id === 'gold:moss-giants:train', JSON.stringify(moss));
+  assert.ok(moss.phase.exec.kind === 'preset' && moss.phase.exec.preset === 'kill-barbarians', JSON.stringify(moss.phase.exec));
+  assert.deepEqual(moss.phase.until, { skill: 'Strength', level: 40 });
+});
+
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {
   const api = { varp: async (id: number) => (id === 101 ? 2 : 0), questStates: async () => [] };
   const phases: string[] = [];

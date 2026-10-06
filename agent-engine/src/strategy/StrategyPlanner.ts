@@ -183,9 +183,13 @@ function trainFor(routeId: string, recommend: Record<string, number>, p: Profile
   if (!skill || !target) return null;
   // Bracket by the trained skill's own level: Defence 24 trains on barbarians even with Attack 40.
   const lvl = level(p, skill);
-  const method = TRAINING.find((m) => m.skill === (MELEE.has(skill) ? 'Melee' : skill) && lvl >= m.from && lvl < m.to && fits(m) && !skip.has(`train:${m.skill}:${m.name}`));
+  // Scripted methods only: an LLM method in the bracket (flesh crawlers behind the Stronghold of
+  // Security's question doors) looped at the Gate of War. With none in the bracket, the best
+  // scripted one below it still trains (barbarians at Strength 33), slower but surely.
+  const usable = TRAINING.filter((m) => m.skill === (MELEE.has(skill) ? 'Melee' : skill) && m.exec.kind !== 'llm' && lvl >= m.from && fits(m) && !skip.has(`train:${m.skill}:${m.name}`));
+  const method = usable.find((m) => lvl < m.to) ?? usable.sort((a, b) => b.to - a.to)[0];
   if (!method) return null;
-  const to = Math.min(target, method.to);
+  const to = lvl < method.to ? Math.min(target, method.to) : target;
   const gaps = short.map(([sk, l]) => `${sk} ${level(p, sk)}/${l}`).join(', ');
   const text = `train ${skill} to ${to} before ${routeId}`;
   return {
