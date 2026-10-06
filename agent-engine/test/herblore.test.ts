@@ -52,6 +52,9 @@ test('herblore: cleaning loop - buy grimy herbs, withdraw 27, clean, bank, sell'
   assert.match(text(await next(p, state(5, [coins(13_000), ...cleaned]))), /Grand Exchange bank/);
   assert.deepEqual(act(await next(p, bankOpen(5, [coins(13_000), ...cleaned], []))), { op: 'bank_deposit', itemId: 251, amount: 'all' });
   assert.deepEqual(act(await next(p, bankOpen(5, [coins(13_000)], [{ id: 251, name: 'Marrentill', quantity: 160 }]))), { op: 'bank_withdraw', itemId: 251, amount: 'all', noted: true });
+  // The withdrawn notes stay carried: the bank closes and they go to the GE.
+  const notesOut = item(1, 252, 'Marrentill', { noted: true, quantity: 160, stackable: true });
+  assert.deepEqual(act(await next(p, bankOpen(5, [coins(13_000), notesOut], []))), { op: 'bank_close' });
   const sold = item(1, 252, 'Marrentill', { noted: true, quantity: 160, stackable: true });
   assert.deepEqual(act(await next(p, state(5, [coins(13_000), sold], { grandExchange: { open: true } } as Partial<Snapshot>))), { op: 'ge_sell', name: 'Marrentill' });
 });

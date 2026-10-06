@@ -136,7 +136,12 @@ export class HerblorePlanner implements Planner {
       // Coins and unnoted inputs stay; a half-processed trip (clean herbs waiting for vials) too.
       const cleaned = r && r.steps.length > 1 ? HERBS.find((h) => h[1] === r.inputs[0])?.[0] : undefined;
       const mid = cleaned ? [cleaned] : [];
-      const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !(!i.noted && (inputs.includes(i.name) || mid.includes(i.name))));
+      // Product notes stay once no inputs are left: they were just withdrawn to be sold (depositing
+      // them again looped withdraw/deposit, as tanning once did with leather).
+      const inputsLeft = inputs.some((n) => count(n) > 0 || s.bank.items.some((b) => b.name === n));
+      const junk = s.inventory.items.find(
+        (i) => i.name !== 'Coins' && !(!i.noted && (inputs.includes(i.name) || mid.includes(i.name))) && !(i.noted && !inputsLeft && products.includes(i.name)),
+      );
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       for (const name of inputs) {
         const stack = s.bank.items.find((b) => b.name === name);
