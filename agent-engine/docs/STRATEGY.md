@@ -50,7 +50,7 @@ prices move, so a live price feed (prices.runescape.wiki) is the next step for m
 ## Gold strategy
 
 `--strategy gold` makes coins by alternating between routes (`GOLD` in `catalog.ts`: the money
-routes plus looting, coin drops, pickpocketing and wool) instead of always taking the
+routes plus looting, coin drops, pickpocketing, wool and amulet stringing) instead of always taking the
 best estimate, so the data covers many ways of earning and the ledger shows which ones pay.
 
 - Each run first sells banked products and `JUNK` on the Grand Exchange (at most once an hour).
@@ -62,6 +62,16 @@ best estimate, so the data covers many ways of earning and the ledger shows whic
   for 25 minutes. Two failures in 12 h drop a route (`data/strategy-failures.json`).
 - Every phase is appended to `data/gold-ledger.jsonl` with its outcome, minutes and coin change
   (carried + last seen banked). The ledger also carries the rotation across runs.
+
+Scripted trading loops (coins in, more coins out; live GE prices from the OSRS Wiki API):
+
+- `tan-hides` (`TanningPlanner`, also `--task tan-hides`): buy up to 270 cowhides at the GE within
+  the carried coins (500 kept back), bank the notes at Al Kharid, withdraw 27, trade Ellis and
+  "Tan All" (1 gp a hide), bank the leather; once the hides are gone, sell the leather as notes.
+  ~95 gp a hide at 2026-10 prices; gives up when the margin or the coins run out.
+- `string-amulets` (`StringingPlanner`, also `--task string-amulets`): at the GE, string the F2P
+  amulet with the best margin after the 2% tax (emerald, ~55 gp, on 2026-10-06) with balls of
+  wool, 14 per inventory; gives up when no amulet clears 20 gp.
 
 **Rules for fighting routes** (moss giants, hill giants, guards, and any route added later):
 
