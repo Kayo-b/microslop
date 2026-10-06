@@ -107,6 +107,8 @@ function gearMet(n: ActivityNeeds, v: AccountView): boolean {
 function moneyRoute(v: AccountView, skip: Set<string>): MoneyRoute | null {
   const ok = MONEY.filter((r) => {
     if ((r.members && !v.profile.account.members) || skip.has(`money:${r.id}`) || r.exec.kind === 'llm' || !r.products.length) return false;
+    // Trading loops (tanning) need coins to start: they cannot be what earns the first coins.
+    if (r.req?.items?.includes('Coins')) return false;
     if (unmet(r.req, v.profile).length) return false;
     // Fights for money need a margin over the requirement: moss giants at combat 40 in bronze kill.
     if (r.exec.kind === 'combat' && v.profile.combatLevel < (r.req?.combat ?? 0) + COMBAT_MARGIN) return false;
