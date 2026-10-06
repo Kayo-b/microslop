@@ -88,6 +88,16 @@ test('herblore: a level gained mid-run switches the recipe at the next purchase,
   assert.equal((act(await next(p, state(5, [coins(40_000)], ge))) as { name: string }).name, 'Grimy marrentill');
 });
 
+test('herblore: a purchase refused for coins (client guide price above the wiki) shrinks the next one', async () => {
+  const p = new HerblorePlanner({ price });
+  await next(p, bankOpen(5, [coins(50_000)], []));
+  const ge = state(5, [coins(50_000)], { grandExchange: { open: true } } as Partial<Snapshot>);
+  assert.deepEqual(act(await p.next({ goal: 'h', snapshot: ge, kb: null, reports: [] })), { op: 'ge_buy', name: 'Grimy marrentill', quantity: 163 });
+  const refused = { subgoal: 'buy', result: 'blocked' as const, reason: 'failed: not_enough_coins (need 80000, have 50000)', steps: 1, trail: [] };
+  const retry = act(await p.next({ goal: 'h', snapshot: ge, kb: null, reports: [refused] })) as { quantity: number };
+  assert.ok(retry.quantity > 0 && retry.quantity <= Math.floor(163 * (50 / 80) * 0.95) + 1, `${retry.quantity}`);
+});
+
 test('herblore: gives up without a paying recipe or the coins for a trip', async () => {
   const p = new HerblorePlanner({ price });
   await next(p, bankOpen(5, [coins(1_000)], []));

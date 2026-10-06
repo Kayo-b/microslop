@@ -13,6 +13,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
+import { BuyScale } from './buyScale.ts';
 import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
 const VIAL = 'Vial of water';
@@ -92,6 +93,7 @@ export class HerblorePlanner implements Planner {
   private readonly o: HerbloreOptions;
   private seen: Map<string, number> | null = null;
   private recipe: ReturnType<typeof bestRecipe> | undefined;
+  private readonly scale = new BuyScale();
 
   constructor(o: HerbloreOptions) {
     this.o = o;
@@ -115,6 +117,7 @@ export class HerblorePlanner implements Planner {
     const products = [...new Set(HERB_RECIPES.map((x) => x.output))];
     const productsHeld = products.filter((n) => count(n) > 0 && !r?.inputs.includes(n));
     const coins = carriedCoins(s);
+    const scale = this.scale.update(ctx.reports.at(-1));
 
     if (s.grandExchange?.open) {
       if (productsHeld.length) return { kind: 'act', action: { op: 'ge_sell', name: productsHeld[0]! }, reason: `sell the ${productsHeld[0]}` };
@@ -125,7 +128,7 @@ export class HerblorePlanner implements Planner {
           // Buy the first input, then top the others up to it.
           const lead = r.inputs[0]!;
           if (have(lead) < Math.min(MIN_BUY, r.perTrip)) {
-            const n = Math.min(MAX_BUY, Math.floor((coins - RESERVE) / Math.ceil(r.cost * OVERBID)));
+            const n = Math.min(MAX_BUY, Math.floor(((coins - RESERVE) * scale) / Math.ceil(r.cost * OVERBID)));
             if (n >= Math.min(MIN_BUY, r.perTrip)) return { kind: 'act', action: { op: 'ge_buy', name: lead, quantity: n }, reason: `buy ${n} ${lead} (${r.id}, ~${r.profit} gp profit each)` };
           } else {
             const short = r.inputs.find((i) => have(i) < have(lead));
