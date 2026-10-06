@@ -330,6 +330,12 @@ export class GameIntentEngine {
       throw e;
     });
     this.lastActTick = act.tick;
+    // The inventory moved under a slot-addressed action (the previous Clean landed after the
+    // snapshot): not a failure, just a stale view. Re-decide on a fresh snapshot instead of
+    // counting it, which ended "clean all the herbs" as stuck every third click.
+    if (!act.success && /slot_changed/.test(act.reason ?? '')) {
+      return { kind: 'waiting', reason: 'inventory changed under the action; re-deciding', snapshot: snap };
+    }
     this.attackTarget =
       act.success && action.op === 'interact' && action.target.kind === 'npc' && action.action.toLowerCase() === 'attack'
         ? { index: action.target.index, tick: act.tick }
