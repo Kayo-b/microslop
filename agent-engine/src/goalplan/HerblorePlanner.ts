@@ -17,6 +17,8 @@ import { BuyScale } from './buyScale.ts';
 import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
 const VIAL = 'Vial of water';
+/** Things beside the GE bank that a processing step never wants (the poll booth's menu blocks the bank). */
+export const GE_DISTRACTIONS = ['Poll booth', 'Fire', 'Bank deposit box', 'Grand Exchange Clerk', 'Banker'];
 
 /** [clean herb, grimy herb, level to clean, unfinished potion, level to mix it]. */
 const HERBS: [string, string, number, string, number][] = [
@@ -170,11 +172,14 @@ export class HerblorePlanner implements Planner {
     if (r) {
       const grimy = r.inputs.find((i) => i.startsWith('Grimy '));
       if (r.steps.includes('clean') && grimy && count(grimy, false) > 0) {
-        return step(`clean all the ${grimy.toLowerCase()}s`, [grimy], ['Clean'], { lacksItem: grimy }, 80, [grimy, ...inputs]);
+        return step(`clean all the ${grimy.toLowerCase()}s`, [grimy], ['Clean'], { lacksItem: grimy }, 80, [grimy, ...inputs], { avoid: GE_DISTRACTIONS });
       }
       const herb = r.steps.includes('mix') ? (grimy ? HERBS.find((h) => h[1] === grimy)![0] : r.inputs[0]!) : null;
       if (herb && count(herb, false) > 0 && count(VIAL, false) > 0) {
-        return step(`use a vial of water on the ${herb.toLowerCase()} and make all the ${r.output.toLowerCase()}`, [VIAL, herb], ['Use', 'Make'], { lacksItem: herb }, 80, [VIAL, herb]);
+        // Done when the scarcer input is gone (14 herbs and 13 vials leave a herb): waiting for the
+        // other one, the classifier wandered to the poll booth, whose menu then blocked the bank.
+        const scarcer = count(herb, false) <= count(VIAL, false) ? herb : VIAL;
+        return step(`use a vial of water on the ${herb.toLowerCase()} and make all the ${r.output.toLowerCase()}`, [VIAL, herb], ['Use', 'Make'], { lacksItem: scarcer }, 80, [VIAL, herb], { avoid: GE_DISTRACTIONS });
       }
     }
 
