@@ -15,7 +15,7 @@ import type { WorldPoint } from '../types.ts';
 
 export type Execution =
   | { kind: 'preset'; preset: string; bank?: boolean }
-  | { kind: 'combat'; monster: string; area?: { name: string; point: WorldPoint }; loot?: string[]; bury?: boolean; style?: CombatStyle }
+  | { kind: 'combat'; monster: string; area?: { name: string; point: WorldPoint }; loot?: string[]; bury?: boolean; style?: CombatStyle; /** Cooked food to bring (default 5). */ food?: number }
   | { kind: 'llm'; goal: string }
   | { kind: 'quest'; quest: string }
   /** Tutorial Island, driven by its progress varp. */
@@ -118,6 +118,11 @@ export interface MoneyRoute {
   products: string[];
   exec: Execution;
   notes?: string;
+  /**
+   * Levels at which a fight is comfortable rather than merely allowed. Below them the gold
+   * strategy spends the route's turn training the weakest of these skills instead.
+   */
+  recommend?: Record<string, number>;
 }
 
 export const MONEY: MoneyRoute[] = [
@@ -126,12 +131,30 @@ export const MONEY: MoneyRoute[] = [
   { id: 'willow-logs', name: 'chop and bank willow logs', members: false, req: { skills: { Woodcutting: 30 } }, gpHour: 10_000, products: ['Willow logs'], exec: { kind: 'preset', preset: 'chop-willows', bank: true } },
   { id: 'trout-salmon', name: 'fly fish and bank trout/salmon', members: false, req: { skills: { Fishing: 30 }, items: ['Fly fishing rod', 'Feather'] }, gpHour: 25_000, products: ['Raw trout', 'Raw salmon'], exec: { kind: 'preset', preset: 'fish-trout', bank: true } },
   { id: 'lobsters', name: 'fish lobsters on Karamja', members: false, req: { skills: { Fishing: 40 }, items: ['Lobster pot'] }, gpHour: 45_000, products: ['Raw lobster'], exec: { kind: 'llm', goal: 'fish lobsters at Musa Point on Karamja and bank them at the Port Sarim deposit box' } },
-  { id: 'hill-giants', name: 'kill hill giants for big bones and limpwurt roots', members: false, req: { combat: 30, items: ['Brass key'] }, gpHour: 60_000, products: ['Big bones', 'Limpwurt root'], exec: { kind: 'combat', monster: 'Hill giant', area: { name: 'Edgeville Dungeon hill giants', point: { x: 3117, y: 9848, plane: 0 } }, loot: ['Big bones', 'Limpwurt root', 'Coins'] } },
-  { id: 'moss-giants', name: 'kill moss giants for big bones and nature runes', members: false, req: { combat: 40 }, gpHour: 70_000, products: ['Big bones', 'Nature rune'], exec: { kind: 'combat', monster: 'Moss giant', area: { name: 'Varrock Sewers moss giants', point: { x: 3165, y: 9880, plane: 0 } }, loot: ['Big bones', 'Nature rune', 'Coins'] } },
+  { id: 'hill-giants', name: 'kill hill giants for big bones and limpwurt roots', members: false, req: { combat: 30, items: ['Brass key'] }, recommend: { Attack: 30, Strength: 30, Defence: 25 }, gpHour: 60_000, products: ['Big bones', 'Limpwurt root'], exec: { kind: 'combat', monster: 'Hill giant', area: { name: 'Edgeville Dungeon hill giants', point: { x: 3117, y: 9848, plane: 0 } }, loot: ['Big bones', 'Limpwurt root', 'Coins'], food: 10 } },
+  { id: 'moss-giants', name: 'kill moss giants for big bones and nature runes', members: false, req: { combat: 40 }, recommend: { Attack: 40, Strength: 40, Defence: 35 }, gpHour: 70_000, products: ['Big bones', 'Nature rune'], exec: { kind: 'combat', monster: 'Moss giant', area: { name: 'Varrock Sewers moss giants', point: { x: 3165, y: 9880, plane: 0 } }, loot: ['Big bones', 'Nature rune', 'Coins'], food: 15 } },
   { id: 'yew-logs', name: 'chop and bank yew logs', members: false, req: { skills: { Woodcutting: 60 } }, gpHour: 60_000, products: ['Yew logs'], exec: { kind: 'llm', goal: 'chop yew trees near Edgeville or Varrock palace and bank the yew logs' } },
   { id: 'tan-hides', name: 'buy cowhides and tan them into leather at Al Kharid', members: false, req: { items: ['Coins'] }, gpHour: 80_000, products: ['Leather'], exec: { kind: 'llm', goal: 'withdraw coins and cowhides, have Ellis in Al Kharid tan them into leather, bank at Al Kharid' }, notes: 'profit depends on hide/leather prices; check live prices first' },
   { id: 'sand-crabs-herbs', name: 'kill sand crabs (P2P, AFK)', members: true, req: { combat: 20 }, gpHour: 10_000, products: [], exec: { kind: 'combat', monster: 'Sand crab' } },
 ];
+
+/**
+ * Routes the "make gold" strategy rotates through: the money routes plus ones that earn coins
+ * without training a gathering skill (looting, coin drops, pickpocketing, trading). The rotation
+ * tries each in turn instead of always taking the best estimate, so the ledger shows which ones
+ * actually pay on this account.
+ */
+export const GOLD: MoneyRoute[] = [
+  ...MONEY,
+  { id: 'feathers', name: 'kill chickens and bank their feathers', members: false, gpHour: 15_000, products: ['Feather'], exec: { kind: 'combat', monster: 'Chicken', area: { name: 'Lumbridge chicken farm', point: { x: 3232, y: 3295, plane: 0 } }, loot: ['Feather'] } },
+  { id: 'guard-coins', name: 'kill Varrock guards for their coin drops', members: false, req: { combat: 30 }, recommend: { Attack: 30, Strength: 30, Defence: 25 }, gpHour: 15_000, products: [], exec: { kind: 'combat', monster: 'Guard', area: { name: 'Varrock west guards', point: { x: 3175, y: 3425, plane: 0 } }, loot: ['Coins'], food: 10 } },
+  { id: 'pickpocket-men', name: 'pickpocket men for coins', members: false, gpHour: 8_000, products: [], exec: { kind: 'llm', goal: 'pickpocket men and women in Lumbridge for coins, eating food when hitpoints drop below half and banking when food runs out' } },
+  { id: 'wool', name: 'shear sheep and spin balls of wool to sell', members: false, gpHour: 12_000, products: ['Ball of wool', 'Wool'], exec: { kind: 'llm', goal: 'take shears, shear sheep in the field north-east of Lumbridge, spin the wool into balls of wool on the Lumbridge Castle spinning wheel, and bank the balls of wool' } },
+  { id: 'ge-flip', name: 'flip cheap items on the Grand Exchange', members: false, req: { items: ['Coins'] }, gpHour: 20_000, products: [], exec: { kind: 'llm', goal: 'at the Grand Exchange, buy a commonly traded cheap item (runes, arrows, feathers or food) a little below its guide price with at most half the coins, then sell what was bought a little above the guide price, collecting from the offer slots in between' } },
+];
+
+/** Banked items with no use to the account that the gold strategy turns into coins. */
+export const JUNK = ['Bronze dagger', 'Iron dagger', 'Bronze mace', 'Iron mace', 'Bronze scimitar', 'Goblin mail', 'Bronze bar', 'Iron bar', 'Copper ore', 'Tin ore', 'Iron ore', 'Oak logs', 'Raw anchovies', 'Uncut sapphire'];
 
 export interface QuestInfo {
   name: string;

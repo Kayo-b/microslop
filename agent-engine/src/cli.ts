@@ -115,7 +115,7 @@ function help(): void {
   npm run agent -- run --task PRESET [--bank] [--until-level N]
   npm run agent -- run --goal TEXT [--escalate]
   npm run agent -- strategy [--strategy level|money|quest]      (dry run: account profile and next phase)
-  npm run agent -- run --strategy level [--skill S] [--level N] | money | quest [--quest NAME]
+  npm run agent -- run --strategy level [--skill S] [--level N] | money | gold | quest [--quest NAME]
   npm run agent -- plan show FILE [--offline [--f2p]]                 (roadmap, estimates, LLM coverage)
   npm run agent -- run --plan FILE                                    (run a plan; LLM rescue on when a key is set)
   npm run agent -- prereq --task PRESET [--setup-budget N]            (dry run: what the activity needs first)
@@ -199,7 +199,22 @@ function strategyGoal(kind: string): StrategyGoal {
   if (kind === 'level') return { kind, skill: values.skill, level: values.level ? Number(values.level) : undefined };
   if (kind === 'money') return { kind };
   if (kind === 'quest') return { kind, quest: values.quest };
-  throw new Error(`unknown strategy "${kind}" (level | money | quest)`);
+  if (kind === 'gold') return { kind, lastRun: goldLastRun() };
+  throw new Error(`unknown strategy "${kind}" (level | money | gold | quest)`);
+}
+
+const GOLD_LEDGER = path.join(ROOT, 'data', 'gold-ledger.jsonl');
+
+/** When each gold route last started, from the ledger, so the rotation continues across runs. */
+function goldLastRun(): Map<string, number> {
+  const last = new Map<string, number>();
+  for (const r of readJsonl<LedgerRecord>(GOLD_LEDGER)) {
+    const started = Date.parse(r.ts) - r.minutes * 60_000;
+    // gold:<route> or gold:<route>:train (a fight's levelling turn counts as the route's turn).
+    const id = r.phase.split(':')[1] ?? r.phase;
+    if (started > (last.get(id) ?? 0)) last.set(id, started);
+  }
+  return last;
 }
 
 /** The LLM backend chosen by --llm/--llm-model or the environment; null when none is configured. */
@@ -414,6 +429,10 @@ async function run(): Promise<void> {
       onPhase: (phase, why) => {
         console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`);
         if (why.startsWith('gave up')) strategyFailed?.(phase.id);
+      },
+      onPhaseEnd: (phase, end) => {
+        console.log(`[strategy] phase ended (${end.outcome}, ${end.minutes.toFixed(0)} min, ${end.coins >= 0 ? '+' : ''}${end.coins} coins): ${phase.text}`);
+        if (g.kind === 'gold') appendLedger(GOLD_LEDGER, { ts: new Date().toISOString(), plan: 'gold', phase: phase.id, text: phase.text, ...end });
       },
     });
     goal = `strategy ${values.strategy}${values.skill ? ` ${values.skill}` : ''}${values.level ? ` to ${values.level}` : ''}${values.quest ? ` ${values.quest}` : ''}`;

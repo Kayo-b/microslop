@@ -8,7 +8,7 @@ import { FOOD_HEAL, RESOURCES } from '../kb/resources.ts';
 import { COOK_PRESETS } from '../planner/CookingPlanner.ts';
 import { type CombatStyle, type GearSlot, requiredSlots } from '../planner/gear.ts';
 import { COMBAT_PRESETS, PRESETS } from '../planner/TaskTreePlanner.ts';
-import { MONEY, QUESTS, TRAINING, type Execution, type Requirement } from '../strategy/catalog.ts';
+import { GOLD, QUESTS, TRAINING, type Execution, type Requirement } from '../strategy/catalog.ts';
 
 export interface ToolNeed {
   /** Lower-case name suffix any owned item may match ("axe" matches "Bronze axe", not "Pickaxe"). */
@@ -119,7 +119,7 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
       break;
     case 'combat': {
       n = empty(`kill-${exec.monster.toLowerCase().replace(/\s+/g, '-')}`);
-      n.food = HARMLESS.test(exec.monster) ? 0 : 5;
+      n.food = HARMLESS.test(exec.monster) ? 0 : (exec.food ?? 5);
       if (exec.style && exec.style !== 'melee') n.style = exec.style;
       if (!HARMLESS.test(exec.monster)) n.gear = { style: exec.style ?? 'melee', slots: requiredSlots(exec.style ?? 'melee') };
       break;
@@ -139,7 +139,7 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
 /** The catalog requirement of the method/route/quest that runs an execution, if any. */
 export function catalogReqFor(exec: Execution): Requirement | undefined {
   const same = (e: Execution) => JSON.stringify(e) === JSON.stringify(exec);
-  return TRAINING.find((m) => same(m.exec))?.req ?? MONEY.find((r) => same(r.exec))?.req;
+  return TRAINING.find((m) => same(m.exec))?.req ?? GOLD.find((r) => same(r.exec))?.req;
 }
 
 function mergeReq(a: Requirement, b: Requirement): Requirement {

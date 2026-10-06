@@ -57,6 +57,40 @@ test('strategy money and quest: membership, requirements and finished quests are
   assert.equal(members, null, 'members quest on a free account');
 });
 
+test('strategy gold: sells banked goods once an hour, then rotates through routes least recently run first', () => {
+  const s = state({ Mining: 20, Attack: 30, Strength: 30, Defence: 20 }, { player: { ...snapshot().player!, combatLevel: 35 } });
+  const p = buildProfile(account(false), s, bankWith(['Coins', 'Iron dagger', 'Shears']));
+  const sell = choosePhase({ kind: 'gold' }, p, new Set());
+  assert.ok(sell && 'phase' in sell && sell.phase.id === 'gold:sell' && sell.phase.exec.kind === 'sell' && sell.phase.exec.items.includes('Iron dagger'), JSON.stringify(sell));
+
+  const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()]]);
+  const first = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(first && 'phase' in first && first.phase.id === 'gold:iron-ore', 'untried routes first, best estimate among them');
+  lastRun.set('iron-ore', Date.now()).set('cowhides', Date.now());
+  const flip = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(flip && 'phase' in flip && flip.phase.id === 'gold:ge-flip' && flip.phase.text.startsWith('at the Grand Exchange'), 'llm routes run with their full goal');
+
+  // Every fitting route tried: the oldest comes round again.
+  const order = ['cowhides', 'ge-flip', 'iron-ore', 'feathers', 'guard-coins', 'wool', 'pickpocket-men'];
+  order.forEach((id, i) => lastRun.set(id, Date.now() - (order.length - i) * 60_000));
+  const again = choosePhase({ kind: 'gold', lastRun }, p, new Set(['gold:cowhides']));
+  assert.ok(again && 'phase' in again && again.phase.id === 'gold:ge-flip', JSON.stringify(again));
+});
+
+test('strategy gold: a fight below its recommended levels trains the weakest skill in its turn', () => {
+  const s = state({ Attack: 40, Strength: 33, Defence: 24, Hitpoints: 35 }, { player: { ...snapshot().player!, combatLevel: 42 } });
+  const p = buildProfile(account(false), s, bankWith(['Coins']));
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()]]);
+  const moss = choosePhase({ kind: 'gold', lastRun }, p, new Set());
+  assert.ok(moss && 'phase' in moss && moss.phase.id === 'gold:moss-giants:train', JSON.stringify(moss));
+  assert.deepEqual(moss.phase.until, { skill: 'Defence', level: 30 }, 'largest gap first, capped at its bracket');
+  assert.ok(moss.phase.exec.kind === 'preset' && moss.phase.exec.preset === 'kill-barbarians', 'bracketed by Defence 24, not the melee average');
+
+  const strong = buildProfile(account(false), state({ Attack: 45, Strength: 45, Defence: 40, Hitpoints: 45 }, { player: { ...snapshot().player!, combatLevel: 50 } }), bankWith(['Coins']));
+  const fight = choosePhase({ kind: 'gold', lastRun }, strong, new Set());
+  assert.ok(fight && 'phase' in fight && fight.phase.id === 'gold:moss-giants' && fight.phase.exec.kind === 'combat' && fight.phase.exec.food === 15, JSON.stringify(fight));
+});
+
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {
   const api = { varp: async (id: number) => (id === 101 ? 2 : 0), questStates: async () => [] };
   const phases: string[] = [];

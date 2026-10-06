@@ -37,6 +37,8 @@ export interface LedgerRecord {
   xp: Record<string, number>;
   /** Skill the phase trained, for XP/hour. */
   skill?: string;
+  /** Coins gained (negative: spent) over the phase. */
+  coins?: number;
 }
 
 export function appendLedger(file: string, rec: LedgerRecord): void {

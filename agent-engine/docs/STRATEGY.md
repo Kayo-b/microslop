@@ -3,7 +3,7 @@
 ## Layers
 
 ```
-strategy   (level | money | quest)  picks a phase from the catalog + live account profile
+strategy   (level | money | gold | quest)  picks a phase from the catalog + live account profile
   phase    scripted planner (preset / generic combat) | LLM planner | quest runner
     sub-goal   planner output, run by the engine
       tick     reflexes -> gates -> Jev/Laya picks one option -> /act -> verify
@@ -21,6 +21,7 @@ npm run agent -- strategy                          # dry run: account, next phas
 npm run agent -- run --strategy level              # raise the lowest trainable skill, bracket by bracket
 npm run agent -- run --strategy level --skill Fishing --level 40
 npm run agent -- run --strategy money              # best available money route, re-evaluated every 30 min
+npm run agent -- run --strategy gold               # rotate through every gold route that fits (below)
 npm run agent -- run --strategy quest              # next unfinished quest in the recommended order
 npm run agent -- run --strategy quest --quest "Cook's Assistant"
 npm run agent -- run --task kill-barbarians --rescue   # any run: add Claude rescue
@@ -45,6 +46,30 @@ those phases are skipped and the strategy moves to the next scripted one.
 The catalog is curated game knowledge: training brackets, F2P/P2P money routes with rough gp/h,
 and a recommended quest order with requirements and rewards. Its gp/h numbers are for ranking only;
 prices move, so a live price feed (prices.runescape.wiki) is the next step for money routes.
+
+## Gold strategy
+
+`--strategy gold` makes coins by alternating between routes (`GOLD` in `catalog.ts`: the money
+routes plus looting, coin drops, pickpocketing, wool and GE flipping) instead of always taking the
+best estimate, so the data covers many ways of earning and the ledger shows which ones pay.
+
+- Each run first sells banked products and `JUNK` on the Grand Exchange (at most once an hour).
+- Then the fitting route that ran least recently goes next (untried first, best estimate first),
+  for 25 minutes. Two failures in 12 h drop a route (`data/strategy-failures.json`).
+- Every phase is appended to `data/gold-ledger.jsonl` with its outcome, minutes and coin change
+  (carried + last seen banked). The ledger also carries the rotation across runs.
+
+**Rules for fighting routes** (moss giants, hill giants, guards, and any route added later):
+
+1. Give the route `recommend` levels (comfortable, not just allowed) and a `food` count on its
+   `combat` execution. Below the recommended levels, the route's turn becomes a levelling phase
+   (`gold:<route>:train`): the skill furthest below its target, trained with the melee method for
+   that skill's own level bracket, up to the bracket's top or the target. Its next turns keep
+   levelling until the fight itself runs.
+2. Every fight, including the levelling phases, goes through the prerequisite flow
+   ([PREREQUISITES.md](PREREQUISITES.md)): weapon, head, body, legs and shield of the best tier
+   the levels allow, and the route's food (default 5) are owned, bought or cooked before the fight
+   starts. Do not add a fight that skips it (`--no-prereq`).
 
 ## Execution kinds
 

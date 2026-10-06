@@ -16,11 +16,17 @@ import { NOT_BANKS, TaskTreePlanner, type CombatTask } from '../planner/TaskTree
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { type AccountApi, BankMemory, buildProfile, level, type Profile, readAccount, TUTORIAL_DONE, unmet, VARP_TUTORIAL } from './account.ts';
-import { ACQUIRE, type Execution, inWilderness, MONEY, QUESTS, TRAINING, type TrainingMethod } from './catalog.ts';
+import { ACQUIRE, type Execution, GOLD, inWilderness, JUNK, MONEY, QUESTS, TRAINING, type TrainingMethod } from './catalog.ts';
 
 export type StrategyGoal =
   | { kind: 'level'; skill?: string; level?: number }
   | { kind: 'money'; minutesPerRoute?: number }
+  /**
+   * Make coins by alternating between every route that fits, least recently run first.
+   * `lastRun` (route id -> epoch ms) carries the rotation across agent runs; the strategy
+   * updates it as phases start.
+   */
+  | { kind: 'gold'; minutesPerRoute?: number; lastRun?: Map<string, number> }
   | { kind: 'quest'; quest?: string }
   /** A plan file compiled into milestones (see goalplan/compiler.ts). */
   | { kind: 'plan'; spec: PlanSpec; rates?: Map<string, number> };
@@ -44,6 +50,8 @@ export interface PhaseEnd {
   minutes: number;
   /** XP gained per skill during the phase. */
   xp: Record<string, number>;
+  /** Change in coins carried plus coins last seen banked over the phase. */
+  coins: number;
 }
 
 export interface StrategyDeps {
@@ -114,6 +122,25 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     };
   }
 
+  if (goal.kind === 'gold') {
+    const last = goal.lastRun ?? new Map<string, number>();
+    // At most one sell phase an hour: an item the GE refuses stays "owned" and would loop.
+    const sellable = [...new Set([...GOLD.flatMap((r) => r.products), ...JUNK])].filter((n) => p.owned.has(n));
+    if (sellable.length && !skip.has('gold:sell') && Date.now() - (last.get('sell') ?? 0) > 3_600_000) {
+      return { phase: { id: 'gold:sell', text: `sell the ${sellable.join(', ')} on the Grand Exchange`, exec: { kind: 'sell', items: sellable } }, why: 'banked items are only worth something once sold' };
+    }
+    const route = GOLD.filter((r) => fits(r) && !skip.has(`gold:${r.id}`))
+      .sort((a, b) => (last.get(a.id) ?? 0) - (last.get(b.id) ?? 0) || b.gpHour - a.gpHour)[0];
+    if (!route) return null;
+    const ran = last.get(route.id);
+    const training = route.recommend && trainFor(route.id, route.recommend, p, fits, skip);
+    if (training) return training;
+    return {
+      phase: { id: `gold:${route.id}`, text: route.exec.kind === 'llm' ? route.exec.goal : route.name, exec: route.exec, maxMs: (goal.minutesPerRoute ?? 25) * 60_000 },
+      why: `${ran ? `least recently run (last ${new Date(ran).toISOString().slice(0, 16)})` : 'not tried yet'}; ~${Math.round(route.gpHour / 1000)}k gp/h estimate`,
+    };
+  }
+
   const named = goal.quest ? QUESTS.find((q) => q.name.toLowerCase() === goal.quest!.toLowerCase()) ?? { name: goal.quest, members: false, reward: '' } : undefined;
   const candidates = named ? [named] : QUESTS;
   for (const q of candidates) {
@@ -127,6 +154,34 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     return { phase: { id: `quest:${q.name}`, text: `complete the quest ${q.name}`, exec: { kind: 'quest', quest: q.name } }, why: q.reward };
   }
   return named ? null : { done: 'no remaining quest is available' };
+}
+
+/**
+ * A fight below its recommended levels: the route's turn trains the weakest short skill instead,
+ * with the bracket's melee method (gear and food are checked by the prerequisite flow like any
+ * fight). Null when the levels are met or no method fits.
+ */
+function trainFor(routeId: string, recommend: Record<string, number>, p: Profile, fits: (m: TrainingMethod) => boolean, skip: Set<string>): { phase: Phase; why: string } | null {
+  const short = Object.entries(recommend).filter(([sk, lvl]) => level(p, sk) < lvl).sort(([a, x], [b, y]) => level(p, a) - x - (level(p, b) - y));
+  const [skill, target] = short[0] ?? [];
+  if (!skill || !target) return null;
+  // Bracket by the trained skill's own level: Defence 24 trains on barbarians even with Attack 40.
+  const lvl = level(p, skill);
+  const method = TRAINING.find((m) => m.skill === (MELEE.has(skill) ? 'Melee' : skill) && lvl >= m.from && lvl < m.to && fits(m) && !skip.has(`train:${m.skill}:${m.name}`));
+  if (!method) return null;
+  const to = Math.min(target, method.to);
+  const gaps = short.map(([sk, l]) => `${sk} ${level(p, sk)}/${l}`).join(', ');
+  const text = `train ${skill} to ${to} before ${routeId}`;
+  return {
+    phase: {
+      id: `gold:${routeId}:train`,
+      text: method.exec.kind === 'llm' ? `${method.exec.goal}; use the ${skill} attack style and stop at ${skill} ${to}` : `${text} with ${method.name}`,
+      exec: method.exec,
+      until: { skill, level: to },
+      maxMs: 25 * 60_000,
+    },
+    why: `${routeId} is below its recommended levels (${gaps})`,
+  };
 }
 
 /** Builds the planner that executes a phase; null when it cannot run here (no LLM key, monster not found). */
@@ -157,7 +212,7 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
         untilLevel,
         area,
         buryAt: e.bury ? 5 : undefined,
-        minFood: 5,
+        minFood: e.food ?? 5,
       };
       return new TaskTreePlanner({ kind: 'combat', ...task }, `kill-${e.monster.toLowerCase().replace(/\s+/g, '-')}`);
     }
@@ -211,7 +266,7 @@ export class StrategyPlanner implements Planner {
   private readonly bank: BankMemory;
   private readonly now: () => number;
   private readonly skip = new Set<string>();
-  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number; xp: Map<string, number> } | null = null;
+  private current: { phase: Phase; planner: Planner; startedAt: number; reportsAt: number; xp: Map<string, number>; coins: number } | null = null;
 
   constructor(goal: StrategyGoal, deps: StrategyDeps) {
     this.goal = goal;
@@ -246,7 +301,8 @@ export class StrategyPlanner implements Planner {
           this.deps.onPhase?.(choice.phase, 'skipped: cannot run here (needs an LLM key, Quest Helper, or a locatable spawn)');
           continue;
         }
-        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length, xp: new Map(ctx.snapshot.skills.map((k) => [k.name, k.xp])) };
+        this.current = { phase: choice.phase, planner, startedAt: this.now(), reportsAt: ctx.reports.length, xp: new Map(ctx.snapshot.skills.map((k) => [k.name, k.xp])), coins: this.coins(ctx.snapshot) };
+        if (this.goal.kind === 'gold') (this.goal.lastRun ??= new Map()).set(choice.phase.id.split(':')[1]!, this.now());
         this.deps.onPhase?.(choice.phase, choice.why);
       }
       const cur = this.current;
@@ -278,11 +334,14 @@ export class StrategyPlanner implements Planner {
     const ph = this.current!.phase;
     const u = ph.until;
     if (u && (s.skills.find((k) => k.name === u.skill)?.level ?? 1) >= u.level) return true;
-    if (ph.untilCoins !== undefined) {
-      const carried = s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
-      if (carried + (this.bank.items.get('Coins') ?? 0) >= ph.untilCoins) return true;
-    }
+    if (ph.untilCoins !== undefined && this.coins(s) >= ph.untilCoins) return true;
     return false;
+  }
+
+  /** Coins carried plus coins last seen banked. */
+  private coins(s: Snapshot): number {
+    const carried = s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
+    return carried + (this.bank.items.get('Coins') ?? 0);
   }
 
   private phaseOver(s: Snapshot): boolean {
@@ -299,6 +358,6 @@ export class StrategyPlanner implements Planner {
       const gained = k.xp - (cur.xp.get(k.name) ?? k.xp);
       if (gained > 0) xp[k.name] = gained;
     }
-    this.deps.onPhaseEnd?.(cur.phase, { outcome, reason, minutes: (this.now() - cur.startedAt) / 60_000, xp });
+    this.deps.onPhaseEnd?.(cur.phase, { outcome, reason, minutes: (this.now() - cur.startedAt) / 60_000, xp, coins: this.coins(s) - cur.coins });
   }
 }
