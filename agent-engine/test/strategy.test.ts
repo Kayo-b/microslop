@@ -91,6 +91,23 @@ test('strategy gold: a fight below its recommended levels trains the weakest ski
   assert.ok(fight && 'phase' in fight && fight.phase.id === 'gold:moss-giants' && fight.phase.exec.kind === 'combat' && fight.phase.exec.food === 15, JSON.stringify(fight));
 });
 
+test('strategy gold: a route whose sub-goals keep failing gives way to the next route', async () => {
+  const api = { varp: async () => 0, questStates: async () => [] };
+  const s = state({ Attack: 20, Strength: 20, Defence: 20 }, { player: { ...snapshot().player!, combatLevel: 25 } });
+  const log: string[] = [];
+  // Only harmless combat routes fit (no coins, no levels), both with a fixed area.
+  const lastRun = new Map<string, number>([['sell', Date.now()]]);
+  const llm: Planner = { name: 'llm-stub', next: async () => ({ kind: 'wait', ms: 600, reason: 'stub' }) as never };
+  const planner = new StrategyPlanner({ kind: 'gold', lastRun }, { account: api, bank: bankWith(['Bronze sword']), llmPlanner: () => llm, onPhase: (p, why) => log.push(`${p.id}: ${why}`) });
+  const ctx: PlannerContext = { goal: 'gold', snapshot: s, kb: null, reports: [] };
+  await planner.next(ctx);
+  const first = planner.phase!.id;
+  const blocked = { subgoal: 'x', result: 'blocked' as const, reason: 'offer_failed', steps: 1, trail: [] };
+  await planner.next({ ...ctx, reports: [blocked, blocked, blocked] });
+  assert.ok(log.some((l) => l.startsWith(`${first}: gave up: 3 sub-goals`)), log.join('\n'));
+  assert.ok(planner.phase && planner.phase.id !== first, `moved on from ${first}: ${planner.phase?.id}`);
+});
+
 test('strategy planner: surveys the bank first, skips phases that cannot run, gives up when nothing fits', async () => {
   const api = { varp: async (id: number) => (id === 101 ? 2 : 0), questStates: async () => [] };
   const phases: string[] = [];

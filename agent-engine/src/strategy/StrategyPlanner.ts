@@ -256,6 +256,9 @@ export function surveyBankStep(s: Snapshot, kb: KnowledgeBase | null): PlanStep 
   };
 }
 
+/** Failed sub-goals in a row after which a gold route gives way to the next. */
+export const GOLD_MAX_BLOCKED = 3;
+
 /** Melee skills a phase trains by selecting the matching attack style. */
 const MELEE_TRAINED = new Set(['Attack', 'Strength', 'Defence']);
 
@@ -306,8 +309,18 @@ export class StrategyPlanner implements Planner {
         this.deps.onPhase?.(choice.phase, choice.why);
       }
       const cur = this.current;
+      const own = ctx.reports.slice(cur.reportsAt);
+      // Gold rotates: a route stuck on the same failure gives way to the next one instead of
+      // running into the agent's run-wide limit (which ends every route with it).
+      const stuck = own.slice(-GOLD_MAX_BLOCKED);
+      if (this.goal.kind === 'gold' && stuck.length === GOLD_MAX_BLOCKED && stuck.every((r) => r.result !== 'done')) {
+        this.skip.add(cur.phase.id);
+        this.deps.onPhase?.(cur.phase, `gave up: ${GOLD_MAX_BLOCKED} sub-goals in a row failed; last: ${stuck.at(-1)!.reason}`);
+        this.endPhase(ctx.snapshot, 'gave_up', 'sub-goals kept failing');
+        continue;
+      }
       // The phase's planner only sees its own history, not the reports of earlier phases.
-      const step = await cur.planner.next({ ...ctx, goal: cur.phase.text, reports: ctx.reports.slice(cur.reportsAt) });
+      const step = await cur.planner.next({ ...ctx, goal: cur.phase.text, reports: own });
       if (step.kind === 'subgoal' || step.kind === 'wait' || step.kind === 'act') return step;
       if (step.kind === 'impossible') {
         this.skip.add(cur.phase.id);

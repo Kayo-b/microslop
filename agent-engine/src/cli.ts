@@ -35,7 +35,7 @@ import { JsonlRescueLog, type Rescuer, type RescueOutcomeRecord, type RescueReco
 import { BankMemory, buildProfile, level, readAccount, unmet } from './strategy/account.ts';
 import { MONEY, QUESTS, TRAINING } from './strategy/catalog.ts';
 import { QuestPlanner } from './strategy/QuestPlanner.ts';
-import { choosePhase, StrategyPlanner, type StrategyGoal } from './strategy/StrategyPlanner.ts';
+import { choosePhase, GOLD_MAX_BLOCKED, StrategyPlanner, type StrategyGoal } from './strategy/StrategyPlanner.ts';
 import { recentFailures, recordFailure } from './strategy/skips.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
@@ -478,6 +478,9 @@ async function run(): Promise<void> {
     planner,
     kb,
     maxSubGoals: values['max-subgoals'] ? Number(values['max-subgoals']) : undefined,
+    // Gold gives up a stuck route itself and moves on; the run-wide limit then only ends runs
+    // where the next routes fail as well.
+    maxBlockedInARow: values.strategy === 'gold' ? 3 * GOLD_MAX_BLOCKED : undefined,
     onEvent: printEvent,
   });
 
