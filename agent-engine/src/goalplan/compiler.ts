@@ -177,18 +177,26 @@ function needsOf(req: Requirement | undefined, sim: Sim, skip: Set<string>, dept
 }
 
 /** The best usable training method for a skill at its current level, with what it still needs. */
-function methodFor(skill: string, sim: Sim, skip: Set<string>, depth = 0): { method: TrainingMethod; needs: Need[] } | null {
+function methodFor(skill: string, sim: Sim, skip: Set<string>, depth = 0): { method: TrainingMethod; needs: Need[]; below?: boolean } | null {
   const key = MELEE.has(skill) ? 'Melee' : skill;
   // Melee brackets pick monsters by overall melee strength; a skill far below the others (Defence 1
   // with Attack 60) fights easier monsters.
   const at = key === 'Melee' ? Math.min(meleeLevel(sim), lvl(sim, skill) + 20) : lvl(sim, skill);
-  const viable: { method: TrainingMethod; needs: Need[] }[] = [];
+  const viable: { method: TrainingMethod; needs: Need[]; below?: boolean }[] = [];
+  const lower: { method: TrainingMethod; needs: Need[]; below?: boolean }[] = [];
   for (const m of TRAINING) {
-    if (m.skill !== key || at < m.from || at >= m.to || (m.members && !sim.members) || skip.has(methodId(skill, m))) continue;
+    if (m.skill !== key || at < m.from || (m.members && !sim.members) || skip.has(methodId(skill, m))) continue;
     const needs = needsOf(m.req, sim, skip, depth + 1);
-    if (needs !== null) viable.push({ method: m, needs });
+    if (needs === null) continue;
+    if (at < m.to) viable.push({ method: m, needs });
+    else if (m.exec.kind !== 'llm') lower.push({ method: m, needs, below: true });
   }
-  return viable.sort((a, b) => (b.method.xpHour ?? 0) - (a.method.xpHour ?? 0))[0] ?? null;
+  // Scripted before LLM methods: an LLM bracket method (flesh crawlers behind the Stronghold of
+  // Security's question doors) looped at the Gate of War. With no scripted method in the bracket,
+  // the best scripted one below it still trains, slower but reliably; LLM methods come last.
+  const byXp = (a: { method: TrainingMethod }, b: { method: TrainingMethod }) => (b.method.xpHour ?? 0) - (a.method.xpHour ?? 0);
+  const scripted = viable.filter((v) => v.method.exec.kind !== 'llm').sort(byXp);
+  return scripted[0] ?? lower.sort((a, b) => b.method.to - a.method.to)[0] ?? viable.sort(byXp)[0] ?? null;
 }
 
 function coverageOf(e: Execution): Coverage {
@@ -264,7 +272,8 @@ function forNeed(need: Need, sim: Sim, ctx: Ctx, why: string, depth: number): Mi
       if (!pick) return null;
       if (pick.needs.length) return forNeed(pick.needs[0]!, sim, ctx, `${pick.method.name} needs it`, depth + 1);
       // Melee brackets follow the average melee level, not this skill's, so only the step caps them.
-      const bracketTop = MELEE.has(need.skill) ? 99 : pick.method.to;
+      // A method from below the bracket trains on past its own top.
+      const bracketTop = MELEE.has(need.skill) || pick.below ? 99 : pick.method.to;
       const to = Math.min(need.level, bracketTop, lvl(sim, need.skill) + ctx.spec.policy.levelsPerPhase);
       return skillMilestone(need.skill, pick.method, to, sim, ctx, why);
     }

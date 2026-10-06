@@ -42,6 +42,11 @@ export interface ResolveOptions {
   shop?: (item: string) => { source: AcquireSource; price: number } | null;
   /** Grand Exchange price of an item; the GE is used when it is cheaper than the shops. */
   gePrice?: (item: string) => number | null;
+  /**
+   * Earn missing coins with a money route first (default true). Strict flows say false: a coin
+   * shortfall blocks instead of starting an unrelated activity.
+   */
+  earnCoins?: boolean;
 }
 
 /** Cooked food to aim for when fishing for it. */
@@ -217,12 +222,23 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
   // Coins for every purchase, earned first.
   coinsNeeded += buys.reduce((s, b) => s + b.cost, 0);
   const prefix: SetupStep[] = [];
-  if (coinsNeeded > v.profile.coins) {
+  if (coinsNeeded > v.profile.coins && o.earnCoins === false) {
+    blocked.push(`${coinsNeeded} coins (${v.profile.coins} owned; not earned inside this flow)`);
+  } else if (coinsNeeded > v.profile.coins) {
     const earn = coinSteps(coinsNeeded - v.profile.coins, v, skip, `${coinsNeeded} coins needed, ${v.profile.coins} owned`);
     if (earn) prefix.push(...earn);
     else blocked.push(`${coinsNeeded} coins (no money route fits this account)`);
   }
   // Buying comes before the rest: fishing for food needs the net it buys.
-  const all = [...prefix, ...buys.map((b) => b.step), ...steps];
+  // One purchase per item: a level's training method and the activity itself can both need
+  // the same tool (a fly fishing rod was bought twice).
+  const bought = new Set<string>();
+  const all = [...prefix, ...buys.map((b) => b.step), ...steps].filter((st) => {
+    if (st.phase.exec.kind !== 'acquire') return true;
+    const item = st.phase.exec.item.toLowerCase();
+    if (bought.has(item)) return false;
+    bought.add(item);
+    return true;
+  });
   return { steps: all, blocked, minutes: all.reduce((s, x) => s + x.minutes, 0) };
 }
