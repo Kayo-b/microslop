@@ -8,6 +8,7 @@ import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.MenuAction;
 import net.runelite.api.VarClientStr;
+import net.runelite.api.VarPlayer;
 import net.runelite.api.annotations.Component;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
@@ -283,15 +284,31 @@ public class Rs2GrandExchange {
         }
         Rs2Keyboard.typeString(request.getItemName());
 
-        if (!Rs2Widget.sleepUntilHasWidgetText(searchName, 162, 44, false, 5000)) return true;
+        if (!Rs2Widget.sleepUntilHasWidgetText(searchName, 162, 44, false, 5000)) {
+            log.warn("GE search: the search box never showed \"{}\"", searchName);
+            return true;
+        }
 
-        sleepUntil(() -> getSearchResultWidget(request.getItemName(), request.isExact()) != null, 2200);
+        // The result list is rebuilt while the name is typed, so a result found right away can be
+        // replaced before the click lands. Re-find and click until the offer has the item.
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            sleepUntil(() -> getSearchResultWidget(request.getItemName(), request.isExact()) != null, 2200);
+            Pair<Widget, Integer> itemResult = getSearchResultWidget(request.getItemName(), request.isExact());
+            if (itemResult == null) {
+                log.warn("GE search: no result for \"{}\"", request.getItemName());
+                return true;
+            }
+            Rs2Widget.clickWidgetFast(itemResult.getLeft(), itemResult.getRight(), 1);
+            if (sleepUntil(Rs2GrandExchange::isOfferItemChosen, 2000)) return false;
+            log.warn("GE search: clicking the result for \"{}\" did not select it (attempt {})", request.getItemName(), attempt);
+        }
+        return true;
+    }
 
-        Pair<Widget, Integer> itemResult = getSearchResultWidget(request.getItemName(), request.isExact());
-        if (itemResult == null) return true;
-
-        Rs2Widget.clickWidgetFast(itemResult.getLeft(), itemResult.getRight(), 1);
-        return false;
+    /** True once the offer being set up has an item (varp 1151 holds its id, -1 before). */
+    private static boolean isOfferItemChosen() {
+        return Microbot.getClientThread().runOnClientThreadOptional(
+                () -> Microbot.getClient().getVarpValue(VarPlayer.CURRENT_GE_ITEM) > 0).orElse(false);
     }
 
     /**
@@ -1706,7 +1723,7 @@ public class Rs2GrandExchange {
     static int getOfferPrice() {
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
             try {
-                return Microbot.getClient().getVarbitValue(VarbitID.GE_NEWOFFER_PRICE);
+                return Microbot.getClient().getVarbitValue(4398); // GE_NEWOFFER_PRICE, gone from the gamevals
             } catch (IndexOutOfBoundsException e) {
                 return -1;
             }

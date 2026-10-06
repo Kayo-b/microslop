@@ -193,7 +193,13 @@ public class ActHandler extends AgentHandler {
 				// coins come back) rather than block every later purchase.
 				if (Rs2GrandExchange.getAvailableSlots().length == 0) Rs2GrandExchange.abortAllOffers(false);
 				if (Rs2GrandExchange.getAvailableSlots().length == 0) return Result.fail("no_free_ge_slot");
-				if (!Rs2GrandExchange.buyItem(name, price, quantity)) return Result.fail("offer_failed (item search or price entry did not complete)");
+				// A setup screen left by an earlier failed offer hides the slot buttons and keeps its
+				// search text, so every later offer would fail too.
+				if (Rs2GrandExchange.isOfferScreenOpen()) Rs2GrandExchange.backToOverview();
+				if (!Rs2GrandExchange.buyItem(name, price, quantity)) {
+					Rs2GrandExchange.backToOverview();
+					return Result.fail("offer_failed (item search or price entry did not complete)");
+				}
 				sleepUntil(Rs2GrandExchange::hasBoughtOffer, 10_000);
 				Rs2GrandExchange.collectAllToInventory();
 				return Result.ok();
@@ -211,7 +217,11 @@ public class ActHandler extends AgentHandler {
 				int price = Math.max(1, (int) Math.floor(guide * 0.7));
 				if (Rs2GrandExchange.getAvailableSlots().length == 0) Rs2GrandExchange.collectAllToInventory();
 				if (Rs2GrandExchange.getAvailableSlots().length == 0) return Result.fail("no_free_ge_slot");
-				if (!Rs2GrandExchange.sellItem(name, quantity, price)) return Result.fail("offer_failed (item selection or price entry did not complete)");
+				if (Rs2GrandExchange.isOfferScreenOpen()) Rs2GrandExchange.backToOverview();
+				if (!Rs2GrandExchange.sellItem(name, quantity, price)) {
+					Rs2GrandExchange.backToOverview();
+					return Result.fail("offer_failed (item selection or price entry did not complete)");
+				}
 				sleepUntil(Rs2GrandExchange::hasSoldOffer, 10_000);
 				Rs2GrandExchange.collectAllToInventory();
 				return Result.ok();
