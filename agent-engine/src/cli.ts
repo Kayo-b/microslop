@@ -42,6 +42,7 @@ import { recentFailures, recordFailure } from './strategy/skips.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
+import { StringingPlanner } from './goalplan/StringingPlanner.ts';
 import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
@@ -340,6 +341,9 @@ async function run(): Promise<void> {
     const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
     planner = new TanningPlanner({ bank: () => (bank.seenAt ? bank.items : null), price: gePrice });
     goal = 'buy cowhides, tan them at Ellis in Al Kharid and sell the leather';
+  } else if (values.task === 'string-amulets') {
+    planner = new StringingPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
+    goal = 'string amulets with wool at the Grand Exchange and sell them';
   } else if (values.task === 'smith-progression') {
     const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
     planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
