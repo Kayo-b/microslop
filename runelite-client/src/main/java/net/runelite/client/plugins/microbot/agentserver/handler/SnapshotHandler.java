@@ -127,6 +127,10 @@ public class SnapshotHandler extends AgentHandler {
 		snapshot.put("shop", readShop());
 		Map<String, Object> ge = new LinkedHashMap<>();
 		ge.put("open", Rs2GrandExchange.isOpen());
+		// Finished or cancelled offers hold items or coins until collected.
+		ge.put("collectable", Microbot.getClientThread().runOnClientThreadOptional(() -> java.util.Arrays.stream(client.getGrandExchangeOffers())
+			.anyMatch(o -> o != null && (o.getState() == net.runelite.api.GrandExchangeOfferState.BOUGHT || o.getState() == net.runelite.api.GrandExchangeOfferState.SOLD
+				|| o.getState() == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY || o.getState() == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL))).orElse(false));
 		snapshot.put("grandExchange", ge);
 		snapshot.put("walk", WalkHandler.activeWalkStatus());
 		snapshot.put("messages", GameMessageLog.recent(maxMessages));

@@ -498,7 +498,11 @@ function geCandidates(s: Snapshot, goal: SubGoal): Candidate[] {
     if (w.need <= 0) continue;
     out.push({ id: `ge:buy:${w.name}`, kind: 'ge_item', name: w.name, action: 'Buy', label: `Buy ${w.need} ${w.name} on the Grand Exchange`, gameAction: { op: 'ge_buy', name: w.name, quantity: w.need } });
   }
-  out.push({ id: 'ge:collect', kind: 'ge_item', name: 'Offers', action: 'Collect', label: 'Collect finished offers', gameAction: { op: 'ge_collect' } });
+  // Only when something is waiting: offered always, the classifier collected nothing five times in
+  // a row and the sub-goal was given up.
+  if (s.grandExchange?.collectable !== false) {
+    out.push({ id: 'ge:collect', kind: 'ge_item', name: 'Offers', action: 'Collect', label: 'Collect finished offers', gameAction: { op: 'ge_collect' } });
+  }
   out.push({ id: 'ge:close', kind: 'ge_item', name: 'Grand Exchange', action: 'Close', label: 'Close the Grand Exchange', gameAction: { op: 'ge_close' } });
   return out;
 }

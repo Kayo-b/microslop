@@ -465,6 +465,9 @@ test('an open Grand Exchange offers buying the wanted item, collecting and closi
   const { candidates } = buildCandidates(s, null, { text: 'buy 1 Redberry pie at the Grand Exchange', targets: ['Grand Exchange Clerk', 'Redberry pie'], actions: ['Exchange'], want: [{ name: 'Redberry pie', count: 1 }] });
   assert.deepEqual(candidates.map((c) => c.id), ['ge:buy:Redberry pie', 'ge:collect', 'ge:close']);
   assert.deepEqual(candidates[0]!.gameAction, { op: 'ge_buy', name: 'Redberry pie', quantity: 1 });
+  s.grandExchange = { open: true, collectable: false };
+  const idle = buildCandidates(s, null, { text: 'buy 1 Redberry pie at the Grand Exchange', targets: ['Grand Exchange Clerk', 'Redberry pie'], actions: ['Exchange'], want: [{ name: 'Redberry pie', count: 1 }] });
+  assert.ok(!idle.candidates.some((c) => c.id === 'ge:collect'), 'nothing to collect: no Collect option');
 });
 
 test('banking walks to a tile inside the bank, not onto a booth (Al Kharid back wall)', async () => {

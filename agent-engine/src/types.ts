@@ -170,7 +170,8 @@ export interface Snapshot {
   bank: BankState;
   shop: ShopState;
   /** The Grand Exchange interface. */
-  grandExchange?: { open: boolean };
+  /** `collectable`: some offer is finished or cancelled and holds items or coins (absent: unknown). */
+  grandExchange?: { open: boolean; collectable?: boolean };
   walk: WalkStatus;
   /** Recent game/system messages only; other players' chat is never included. */
   messages: GameMessage[];
