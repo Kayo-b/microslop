@@ -229,8 +229,10 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
 const ENGINE_DIR = path.resolve(import.meta.dirname, '..', '..');
 
 async function agentRequest(method: 'GET' | 'POST', route: string, body?: unknown, timeoutMs = 10_000): Promise<unknown> {
-  const token = (await readFile(path.join(os.homedir(), '.runelite', '.agent-token'), 'utf8').catch(() => '')).trim();
-  const res = await fetch(`http://127.0.0.1:8081${route}`, {
+  // Same env as the agent backend and microbot-cli: a second client runs on its own port and home.
+  const tokenFile = process.env.MICROBOT_TOKEN_FILE ?? path.join(os.homedir(), '.runelite', '.agent-token');
+  const token = (process.env.MICROBOT_TOKEN ?? (await readFile(tokenFile, 'utf8').catch(() => ''))).trim();
+  const res = await fetch(`http://${process.env.MICROBOT_HOST ?? '127.0.0.1'}:${process.env.MICROBOT_PORT ?? 8081}${route}`, {
     method,
     headers: { ...(token ? { 'X-Agent-Token': token } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
