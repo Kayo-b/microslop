@@ -52,6 +52,8 @@ public class Rs2TileObjectModel implements TileObject, IEntity {
 
     @Getter
     private final TileObjectType tileObjectType;
+    /** The wrapped client object; for a GameObject its scene bounds give the exact footprint. */
+    @Getter
     private final TileObject tileObject;
     private String[] actions;
 

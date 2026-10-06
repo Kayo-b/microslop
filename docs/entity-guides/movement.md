@@ -382,3 +382,29 @@ the caller to answer "No".
 
 **Where this applies:** `shortestpath/blocked_edges.tsv`, `shortestpath/teleportation_portals.tsv`,
 `Rs2Walker` prompt handling; any door whose interaction opens a destination prompt.
+
+## 19. A GameObject's world location is its south-west tile, not its centre
+
+`Rs2TileObjectModel.getWorldLocation()` returns the south-west corner of a GameObject's scene
+bounds. Reachability, walking and "is it next to me" checks must build the footprint from that
+corner (or from `getSceneMinLocation`/`getSceneMaxLocation`, which also covers rotated objects),
+never as a square centred on the location.
+
+**Why this matters:** `/snapshot` tested a ring around a guessed centre for the 2x3 Al Kharid
+furnace: it checked tiles inside the furnace and missed the ones beside it, marked the furnace
+unreachable, and the smelting flow stalled with "walk to Furnace (3 tiles) -> no effect" on every
+attempt (2026-10-06).
+
+**Pattern to follow:**
+
+```java
+// wrong: centres a footprint on the corner tile
+int half = sizeX / 2; for (int dx = -half - 1; dx <= half + 1; dx++) ...
+// right: the exact footprint from the scene bounds
+GameObject go = (GameObject) model.getTileObject();
+WorldPoint sw = WorldPoint.fromScene(wv, go.getSceneMinLocation().getX(), go.getSceneMinLocation().getY(), go.getPlane());
+int sizeX = go.getSceneMaxLocation().getX() - go.getSceneMinLocation().getX() + 1;
+```
+
+**Where this applies:** `agentserver/handler/SnapshotHandler.serializeObject` (`footprint`,
+`putReachThroughWallsFromCorner`), any code sizing GameObjects from `ObjectComposition.getSizeX/Y`.
