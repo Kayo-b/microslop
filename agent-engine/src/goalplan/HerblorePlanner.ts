@@ -102,11 +102,16 @@ export class HerblorePlanner implements Planner {
     if (s.bank.open) this.seen = new Map(s.bank.items.map((b) => [b.name, b.quantity]));
     const bank = this.seen;
     const level = s.skills.find((k) => k.name === 'Herblore')?.level ?? 1;
-    // Chosen once per run, so a price wobble does not strand half-bought inputs.
-    this.recipe ??= bestRecipe(level, this.o.price);
-    const r = this.recipe;
     const count = (name: string, noted?: boolean) =>
       s.inventory.items.filter((i) => i.name === name && (noted === undefined || Boolean(i.noted) === noted)).reduce((n, i) => n + i.quantity, 0);
+    // Re-picked only between batches (no inputs carried or banked), so a price wobble never
+    // strands half-bought inputs, while a new level (Herblore 5: guam -> marrentill) takes effect
+    // at the next purchase instead of the next run.
+    const stockLeft = (x: NonNullable<typeof this.recipe>) => x.inputs.some((n) => count(n) > 0 || (bank?.get(n) ?? 0) > 0);
+    if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && s.grandExchange?.open)) {
+      this.recipe = bestRecipe(level, this.o.price);
+    }
+    const r = this.recipe;
     const products = [...new Set(HERB_RECIPES.map((x) => x.output))];
     const productsHeld = products.filter((n) => count(n) > 0 && !r?.inputs.includes(n));
     const coins = carriedCoins(s);

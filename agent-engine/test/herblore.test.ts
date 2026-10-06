@@ -75,6 +75,19 @@ test('herblore: unfinished potions from grimy herbs - clean, then mix with vials
   assert.ok(mix.kind === 'subgoal' && mix.subgoal.targets?.includes('Vial of water') && mix.subgoal.targets.includes('Harralander'), text(mix));
 });
 
+test('herblore: a level gained mid-run switches the recipe at the next purchase, not mid-batch', async () => {
+  const p = new HerblorePlanner({ price });
+  await next(p, bankOpen(4, [coins(50_000)], []));
+  const ge = { grandExchange: { open: true } } as Partial<Snapshot>;
+  assert.equal((act(await next(p, state(4, [coins(50_000)], ge))) as { name: string }).name, 'Grimy guam leaf');
+  // Level 5 with guam still banked: keep cleaning guam.
+  await next(p, bankOpen(5, [coins(40_000)], [{ id: 199, name: 'Grimy guam leaf', quantity: 100 }]));
+  assert.deepEqual(act(await next(p, state(5, [coins(40_000)], ge))), { op: 'ge_close' });
+  // Stock gone: the next purchase is marrentill.
+  await next(p, bankOpen(5, [coins(40_000)], []));
+  assert.equal((act(await next(p, state(5, [coins(40_000)], ge))) as { name: string }).name, 'Grimy marrentill');
+});
+
 test('herblore: gives up without a paying recipe or the coins for a trip', async () => {
   const p = new HerblorePlanner({ price });
   await next(p, bankOpen(5, [coins(1_000)], []));
