@@ -51,7 +51,7 @@ test('flows: a trading loop does not demand a fixed coin sum as a prerequisite',
 test('flows: a goal run takes the best option that can be set up', () => {
   const st = flowStatus(FLOWS.gold!, view({}, { ...gear, Coins: 50_000 }), { members: false });
   assert.equal(chooseOption(st, new Set())?.id, 'tan-hides');
-  assert.equal(chooseOption(st, new Set(['flow:gold:tan-hides']))?.id, 'moss-giants', 'next by gp/h; sub-flows allowed');
+  assert.equal(chooseOption(st, new Set(['flow:gold:tan-hides']))?.id, 'craft-jewellery', 'next by gp/h; sub-flows allowed (Crafting 5 comes from two quests first)');
   assert.equal(optionNeeds(FLOWS.gold!.options.find((o) => o.id === 'moss-giants')!).req.skills?.Defence, 35, 'recommended levels become requirements');
 });
 

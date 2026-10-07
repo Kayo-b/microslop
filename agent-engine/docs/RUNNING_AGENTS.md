@@ -51,8 +51,15 @@ npm run agent -- monitor [--hours 2]                              # running camp
 Gold flow options (`src/strategy/catalog.ts`): `cowhides`, `iron-ore`, `willow-logs`,
 `trout-salmon`, `lobsters`, `hill-giants`, `moss-giants`, `yew-logs`, `tan-hides`,
 `sand-crabs-herbs`, `feathers`, `guard-coins`, `smelt-steel`, `herblore`, `string-amulets`,
-`pickpocket-men`, `wool`. Trading loops with their own planner: `tan-hides`, `string-amulets`,
-`herblore`, `smelt-steel`.
+`craft-jewellery`, `pickpocket-men`, `wool`. Trading loops with their own planner: `tan-hides`,
+`string-amulets`, `herblore`, `smelt-steel`, `craft-jewellery`.
+
+**Progression.** Two loops raise their own skill while they earn. `herblore` cleans herbs (the only
+Herblore XP in the loop) when a recipe at a higher level pays clearly more. `craft-jewellery`
+ranks recipes by profit plus Crafting XP, so it climbs gold -> sapphire -> emerald -> ruby -> diamond
+as the level allows. Below its entry level (Crafting 5) the flow trains first with the Sheep Shearer
+and Goblin Diplomacy quests. A character-1 campaign that builds Crafting:
+`data/campaign/char1-crafting.json` (`CHAR1_CONFIG=data/campaign/char1-crafting.json gold-run start 1`).
 
 ### Useful flags
 
