@@ -74,6 +74,34 @@ export function bestRecipe(level: number, price: (item: string) => number | null
     .sort((a, b) => b.profit * b.perHour - a.profit * a.perHour)[0] ?? null;
 }
 
+/** Levels ahead whose recipes can justify training: cleaning ~8 levels is about an hour of clicks. */
+const TRAIN_REACH = 8;
+/** A recipe from a higher level must out-earn the current best by this factor to be worth training for. */
+const TRAIN_GAIN = 1.2;
+/** Cleaning may lose up to this much per herb while it trains (cleaning is the only XP; unfinished potions give none). */
+const TRAIN_LOSS = 10;
+
+/**
+ * `bestRecipe`, except when a recipe within reach pays clearly more: then the best herb to clean
+ * now (cleaning gives XP, mixing unfinished potions gives none), until the level unlocks it.
+ * Without this the best-paying unfinished potion kept Herblore stuck at 22 for hours.
+ * `coins` skips herbs too dear to buy a first batch of.
+ */
+export function nextRecipe(level: number, price: (item: string) => number | null, coins = Infinity, minProfit = 20): (HerbRecipe & { profit: number; cost: number }) | null {
+  const best = bestRecipe(level, price, minProfit);
+  const afford = (r: { cost: number }) => r.cost * MIN_BUY <= coins - RESERVE;
+  const ahead = bestRecipe(level + TRAIN_REACH, price, minProfit);
+  if (!ahead || ahead.level <= level || !afford(ahead)) return best;
+  if (best && ahead.profit * ahead.perHour < best.profit * best.perHour * TRAIN_GAIN) return best;
+  if (best?.steps.length === 1 && best.steps[0] === 'clean') return best;
+  // HERB_RECIPES lists herbs in level order, so the last affordable clean recipe is the most XP per click.
+  const train = HERB_RECIPES.filter((r) => r.steps.length === 1 && r.steps[0] === 'clean' && r.level <= level)
+    .map((r) => ({ ...r, profit: recipeProfit(r, price) ?? -1, cost: r.inputs.reduce((n, i) => n + (price(i) ?? 0), 0) }))
+    .filter((r) => r.profit >= -TRAIN_LOSS && r.cost > 0 && afford(r))
+    .at(-1);
+  return train ?? best;
+}
+
 const RESERVE = 500;
 /** ge_buy offers the client's guide price +30%; a little more covers the wiki price differing. */
 const OVERBID = 1.32;
@@ -94,7 +122,7 @@ export class HerblorePlanner implements Planner {
   readonly name = 'herblore';
   private readonly o: HerbloreOptions;
   private seen: Map<string, number> | null = null;
-  private recipe: ReturnType<typeof bestRecipe> | undefined;
+  private recipe: ReturnType<typeof nextRecipe> | undefined;
   private readonly scale = new BuyScale();
 
   constructor(o: HerbloreOptions) {
@@ -113,7 +141,7 @@ export class HerblorePlanner implements Planner {
     // at the next purchase instead of the next run.
     const stockLeft = (x: NonNullable<typeof this.recipe>) => x.inputs.some((n) => count(n) > 0 || (bank?.get(n) ?? 0) > 0);
     if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && s.grandExchange?.open)) {
-      this.recipe = bestRecipe(level, this.o.price);
+      this.recipe = nextRecipe(level, this.o.price, carriedCoins(s) + (bank?.get('Coins') ?? 0));
     }
     const r = this.recipe;
     const products = [...new Set(HERB_RECIPES.map((x) => x.output))];

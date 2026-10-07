@@ -90,5 +90,5 @@ fi
 # shellcheck disable=SC1090
 source "$SESSION_FILE"
 J17="$(mise where java@temurin-17)"
-cd "${MICROBOT_DIR:-$HOME/projects/Microbot}"
+cd "${MICROBOT_DIR:-$HOME/projects/Microbot_}"
 JAVA_HOME="$J17" exec ./gradlew :client:run --console=plain -Dorg.gradle.java.installations.paths="$J17"
