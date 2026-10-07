@@ -7,6 +7,7 @@
 import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
 import { SellPlanner } from '../goalplan/SellPlanner.ts';
 import { HerblorePlanner } from '../goalplan/HerblorePlanner.ts';
+import { JewelleryPlanner } from '../goalplan/JewelleryPlanner.ts';
 import { SmeltingPlanner } from '../goalplan/SmeltingPlanner.ts';
 import { StringingPlanner } from '../goalplan/StringingPlanner.ts';
 import { TanningPlanner } from '../goalplan/TanningPlanner.ts';
@@ -234,6 +235,7 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       }
       if (e.preset === 'string-amulets') return deps.gePrice ? new StringingPlanner({ price: deps.gePrice }) : null;
       if (e.preset === 'smelt-steel') return new SmeltingPlanner();
+      if (e.preset === 'craft-jewellery') return deps.gePrice ? new JewelleryPlanner({ price: deps.gePrice }) : null;
       if (e.preset === 'herblore') return deps.gePrice ? new HerblorePlanner({ price: deps.gePrice }) : null;
       return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {

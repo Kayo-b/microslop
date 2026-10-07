@@ -66,7 +66,7 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
   // Gear smithing just ran (it alternates with the routes; tested below).
   const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const first = choosePhase({ kind: 'gold', lastRun }, p, new Set());
-  assert.ok(first && 'phase' in first && first.phase.id === 'gold:iron-ore', 'untried routes first, best estimate among them');
+  assert.ok(first && 'phase' in first && first.phase.id === 'gold:string-amulets', 'untried routes first, best estimate among them');
   lastRun.set('iron-ore', Date.now()).set('string-amulets', Date.now()).set('cowhides', Date.now()).set('feathers', Date.now()).set('guard-coins', Date.now());
   const wool = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(wool && 'phase' in wool && wool.phase.id === 'gold:wool' && wool.phase.text.startsWith('take shears'), 'llm routes run with their full goal');
@@ -81,7 +81,7 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
 test('strategy gold: a fight below its recommended levels trains the weakest skill in its turn', () => {
   const s = state({ Attack: 40, Strength: 33, Defence: 24, Hitpoints: 35 }, { player: { ...snapshot().player!, combatLevel: 42 } });
   const p = buildProfile(account(false), s, bankWith(['Coins']));
-  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['string-amulets', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const moss = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(moss && 'phase' in moss && moss.phase.id === 'gold:moss-giants:train', JSON.stringify(moss));
   assert.deepEqual(moss.phase.until, { skill: 'Defence', level: 30 }, 'largest gap first, capped at its bracket');

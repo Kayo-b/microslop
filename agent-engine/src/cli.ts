@@ -45,6 +45,7 @@ import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
 import { HerblorePlanner } from './goalplan/HerblorePlanner.ts';
+import { JewelleryPlanner } from './goalplan/JewelleryPlanner.ts';
 import { StringingPlanner } from './goalplan/StringingPlanner.ts';
 import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
@@ -381,6 +382,9 @@ async function run(): Promise<void> {
   } else if (values.task === 'herblore') {
     planner = new HerblorePlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
     goal = 'clean herbs and mix unfinished potions at the Grand Exchange and sell them';
+  } else if (values.task === 'craft-jewellery') {
+    planner = new JewelleryPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
+    goal = 'craft jewellery at the Edgeville furnace from Grand Exchange bars and gems and sell it';
   } else if (values.task === 'string-amulets') {
     planner = new StringingPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
     goal = 'string amulets with wool at the Grand Exchange and sell them';
