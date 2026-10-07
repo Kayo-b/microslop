@@ -106,3 +106,20 @@ used; Claude Code is only used when named.
 - The prompt contains game state (NPC names, game messages; never player chat). With more
   tools than the default, treat it like running an agent on untrusted text.
 - About 4 s and $0.03 per planner call with Sonnet.
+
+## Campaign configs in use
+
+Gitignored, in `data/campaign/` (each character's checkout has its own):
+
+| File | What |
+|---|---|
+| `gaps-2026-09-30.json` | gap-weighted rotation used for the first overnight data runs |
+| `thin-areas-2026-10-06.json` | LLM-planned `--goal` activities for thin dataset areas (firemaking, thieving, fletching, crafting, cooking, runecrafting, smelting, quests, range-cows) |
+| `quests-2026-10-01.json`, `quests-only-2026-10-01.json` | quest sessions (`--strategy quest`, 45 min) |
+| `ab-laya-v1-2026-10-05.json` | every activity twice, `@jev` / `@laya` ([LAYA_FINETUNING.md](LAYA_FINETUNING.md#7-ab-in-game)) |
+| `gold-2026-10-06.json` | `--strategy gold`, 55 min slices (rotation through gold routes) |
+| `smelt-2026-10-06.json` | `--flow gold --option smelt-steel`, 55 min slices |
+| `char2-gold.json`, `char2-herblore.json` | second character: `--flow gold` / `--flow gold --option herblore` ([TWO_CHARACTERS.md](TWO_CHARACTERS.md)) |
+
+Config fields and `agent run` flags: [CONFIGURATION.md](CONFIGURATION.md). Launch commands:
+[RUNNING_AGENTS.md](RUNNING_AGENTS.md).
