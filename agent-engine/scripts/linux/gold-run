@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Start / stop / inspect the gold-run campaigns of both characters as systemd user units.
+#
+#   gold-run start  [1|2|both] [--hours H] [-- extra campaign args]
+#   gold-run stop   [1|2|both]
+#   gold-run status [1|2|both]
+#   gold-run logs   1|2
+#   gold-run rebuild-char2          merge feat/agent-engine into feat/char2 and rebuild its shaded jar
+#
+# Character 1 (<char1-name>): ~/projects/Microbot_,       unit microbot-jev-data, port 8081, world 316
+# Character 2 (<char2-name>):  ~/projects/Microbot_-char2, unit microbot-char2,    port 8082, world 302
+#
+# Env overrides: CHAR1_CONFIG, CHAR2_CONFIG (campaign JSON, relative to each checkout's agent-engine/),
+# CHAR1_WORLD, CHAR2_WORLD, LLM_ARGS (default: --llm claude-code --rescue-model haiku --rescue),
+# DISPLAY (passed to the units; use :1 after an Xwayland crash). See docs/TWO_CHARACTERS.md.
+set -uo pipefail
+
+ROOT1="${MICROBOT_DIR:-$HOME/projects/Microbot_}"
+ROOT2="${MICROBOT_DIR_CHAR2:-$HOME/projects/Microbot_-char2}"
+ENGINE1="$ROOT1/agent-engine"
+ENGINE2="$ROOT2/agent-engine"
+UNIT1=microbot-jev-data
+UNIT2=microbot-char2
+CONFIG1="${CHAR1_CONFIG:-data/campaign/smelt-2026-10-06.json}"
+CONFIG2="${CHAR2_CONFIG:-data/campaign/char2-herblore.json}"
+WORLD1="${CHAR1_WORLD:-316}"
+WORLD2="${CHAR2_WORLD:-302}"
+TOKEN2="$HOME/.microbot-char2-home/.runelite/.agent-token"
+read -r -a LLM <<< "${LLM_ARGS:---llm claude-code --rescue-model haiku --rescue}"
+
+die() { echo "gold-run: $*" >&2; exit 1; }
+
+# Hours until 23:59 (the campaign stops itself then).
+hours_left() {
+  python3 -c "import datetime as d;n=d.datetime.now();print(max(0.5,round((n.replace(hour=23,minute=59)-n).total_seconds()/3600,1)))"
+}
+
+setenv_common() {
+  printf '%s\n' "--setenv=PATH=$PATH" "--setenv=HOME=$HOME"
+  [[ -n "${DISPLAY:-}" ]] && printf '%s\n' "--setenv=DISPLAY=$DISPLAY"
+  return 0
+}
+
+start1() {
+  local hours="$1"; shift
+  systemctl --user reset-failed "$UNIT1" 2>/dev/null
+  mapfile -t env < <(setenv_common)
+  systemd-run --user --unit="$UNIT1" --working-directory="$ENGINE1" \
+    --setenv=MICROBOT_DIR="$ROOT1" --setenv=MICROBOT_CAMPAIGN_HOURS="$hours" "${env[@]}" \
+    "$ENGINE1/scripts/linux/microbot-campaign" --config "$CONFIG1" --world "$WORLD1" "${LLM[@]}" "$@"
+}
+
+start2() {
+  local hours="$1"; shift
+  [[ -d "$ENGINE2" ]] || die "second checkout missing: $ENGINE2"
+  systemctl --user reset-failed "$UNIT2" 2>/dev/null
+  mapfile -t env < <(setenv_common)
+  # runner.ts directly: the wrapper's lock and session refresh belong to character 1.
+  systemd-run --user --unit="$UNIT2" --working-directory="$ENGINE2" \
+    --setenv=MICROBOT_PORT=8082 --setenv=MICROBOT_TOKEN_FILE="$TOKEN2" \
+    --setenv=MICROBOT_RUN="$HOME/.config/microbot-jx/run-char2.sh" "${env[@]}" \
+    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists=../.env \
+    src/campaign/runner.ts --config "$CONFIG2" --hours "$hours" --world "$WORLD2" --restart-client \
+    "${LLM[@]}" "$@"
+}
+
+rebuild2() {
+  local j17; j17="$(mise where java@temurin-17)" || die "mise java@temurin-17 missing"
+  (cd "$ROOT2" && git merge feat/agent-engine && \
+    JAVA_HOME="$j17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$j17")
+}
+
+pick() { case "${1:-both}" in 1|char1) echo 1;; 2|char2) echo 2;; both|"") echo both;; *) die "which character? 1, 2 or both";; esac; }
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  start)
+    which="$(pick "${1:-both}")"; [[ "${1:-}" =~ ^(1|2|both|char1|char2)$ ]] && shift
+    hours="$(hours_left)"; extra=()
+    while (($#)); do
+      case "$1" in
+        --hours) hours="$2"; shift 2;;
+        --) shift; extra=("$@"); break;;
+        *) die "unknown option $1";;
+      esac
+    done
+    [[ "$which" != 2 ]] && { start1 "$hours" "${extra[@]}" || exit 1; }
+    [[ "$which" != 1 ]] && { start2 "$hours" "${extra[@]}" || exit 1; }
+    echo "started for ${hours}h. Watch: gold-run status | gold-run logs 1|2"
+    ;;
+  stop)
+    which="$(pick "${1:-both}")"
+    [[ "$which" != 2 ]] && systemctl --user stop "$UNIT1"
+    [[ "$which" != 1 ]] && systemctl --user stop "$UNIT2"
+    ;;
+  status)
+    which="$(pick "${1:-both}")"
+    [[ "$which" != 2 ]] && { echo "char 1: $(systemctl --user is-active $UNIT1)"; (cd "$ENGINE1" && npm run --silent agent -- monitor --hours 1); }
+    [[ "$which" != 1 ]] && { echo "char 2: $(systemctl --user is-active $UNIT2)"; (cd "$ENGINE2" && MICROBOT_PORT=8082 MICROBOT_TOKEN_FILE="$TOKEN2" npm run --silent agent -- monitor --hours 1); }
+    ;;
+  logs)
+    case "$(pick "${1:-}")" in 1) exec journalctl --user -u "$UNIT1" -f;; 2) exec journalctl --user -u "$UNIT2" -f;; *) die "logs needs 1 or 2";; esac
+    ;;
+  rebuild-char2) rebuild2;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2;;
+esac

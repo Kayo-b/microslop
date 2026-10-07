@@ -10,6 +10,72 @@ Claude Sonnet.
 > **Account risk.** This drives the live OSRS client. Automating gameplay breaks Jagex's rules
 > and can get an account banned. Use a throwaway account.
 
+## Quick start: gold-run campaigns for both characters
+
+`scripts/linux/gold-run` starts each character's campaign as a systemd user unit (survives
+closing the terminal, stops cleanly). It launches the client, logs in, and rotates 55-minute
+`--flow gold` activities until 23:59.
+
+| | Character 1 `<char1-name>` | Character 2 `<char2-name>` |
+|---|---|---|
+| Campaign | `data/campaign/smelt-2026-10-06.json` (smelt-steel) | `data/campaign/char2-herblore.json` (herblore) |
+| World | 316 (F2P) | 302 (members) |
+| Checkout / port / unit | `~/projects/Microbot_` / 8081 / `microbot-jev-data` | `~/projects/Microbot_-char2` / 8082 / `microbot-char2` |
+
+### One-time setup
+
+Full walkthrough (Bolt, Jagex session, JDK, second checkout): [docs/RUNNING.md](docs/RUNNING.md),
+[docs/TWO_CHARACTERS.md](docs/TWO_CHARACTERS.md).
+
+```bash
+cd ~/projects/Microbot_/agent-engine
+npm install
+npm run kb:dump && npm run kb:wiki && npm run kb:build       # -> data/kb.sqlite (~2 min)
+mise install java@temurin-17
+scripts/linux/build-bolt.sh
+install -m 755 scripts/linux/{bolt-microbot,microbot-run,microbot-campaign,gold-run} ~/.local/bin/
+bolt-microbot                                                # sign in to Jagex once, close Bolt
+# repo-root .env: JEV_API_KEY=...   (--llm claude-code needs no key, it uses the local `claude` login)
+# first client start: Configuration -> search "Agent Server" -> enable [M] Agent Server (TCP, stealth bind off)
+```
+
+### Daily
+
+```bash
+gold-run start            # both characters, until 23:59
+gold-run start 1          # only character 1   (also: 2)
+gold-run start both --hours 4
+gold-run status           # unit state + campaign monitor (activity, rescues, gp/h, alerts)
+gold-run logs 1           # follow journal (1 or 2)
+gold-run stop             # ends running activity at once and stops the clients
+gold-run rebuild-char2    # after Java changes: merge feat/agent-engine, rebuild char 2's shaded jar
+```
+
+Other campaign file or world: `CHAR1_CONFIG=data/campaign/gold-2026-10-06.json CHAR2_WORLD=302 gold-run start`.
+Extra campaign flags go after `--`: `gold-run start both -- --dry-run`.
+After an Xwayland crash run `DISPLAY=:1 gold-run start` (see the troubleshooting table in
+[docs/RUNNING_AGENTS.md](docs/RUNNING_AGENTS.md)).
+
+Rules: max 2 characters logged in at once; members content needs world 302; stop both campaigns
+before trading coins between them. More in [docs/FILES.md](docs/FILES.md).
+
+## Where to go next
+
+| I want to... | Read |
+|---|---|
+| set up the machine, Bolt, the Jagex session, fix login | [docs/RUNNING.md](docs/RUNNING.md) |
+| run one sub-goal, a task, a flow or a strategy by hand; look before acting; stop/clean up | [docs/RUNNING_AGENTS.md](docs/RUNNING_AGENTS.md) |
+| run a different gold route (`cowhides`, `tan-hides`, `string-amulets`, ...) or other campaign | [docs/RUNNING_AGENTS.md](docs/RUNNING_AGENTS.md#agent-run-modes), [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
+| write a new campaign JSON, tune flags, env vars, LLM backends | [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/CAMPAIGN.md](docs/CAMPAIGN.md) |
+| schedule daily sessions with a systemd timer; read monitor alerts | [docs/CAMPAIGN.md](docs/CAMPAIGN.md) |
+| create a new gold option / strategy / flow | [docs/STRATEGY.md](docs/STRATEGY.md) (catalog, `FlowPlanner`, planners) |
+| build a plan toward a stat build; set up tools, gear, food first | [docs/PLANS.md](docs/PLANS.md), [docs/PREREQUISITES.md](docs/PREREQUISITES.md) |
+| run both characters in depth, move coins between them | [docs/TWO_CHARACTERS.md](docs/TWO_CHARACTERS.md) |
+| gather data, build the dataset, fine-tune and A/B Laya | [docs/DATA_GATHERING.md](docs/DATA_GATHERING.md), [docs/DATASET.md](docs/DATASET.md), [docs/LAYA_FINETUNING.md](docs/LAYA_FINETUNING.md) |
+| find a source file, state file or outside-repo path; see the rules | [docs/FILES.md](docs/FILES.md) |
+| understand design choices, run tests | [docs/DESIGN.md](docs/DESIGN.md) |
+| use the Java endpoints / CLI | [../docs/AGENT_SERVER.md](../docs/AGENT_SERVER.md), [../docs/MICROBOT_CLI.md](../docs/MICROBOT_CLI.md) |
+
 ## How it fits together
 
 ```
@@ -42,112 +108,3 @@ Claude Sonnet.
 
 The Java side lives in `runelite-client/.../microbot/agentserver/` (`SnapshotHandler`, `ActHandler`,
 `GameMessageLog`); endpoints are documented in `docs/AGENT_SERVER.md`.
-
-## Docs
-
-Start with **[docs/QUICKSTART.md](docs/QUICKSTART.md)** (commands and important files). By theme:
-[data gathering](docs/DATA_GATHERING.md), [Laya fine-tuning](docs/LAYA_FINETUNING.md),
-[running agents](docs/RUNNING_AGENTS.md), [configuration](docs/CONFIGURATION.md),
-[two characters](docs/TWO_CHARACTERS.md), [campaigns](docs/CAMPAIGN.md),
-[strategies](docs/STRATEGY.md), [plans](docs/PLANS.md), [prerequisites](docs/PREREQUISITES.md).
-
-## Setup
-
-Requirements: Node 24+, JDK 17 for Gradle (`mise install java@temurin-17`), a Microbot build with
-this branch.
-
-```bash
-cd agent-engine
-npm install
-
-# Knowledge base (one-off, ~2 min; re-run after big game updates)
-npm run kb:dump     # downloads the latest OSRS cache from OpenRS2, dumps definitions/placements
-npm run kb:wiki     # NPC spawns, monster stats, shops from the OSRS Wiki
-npm run kb:build    # -> data/kb.sqlite
-```
-
-Secrets go in the repo-root `.env` (gitignored):
-
-| Variable | Used for |
-|---|---|
-| `JEV_API_KEY` | TypeSafe Jev (default decision engine) |
-| `ANTHROPIC_API_KEY` | Claude planner (`--goal`) and escalator (`--escalate`) |
-| `DECISION_ENGINE` | `jev` (default) or `laya` |
-| `LAYA_URL`, `LAYA_MODEL`, `LAYA_API_KEY` | local `laya-serve` (default `http://127.0.0.1:8000`) |
-| `CLAUDE_MODEL` | default `claude-sonnet-5-5` |
-| `MICROBOT_HOST`, `MICROBOT_PORT`, `MICROBOT_TOKEN` | agent server (defaults `127.0.0.1:8081`, token from `~/.runelite/.agent-token`) |
-
-## First live run
-
-For the full Linux + Jagex account setup (Bolt, session capture, `microbot-run`) and a
-troubleshooting table, see **[docs/RUNNING.md](docs/RUNNING.md)**.
-
-1. Build and start the client (`./gradlew :client:assemble` or run from your IDE), log in, and
-   enable the **Agent Server** plugin.
-2. Look before acting. This takes one snapshot, prints what the engine would show the model, and
-   asks Jev, without clicking anything:
-   ```bash
-   npm run agent -- inspect --goal "chop trees" --targets "Tree" --decide
-   ```
-3. Short scripted run. Stand near trees with an axe, then:
-   ```bash
-   npm run agent -- run --task chop-trees --max-subgoals 1
-   ```
-   Ctrl+C stops after the current step and cancels any walk.
-4. Longer loops: `--bank` banks instead of dropping, `--until-level 15` stops at a level.
-   `npm run agent -- presets` lists the tasks.
-5. Open goals through Claude (needs `ANTHROPIC_API_KEY`):
-   ```bash
-   npm run agent -- run --goal "get 10 mining at the nearest copper/tin mine" --escalate
-   ```
-
-Each run writes `logs/agent/<run-id>/steps.jsonl` containing the exact state and options the model
-saw, its answers and probabilities, the action taken, and the verified outcome.
-
-## Tests
-
-```bash
-npm test               # offline: fake agent server + scripted decider (no API calls)
-npm run typecheck
-npm run test:live-jev     # a few Jev calls, including a full chop/bank loop on the fake client
-npm run test:live-claude  # Claude planner/escalator (skips without ANTHROPIC_API_KEY)
-```
-
-Java: `./gradlew :client:runUnitTests --tests "*agentserver*"` (JDK 17).
-
-## Training data for Laya
-
-```bash
-npm run dataset:export   # logs/agent/*/steps.jsonl -> data/dataset/decisions.jsonl
-```
-
-Each example is a `/v1/systemone` request (`state`, `questions`) with gold `labels` and, for
-model decisions, the teacher's probability distribution as `soft` targets. Only verified-successful
-actions and successful escalations are kept. Laya's RLCD recipe trains on soft targets, and the
-browser-agent write-up in `laya/docs/finetune_browser_agent.md` describes the input format that
-worked best (options in the question, compact state). After fine-tuning, point `laya-serve` at the
-checkpoint and set `DECISION_ENGINE=laya`; nothing else changes.
-
-## Design notes and known limits
-
-- **The classifier only gets real choices.** Waiting, eating, level-up dialogs, and completion
-  checks are deterministic. The op question is dropped when only one op is possible, and walking
-  isn't offered while a usable target is visible. Live Jev runs showed it is strong at "which
-  option" (0.9 to 1.0 confidence) and weak at abstract "what now" questions.
-- **Two stuck detectors.** The per-sub-goal watchdog (`src/agent/watchdog.ts`) ends one sub-goal
-  that spins. The run-level loop detector (`src/agent/loopDetector.ts`) trips when, with no XP or
-  items gained, the player stays within 20 tiles for 8 minutes or the last 30 actions are three
-  clicks over and over, across sub-goals. With `--rescue`, its evidence (top actions, positions,
-  game messages) goes to the LLM to diagnose and break the loop or abandon the goal; the third
-  verdict ends the run, and the strategy remembers the failed phase.
-- **Exact instances.** Options address NPCs by client index and objects/items by id + tile, so the
-  click lands on the entity the model chose, not the nearest one with that name.
-- **`keep` lists** stop drop/deposit options (including deposit-all) for tools the sub-goal
-  protects.
-- **Destination ranking is straight-line distance.** The web walker finds the real path, but the
-  "nearest" bank can be behind a toll gate or a river (e.g. Al Kharid from Lumbridge Swamp). Give
-  the planner a `destination` when it matters.
-- **Skill requirements are curated** (`src/kb/resources.ts`) for common trees, rocks and fishing
-  spots. Extend it for other skills.
-- **Wiki data** is CC BY-NC-SA 3.0. The OpenRS2 cache is Jagex's; keep `data/` local (it's
-  gitignored).

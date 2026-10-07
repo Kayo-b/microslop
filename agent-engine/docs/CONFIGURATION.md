@@ -23,7 +23,7 @@ Set `MICROBOT_PORT` / `MICROBOT_TOKEN_FILE` / `MICROBOT_RUN` in the shell or sys
 `.env`) when running a second character, otherwise both would share them.
 
 `microbot-campaign` / `microbot-run` environment: `MICROBOT_DIR` (checkout, default
-`~/projects/Microbot`; **set it to `~/projects/Microbot_`**), `MICROBOT_CAMPAIGN_HOURS` (default
+`~/projects/Microbot_`), `MICROBOT_CAMPAIGN_HOURS` (default
 3), `MICROBOT_CHARACTER`, `MICROBOT_KEEP_CLIENT=1`, `MICROBOT_SESSION_FILE`, `BOLT_CREDS`.
 `microbot-run-jar`: `CLIENT_HOME`, `AGENT_PORT`, `REBUILD=1`, `MICROBOT_DIR`.
 
