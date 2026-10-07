@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bestRecipe, HerblorePlanner } from '../src/goalplan/HerblorePlanner.ts';
+import { bestRecipe, HerblorePlanner, nextRecipe } from '../src/goalplan/HerblorePlanner.ts';
 import type { PlanStep } from '../src/planner/types.ts';
 import type { InventoryItem, Snapshot } from '../src/types.ts';
 import { item, snapshot } from './support/fixtures.ts';
@@ -15,6 +15,8 @@ const prices: Record<string, number> = {
   'Grimy ranarr weed': 5687, 'Ranarr weed': 5892, 'Ranarr potion (unf)': 6274,
 };
 const price = (n: string) => prices[n] ?? null;
+// Without ranarr in reach the best level-22 recipe is mixing; the training detour has its own test.
+const noRanarr = (n: string) => (/ranarr/i.test(n) ? null : price(n));
 const coins = (n: number) => item(0, 995, 'Coins', { quantity: n, stackable: true });
 const state = (level: number, items: InventoryItem[], extra: Partial<Snapshot> = {}) => {
   const s = snapshot({ inventory: { freeSlots: 28 - items.length, items }, ...extra });
@@ -35,6 +37,13 @@ test('herblore: the best recipe per hour for the level, from live prices', () =>
   const dearClean = (n: string) => (n === 'Harralander' ? 520 : price(n));
   assert.equal(bestRecipe(22, dearClean)?.id, 'unf:Harralander', 'clean herbs dear: clean the grimy ones first');
   assert.equal(bestRecipe(1, price), null, 'no recipe below Herblore 3');
+});
+
+test('herblore: trains by cleaning while a much better recipe is in reach, instead of mixing unfinished potions forever', () => {
+  assert.equal(nextRecipe(22, price, 150_000)?.id, 'clean:Harralander', 'ranarr unf (level 30) beats harralander unf: clean for XP');
+  assert.equal(nextRecipe(22, price, 5_000)?.id, 'mix:Harralander', 'too poor to buy a ranarr batch: keep earning');
+  assert.equal(nextRecipe(30, price, 150_000)?.id, 'mix:Ranarr weed', 'level reached: mix');
+  assert.equal(nextRecipe(5, price, 150_000)?.id, bestRecipe(5, price)?.id, 'no better recipe in reach: unchanged');
 });
 
 test('herblore: cleaning loop - buy grimy herbs, withdraw 27, clean, bank, sell', async () => {
@@ -60,7 +69,7 @@ test('herblore: cleaning loop - buy grimy herbs, withdraw 27, clean, bank, sell'
 });
 
 test('herblore: unfinished potions from grimy herbs - clean, then mix with vials, keeping the cleaned herbs at the bank', async () => {
-  const p = new HerblorePlanner({ price: (n) => (n === 'Harralander' ? 520 : price(n)) });
+  const p = new HerblorePlanner({ price: (n) => (n === 'Harralander' ? 520 : noRanarr(n)) });
   await next(p, bankOpen(22, [coins(100_000)], []));
   const ge = { grandExchange: { open: true } } as Partial<Snapshot>;
   // (100,000 - 500) / ceil((331 + 5) * 1.32) = 224.
@@ -80,7 +89,7 @@ test('herblore: unfinished potions from grimy herbs - clean, then mix with vials
 });
 
 test('herblore: a level gained mid-run switches the recipe at the next purchase, not mid-batch', async () => {
-  const p = new HerblorePlanner({ price });
+  const p = new HerblorePlanner({ price: noRanarr });
   await next(p, bankOpen(4, [coins(50_000)], []));
   const ge = { grandExchange: { open: true } } as Partial<Snapshot>;
   assert.equal((act(await next(p, state(4, [coins(50_000)], ge))) as { name: string }).name, 'Grimy guam leaf');
@@ -103,7 +112,7 @@ test('herblore: a purchase refused for coins (client guide price above the wiki)
 });
 
 test('herblore: a full inventory is processed as it is, never a withdraw into no free slot', async () => {
-  const p = new HerblorePlanner({ price });
+  const p = new HerblorePlanner({ price: noRanarr });
   const herbs = Array.from({ length: 14 }, (_, i) => item(1 + i, 255, 'Harralander'));
   const vials = Array.from({ length: 13 }, (_, i) => item(15 + i, 227, 'Vial of water'));
   const full = bankOpen(22, [coins(87_000), ...herbs, ...vials], [{ id: 255, name: 'Harralander', quantity: 157 }, { id: 227, name: 'Vial of water', quantity: 158 }]);
