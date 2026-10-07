@@ -43,6 +43,14 @@ Claude Sonnet.
 The Java side lives in `runelite-client/.../microbot/agentserver/` (`SnapshotHandler`, `ActHandler`,
 `GameMessageLog`); endpoints are documented in `docs/AGENT_SERVER.md`.
 
+## Docs
+
+Start with **[docs/QUICKSTART.md](docs/QUICKSTART.md)** (commands and important files). By theme:
+[data gathering](docs/DATA_GATHERING.md), [Laya fine-tuning](docs/LAYA_FINETUNING.md),
+[running agents](docs/RUNNING_AGENTS.md), [configuration](docs/CONFIGURATION.md),
+[two characters](docs/TWO_CHARACTERS.md), [campaigns](docs/CAMPAIGN.md),
+[strategies](docs/STRATEGY.md), [plans](docs/PLANS.md), [prerequisites](docs/PREREQUISITES.md).
+
 ## Setup
 
 Requirements: Node 24+, JDK 17 for Gradle (`mise install java@temurin-17`), a Microbot build with
