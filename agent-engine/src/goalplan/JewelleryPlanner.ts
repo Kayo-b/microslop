@@ -14,7 +14,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { BuyScale } from './buyScale.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, nearGrandExchange, SAFE_CARRY } from './SellPlanner.ts';
 
 /** A tile inside the bank (the booths themselves cannot be stood on). */
 export const EDGEVILLE_BANK = { name: 'Edgeville bank', point: { x: 3094, y: 3492, plane: 0 } };
@@ -157,6 +157,7 @@ export class JewelleryPlanner implements Planner {
     const scale = this.scale.update(ctx.reports.at(-1));
     const have = (n: string) => count(n, false) + count(n, true) + banked(n);
     const mouldOwned = r ? have(r.mould) > 0 : true;
+    const stocked = !!r && Math.min(...inputs.map(have)) >= Math.min(MIN_BUY, r.perTrip);
 
     // The make menu: pick the product when the bars and gems are still there.
     if (s.production.open && s.production.interface === 'make') {
@@ -202,11 +203,15 @@ export class JewelleryPlanner implements Planner {
           if (stack && amount > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount }, reason: `withdraw ${name}` };
         }
       }
+      // Bank the coins once the trip is withdrawn: nothing is walked to the furnace with them.
+      const coinsHeld = s.inventory.items.find((i) => i.name === 'Coins');
+      if (stocked && coinsHeld && coins > SAFE_CARRY) return { kind: 'act', action: { op: 'bank_deposit', itemId: coinsHeld.id, amount: 'all' }, reason: 'bank the coins before walking' };
       if (!inputs.some((n) => count(n, false) > 0)) {
         const product = s.bank.items.find((b) => products.includes(b.name) && !inputs.includes(b.name));
         if (product) return { kind: 'act', action: { op: 'bank_withdraw', itemId: product.id, amount: 'all', noted: true }, reason: `withdraw the ${product.name} as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-        if (coinStack && coinStack.quantity > coins) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy bars and gems' };
+        // Coins come out only at the Grand Exchange bank, where they are spent on the spot.
+        if (coinStack && coinStack.quantity > coins && !stocked && nearGrandExchange(s)) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy bars and gems' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }
@@ -227,6 +232,9 @@ export class JewelleryPlanner implements Planner {
       return step('open the Grand Exchange to sell', ['Grand Exchange Clerk'], ['Exchange'], { geOpen: true }, 300, products, { destination: GRAND_EXCHANGE });
     }
     const stockBanked = (inputs.length > 0 && inputs.every((n) => banked(n) > 0)) || products.some((n) => banked(n) > 0 && !inputs.includes(n));
+    if (stocked && coins > SAFE_CARRY && nearGrandExchange(s)) {
+      return step('open the Grand Exchange bank to bank the coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [], { destination: GRAND_EXCHANGE_BANK });
+    }
     if (others.length || bank === null || stockBanked) {
       return step('open the Edgeville bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [...inputs, ...(r ? [r.mould] : [])], { destination: EDGEVILLE_BANK });
     }

@@ -66,3 +66,12 @@ test('jewellery: finished pieces go to the bank, then out as notes to sell', asy
   assert.deepEqual(act(await next(p, bankOpen(8, [coins(100), mould, ...made], []))), { op: 'bank_deposit', itemId: 1654, amount: 'all' });
   assert.deepEqual(act(await next(p, bankOpen(8, [coins(100), mould], [{ id: 1654, name: 'Gold necklace', quantity: 26 }]))), { op: 'bank_withdraw', itemId: 1654, amount: 'all', noted: true });
 });
+
+test('jewellery: coins above the safe amount are banked once the trip is withdrawn, never taken out away from the GE', async () => {
+  const p = new JewelleryPlanner({ price });
+  const bars = Array.from({ length: 12 }, (_, i) => item(1 + i, 2357, 'Gold bar'));
+  const inv = [coins(50000), ...bars, item(20, 1592, 'Ring mould')];
+  const s = bankOpen(5, inv, [{ id: 995, name: 'Coins', quantity: 90000 }]);
+  assert.deepEqual(act(await next(p, s)), { op: 'bank_deposit', itemId: 995, amount: 'all' });
+  assert.equal(act(await next(p, bankOpen(5, [...bars, item(20, 1592, 'Ring mould')], [{ id: 995, name: 'Coins', quantity: 90000 }])))?.op, 'bank_close');
+});

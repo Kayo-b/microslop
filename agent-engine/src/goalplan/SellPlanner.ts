@@ -70,3 +70,13 @@ export class SellPlanner implements Planner {
 
 /** Coins carried. */
 export const carriedCoins = (s: Snapshot) => s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
+
+/** Coins above this are banked before walking anywhere (a PK or a misclick would cost the stack). */
+export const SAFE_CARRY = 10_000;
+
+/** True within a short walk of the Grand Exchange bank: coins are only taken out of the bank here. */
+export function nearGrandExchange(s: Snapshot, radius = 30): boolean {
+  const p = s.player?.position;
+  const b = GRAND_EXCHANGE_BANK.point;
+  return !!p && p.plane === b.plane && Math.abs(p.x - b.x) <= radius && Math.abs(p.y - b.y) <= radius;
+}

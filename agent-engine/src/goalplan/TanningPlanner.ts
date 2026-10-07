@@ -16,7 +16,7 @@ import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { BuyScale } from './buyScale.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, nearGrandExchange, SAFE_CARRY } from './SellPlanner.ts';
 
 /** A tile inside the bank (the booths themselves cannot be stood on). */
 export const AL_KHARID_BANK = { name: 'Al Kharid bank', point: { x: 3270, y: 3166, plane: 0 } };
@@ -122,18 +122,23 @@ export class TanningPlanner implements Planner {
       const hidesLeft = h.hides > 0 || s.bank.items.some((b) => b.name === HIDE);
       const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !(i.name === HIDE && !i.noted) && !(i.name === LEATHER && i.noted && !hidesLeft));
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
+      // Coins are banked before any walk; the tanning fees (1 gp a hide) are taken back out below.
+      const coinsHeld = s.inventory.items.find((i) => i.name === 'Coins');
+      if (coinsHeld && h.coins > SAFE_CARRY && (hidesAnywhere > 0 || !nearGrandExchange(s))) {
+        return { kind: 'act', action: { op: 'bank_deposit', itemId: coinsHeld.id, amount: 'all' }, reason: 'bank the coins before walking' };
+      }
       const hideStack = s.bank.items.find((b) => b.name === HIDE);
       if (h.hides === 0 && hideStack) {
         // Tanning costs 1 gp a hide; coins live in the inventory.
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-        if (h.coins < 27 && coinStack) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins for the tanning fees' };
+        if (h.coins < 27 && coinStack) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 200 }, reason: 'withdraw coins for the tanning fees' };
         return { kind: 'act', action: { op: 'bank_withdraw', itemId: hideStack.id, amount: Math.min(hideStack.quantity, s.inventory.freeSlots) }, reason: 'withdraw cowhides to tan' };
       }
       const leatherStack = s.bank.items.find((b) => b.name === LEATHER);
       if (h.hides === 0 && leatherStack) return { kind: 'act', action: { op: 'bank_withdraw', itemId: leatherStack.id, amount: 'all', noted: true }, reason: 'withdraw the leather as notes to sell' };
       // Coins for the next purchase, when most of them are banked.
       const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-      if (h.hides === 0 && coinStack && coinStack.quantity > h.coins) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy cowhides' };
+      if (h.hides === 0 && coinStack && coinStack.quantity > h.coins && nearGrandExchange(s)) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy cowhides' };
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }
 
@@ -142,6 +147,9 @@ export class TanningPlanner implements Planner {
         destination: ELLIS,
         avoid: ['Tanning rack'],
       });
+    }
+    if (h.coins > SAFE_CARRY && nearGrandExchange(s) && (h.hideNotes > 0 || h.leather > 0)) {
+      return step('open the Grand Exchange bank to bank the coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, { destination: GRAND_EXCHANGE_BANK });
     }
     if (h.leather > 0 || h.hideNotes > 0) {
       return step('open the Al Kharid bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 400, { destination: AL_KHARID_BANK });
