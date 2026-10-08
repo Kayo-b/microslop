@@ -392,7 +392,7 @@ async function run(): Promise<void> {
     planner = new StringingPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
     goal = 'string amulets with wool at the Grand Exchange and sell them';
   } else if (values.task === 'smith-progression') {
-    const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
+    const metal = (['bronze', 'iron', 'steel', 'mithril', 'adamant'] as const).find((m) => m === values.metal);
     planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
     goal = `smithing progression to level ${values['until-level'] ?? 33}${metal ? ` (${metal})` : ''}`;
   } else if (values.task) {

@@ -238,6 +238,7 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       if (e.preset === 'smelt-steel') return new SmeltingPlanner();
       if (e.preset === 'craft-jewellery') return deps.gePrice ? new JewelleryPlanner({ price: deps.gePrice }) : null;
       if (e.preset === 'herblore') return deps.gePrice ? new HerblorePlanner({ price: deps.gePrice }) : null;
+      if (e.preset === 'herblore-train') return deps.gePrice ? new HerblorePlanner({ price: deps.gePrice, train: true }) : null;
       return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {
       let area = e.area;

@@ -45,6 +45,10 @@ export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = 
   'chop-willows': { activity: 'chop willow trees for willow logs', targets: ['Willow tree'], action: 'Chop down', product: 'Willow logs', skill: 'Woodcutting', keep: ['axe'] },
   'mine-copper': { activity: 'mine copper ore', targets: ['Copper rocks'], action: 'Mine', product: 'Copper ore', skill: 'Mining', keep: ['pickaxe'] },
   'mine-tin': { activity: 'mine tin ore', targets: ['Tin rocks'], action: 'Mine', product: 'Tin ore', skill: 'Mining', keep: ['pickaxe'] },
+  // The Dwarven Mine (Falador trapdoor) has coal, mithril and adamantite close together.
+  'mine-coal': { activity: 'mine coal', targets: ['Coal rocks'], action: 'Mine', product: 'Coal', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine coal', point: { x: 3017, y: 9720, plane: 0 } } },
+  'mine-mithril': { activity: 'mine mithril ore', targets: ['Mithril rocks'], action: 'Mine', product: 'Mithril ore', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine mithril', point: { x: 3033, y: 9719, plane: 0 } } },
+  'mine-adamant': { activity: 'mine adamantite ore', targets: ['Adamantite rocks'], action: 'Mine', product: 'Adamantite ore', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine adamantite', point: { x: 3037, y: 9716, plane: 0 } } },
   'mine-iron': { activity: 'mine iron ore', targets: ['Iron rocks'], action: 'Mine', product: 'Iron ore', skill: 'Mining', keep: ['pickaxe'] },
 };
 
