@@ -55,6 +55,10 @@ something cheaper; a setup phase that fails goes to skip memory (`data/strategy-
 The check runs again after setup, and when the activity gives up for a fixable reason (out of
 arrows, no coins, no tool).
 
+## Selling: value check
+
+The sell phase compares a quick Grand Exchange sale (70% of guide, minus 2% tax) with a general store (40% of store value) and skips the Grand Exchange for items a store pays more for. `make-agent price ITEMS="Cowhide"` shows the numbers for any item. NPC selling itself is not automated: the agent server has no shop-sell action yet.
+
 ## Nothing valuable is dropped
 
 `src/engine/drops.ts`: the engine offers `Drop` only for worthless items (burnt food, ashes, bronze/iron junk, empty jugs/pots/vials, bones, goblin mail). Gather presets that used to drop their product (`bank: false`) bank it instead, and the LLM planner prompt tells Claude to free space by banking, never by dropping.

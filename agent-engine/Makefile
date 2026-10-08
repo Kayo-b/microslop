@@ -61,7 +61,7 @@ gold-rebuild-char2: ## merge feat/agent-engine into feat/char2 and rebuild its s
 
 ##@ agent - Look at and run the agent by hand (CHAR=1|2 picks the character)
 ##? vars: CHAR=1  PLAN=<plan json>  OPTION=<gold option>  TASK=<preset>  STRATEGY=level|money|gold|quest  HOURS=  ARGS=<extra flags>
-.PHONY: agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
+.PHONY: agent-price agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
 agent-state: ## live client state (position, login)
 	cd $(CHAR_ROOT) && $(CHAR_ENV) ./microbot-cli state
 agent-skills: ## skill levels
@@ -72,6 +72,9 @@ agent-strategy: ## account profile + next phase per strategy (dry run)
 	$(AGENT) strategy
 agent-flow: ## gold option tree for the logged-in account
 	$(AGENT) flow gold
+agent-price: ## sell value check: Grand Exchange net vs shop vs alch; ITEMS="Harralander potion (unf)"
+	$(call need,ITEMS,Cowhide)
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/price-check.ts $(foreach i,$(ITEMS),"$(i)")
 agent-presets: ## list scripted tasks
 	$(AGENT) presets
 agent-prereq: ## what a task needs first; TASK=kill-barbarians
