@@ -69,6 +69,7 @@ before trading coins between them. More in [docs/FILES.md](docs/FILES.md).
 | write a new campaign JSON, tune flags, env vars, LLM backends | [docs/CONFIGURATION.md](docs/CONFIGURATION.md), [docs/CAMPAIGN.md](docs/CAMPAIGN.md) |
 | schedule daily sessions with a systemd timer; read monitor alerts | [docs/CAMPAIGN.md](docs/CAMPAIGN.md) |
 | create a new gold option / strategy / flow | [docs/STRATEGY.md](docs/STRATEGY.md) (catalog, `FlowPlanner`, planners) |
+| just run things: `make-gold`, `make-agent`, `make-data-gathering`, `make-laya` (each has `--help`) | [docs/COMMANDS.md](docs/COMMANDS.md) |
 | level the skills that unlock the wiki's best gold methods; commands to start those plans and the gold loops | [docs/GOLD_PLANS.md](docs/GOLD_PLANS.md) |
 | build a plan toward a stat build; set up tools, gear, food first | [docs/PLANS.md](docs/PLANS.md), [docs/PREREQUISITES.md](docs/PREREQUISITES.md) |
 | run both characters in depth, move coins between them | [docs/TWO_CHARACTERS.md](docs/TWO_CHARACTERS.md) |

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Thin front end for agent-engine/Makefile. One file, several names (symlinks, see `make dev-install-cli`):
+#   make-gold  make-agent  make-data-gathering  make-laya  make-dev
+#   make-agent --help            list the commands of that group
+#   make-agent strategy CHAR=2   run `make agent-strategy CHAR=2`
+set -euo pipefail
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+ENGINE="$(cd "$(dirname "$self")/../.." && pwd)"
+case "$(basename "${BASH_SOURCE[0]}")" in
+  make-gold) group=gold ;;
+  make-agent) group=agent ;;
+  make-data-gathering) group=data ;;
+  make-laya) group=laya ;;
+  make-dev) group=dev ;;
+  *) group="" ;;
+esac
+if [[ $# -eq 0 || "$1" == -h || "$1" == --help || "$1" == help ]]; then
+  exec make --no-print-directory -C "$ENGINE" help GROUP="$group"
+fi
+target="$1"; shift
+exec make --no-print-directory -C "$ENGINE" "${group:+$group-}$target" "$@"
