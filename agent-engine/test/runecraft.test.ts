@@ -83,3 +83,11 @@ test('runecraft: coins are withdrawn in a capped amount and banked again before 
   const first = await planner().next(ctx(walking));
   assert.ok(first.kind === 'subgoal' && /bank the coins/.test(first.subgoal.text), 'banks before leaving the Grand Exchange');
 });
+
+test('runecraft: arriving at the ruins while still moving waits instead of re-issuing the walk', async () => {
+  const snap = at(3050, 3444, { inventory: inv(['Rune essence', 27], ['Body talisman']) });
+  snap.skills = snap.skills.map((k) => (k.name === 'Runecraft' ? { ...k, level: 20 } : k)) as never;
+  snap.player!.moving = true;
+  const step = await planner().next(ctx(snap));
+  assert.equal(step.kind, 'wait');
+});

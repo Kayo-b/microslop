@@ -124,6 +124,11 @@ export class RunecraftPlanner implements Planner {
         return step('open the Grand Exchange bank to bank the coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, { destination: GRAND_EXCHANGE_BANK });
       }
       const r = altar.ruins;
+      // Close but still walking: wait for it to stop. Re-issuing the walk sub-goal (done on arrival at
+      // its radius) spun until the agent gave up on "a sub-goal that is already complete".
+      if (me && me.plane === r.point.plane && dist(me, r.point) <= 5 && s.player?.moving) {
+        return { kind: 'wait', reason: 'arriving at the ruins', until: { near: { ...r.point, radius: 1 } }, maxSeconds: 8 };
+      }
       if (me && me.plane === r.point.plane && dist(me, r.point) <= 5 && !s.player?.moving) {
         // Using the talisman on the ruins is what opens them; the plain "Enter" click did nothing live.
         const tal = s.inventory.items.find((i) => i.name === altar.talisman && !i.noted)!;
