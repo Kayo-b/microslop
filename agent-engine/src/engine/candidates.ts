@@ -22,6 +22,8 @@ export interface CandidateOptions {
   maxPerGroup?: number;
   /** Include unreachable entities (labelled as such). Default false. */
   includeUnreachable?: boolean;
+  /** Destinations the account may walk to; free accounts pass the free-to-play map. Others are never offered. */
+  allowDestination?: (p: WorldPoint) => boolean;
 }
 
 export interface CandidateSet {
@@ -193,7 +195,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
   out.push(...namedItemPairs(s, goal));
   out.push(...equipmentCandidates(s, goal));
 
-  const destinations = goal.noTravel ? [] : kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5) : goalDestination(s, goal);
+  const destinations = goal.noTravel ? [] : kb ? buildDestinations(s, kb, goal, opts.maxDestinations ?? 5, opts.allowDestination) : goalDestination(s, goal, opts.allowDestination);
   const avoid = new Set((goal.avoid ?? []).map(lc));
   const avoidAt = goal.avoidAt ?? [];
   const at = (c: Candidate): WorldPoint | null => {
@@ -547,14 +549,14 @@ function rank(cands: Candidate[], goal: SubGoal, max: number): Candidate[] {
   return [...cands].sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, max);
 }
 
-function goalDestination(s: Snapshot, goal: SubGoal): Destination[] {
+function goalDestination(s: Snapshot, goal: SubGoal, allow?: (p: WorldPoint) => boolean): Destination[] {
   const me = s.player?.position;
   const p = goal.destination?.point;
-  if (!me || !p) return [];
+  if (!me || !p || (allow && !allow(p))) return [];
   return [{ id: 'dest:goal', label: `${goal.destination?.name ?? 'Sub-goal destination'} (${tileDistance(me, p)} tiles)`, to: p, distance: tileDistance(me, p) }];
 }
 
-export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal, max: number): Destination[] {
+export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal, max: number, allow?: (p: WorldPoint) => boolean): Destination[] {
   const me = s.player?.position;
   if (!me) return [];
   const out: Destination[] = [];
@@ -563,6 +565,7 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
   const blocked = [...s.objects, ...s.npcs].filter((e) => !e.reachable).map((e) => e.position);
   const isBlocked = (to: WorldPoint) => blocked.some((b) => b.x === to.x && b.y === to.y && b.plane === to.plane);
   const push = (label: string, to: WorldPoint) => {
+    if (allow && !allow(to)) return; // e.g. a members area on a free account
     const distance = tileDistance(me, to);
     if (distance <= 2) return; // already there
     if (out.some((d) => tileDistance(d.to, to) <= 3)) return;

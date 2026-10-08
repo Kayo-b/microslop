@@ -15,6 +15,7 @@ import { freshProfile, roadmap } from './goalplan/compiler.ts';
 import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
 import { chooseOption, FlowPlanner, FLOWS, flowStatus } from './flows/FlowPlanner.ts';
 import { transferCoins } from './tools/transfer.ts';
+import { inF2pArea } from './strategy/f2p.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -562,6 +563,8 @@ async function run(): Promise<void> {
     logger,
     runId: logger.runId,
     minConfidence: values['min-confidence'] ? Number(values['min-confidence']) : undefined,
+    // Free accounts are never sent to members-only areas (a walk there never arrives).
+    candidates: (await isMember().catch(() => true)) ? undefined : { allowDestination: inF2pArea },
   });
   const agent = new Agent({
     backend,

@@ -546,3 +546,13 @@ test('a slot-addressed action that finds its slot changed re-decides instead of 
     assert.equal(r.kind, 'waiting', `step ${i}: ${r.kind}`);
   }
 });
+
+test('candidates: a free account is never offered a destination outside the free-to-play map', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const { inF2pArea } = await import('../src/strategy/f2p.ts');
+  const kb = { findPlaces: () => [{ name: 'Karamja Volcano', point: { x: 2829, y: 9580, plane: 0 } }], nearestBanks: () => [], nearestObjects: () => [], nearestSpawns: () => [] } as never;
+  const s = snapshot();
+  const goal = { text: 'mine gold ore', destination: { name: 'Varrock gold mine' } } as never;
+  assert.equal(buildDestinations(s, kb, goal, 5).length, 1, 'members accounts are offered it');
+  assert.equal(buildDestinations(s, kb, goal, 5, inF2pArea).length, 0, 'free accounts are not');
+});
