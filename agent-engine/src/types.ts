@@ -129,7 +129,7 @@ export interface BankState {
 export interface ProductionState {
   open: boolean;
   /** "make": skill-multi chatbox (cook, smelt, fletch); "smithing": the anvil grid; "tanning": the tanner's leathers. */
-  interface?: 'make' | 'smithing' | 'tanning' | null;
+  interface?: 'make' | 'smithing' | 'tanning' | 'jewellery' | null;
   options: string[];
 }
 
