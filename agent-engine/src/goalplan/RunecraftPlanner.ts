@@ -28,11 +28,12 @@ export interface Altar {
   ruins: { id: number; point: WorldPoint };
 }
 
-/** Free-to-play altars close to the Grand Exchange, best XP per trip first as the level allows. Ruins ids/tiles are from the KB. */
+/** Free-to-play altars, the best the level allows first (Air from level 1: mind runes need level 2). Ruins ids/tiles are from the KB. */
 export const ALTARS: Altar[] = [
   { name: 'Body', level: 20, talisman: 'Body talisman', ruins: { id: 34818, point: { x: 3052, y: 3444, plane: 0 } } },
   { name: 'Earth', level: 9, talisman: 'Earth talisman', ruins: { id: 34816, point: { x: 3305, y: 3473, plane: 0 } } },
   { name: 'Mind', level: 2, talisman: 'Mind talisman', ruins: { id: 34814, point: { x: 2981, y: 3513, plane: 0 } } },
+  { name: 'Air', level: 1, talisman: 'Air talisman', ruins: { id: 34813, point: { x: 2984, y: 3291, plane: 0 } } },
 ];
 
 export function altarFor(level: number): Altar {
@@ -94,7 +95,9 @@ export class RunecraftPlanner implements Planner {
     if (essence > 0 && talisman > 0 && !s.bank.open && !s.grandExchange?.open) {
       const r = altar.ruins;
       if (me && me.plane === r.point.plane && dist(me, r.point) <= 5 && !s.player?.moving) {
-        return { kind: 'act', action: { op: 'interact', target: { kind: 'object', id: r.id, x: r.point.x, y: r.point.y, plane: r.point.plane }, action: 'Enter' }, reason: `enter the ${altar.name.toLowerCase()} altar ruins` };
+        // Using the talisman on the ruins is what opens them; the plain "Enter" click did nothing live.
+        const tal = s.inventory.items.find((i) => i.name === altar.talisman && !i.noted)!;
+        return { kind: 'act', action: { op: 'use_item_on', itemSlot: tal.slot, target: { kind: 'object', id: r.id, x: r.point.x, y: r.point.y, plane: r.point.plane } }, reason: `use the ${altar.talisman} on the ${altar.name.toLowerCase()} altar ruins` };
       }
       return step(`walk to the ${altar.name.toLowerCase()} altar ruins`, [], [], { near: { ...r.point, radius: 4 } }, 150, { destination: { name: `${altar.name} altar ruins`, point: r.point } });
     }

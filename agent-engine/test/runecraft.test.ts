@@ -16,7 +16,8 @@ const at = (x: number, y: number, extra: Partial<Snapshot> = {}): Snapshot => {
 const inv = (...names: [string, number?][]) => ({ freeSlots: 28 - names.length, items: names.map(([n, q], i) => item(i, 1000 + i, n, { quantity: q ?? 1 })) });
 
 test('runecraft: the altar follows the level (mind, then earth, then body) and names its own ruins', () => {
-  assert.equal(altarFor(1).name, 'Mind');
+  assert.equal(altarFor(1).name, 'Air', 'mind runes need level 2');
+  assert.equal(altarFor(2).name, 'Mind');
   assert.equal(altarFor(9).name, 'Earth');
   assert.equal(altarFor(20).name, 'Body');
   assert.equal(altarFor(5).ruins.point.x, 2981, 'the mind ruins, not whichever mysterious ruins is nearest');
@@ -27,7 +28,7 @@ test('runecraft: ready -> walk to the right ruins, enter with a direct action, c
   assert.ok(far.kind === 'subgoal' && far.subgoal.destination?.point?.x === 2981 && far.subgoal.doneWhen?.near);
 
   const near = await planner().next(ctx(at(2982, 3510, { inventory: inv(['Rune essence', 27], ['Mind talisman']) })));
-  assert.ok(near.kind === 'act' && near.action.op === 'interact' && near.action.action === 'Enter' && near.action.target.kind === 'object' && near.action.target.id === 34814);
+  assert.ok(near.kind === 'act' && near.action.op === 'use_item_on' && near.action.target.kind === 'object' && near.action.target.id === 34814, 'the talisman is used on the ruins');
 
   const altar = { id: 34764, name: 'Altar', type: 'GAME', actions: ['Craft-rune'], position: { x: 2584, y: 4837, plane: 0 }, distance: 4, reachable: true, pathDistance: 4 };
   const inside = await planner().next(ctx(at(2583, 4832, { inventory: inv(['Rune essence', 27], ['Mind talisman']), objects: [altar] })));
