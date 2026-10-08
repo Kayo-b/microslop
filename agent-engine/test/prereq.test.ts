@@ -126,3 +126,24 @@ test('prereq planner: an unseen bank is surveyed first', async () => {
   const step = await p.next({ goal: 'x', snapshot: snapshot(), kb: null, reports: [] });
   assert.ok(step.kind === 'subgoal' && /to see what the account owns/.test(step.subgoal.text));
 });
+
+test('loadout: every non-combat activity wants gear, softly; owned gear is wielded, banked upgrades fetched', async () => {
+  const quest = activityNeeds({ kind: 'quest', quest: "Cook's Assistant" })!;
+  assert.ok(quest.gear?.soft && quest.gear.slots.includes('weapon'));
+  assert.ok(activityNeeds({ kind: 'llm', goal: 'pickpocket men' })?.gear?.soft, 'llm phases get a loadout too');
+  assert.equal(activityNeeds({ kind: 'sell', items: ['Cowhide'] }), null, 'selling starts without a loadout');
+
+  // Soft: a poor account is neither blocked nor sent to earn coins for armour.
+  const poor = resolveSetup(quest, view({ counts: { Shrimps: 1 }, coins: 5 }), { shop, earnCoins: false });
+  assert.deepEqual(poor.blocked, []);
+  assert.deepEqual(ids(poor.steps), []);
+  // Affordable pieces are bought.
+  const rich = resolveSetup(quest, view({ counts: { Shrimps: 1 }, coins: 5000 }), { shop });
+  assert.ok(ids(rich.steps).includes('acquire:Bronze full helm'));
+
+  const { nextLoadoutStep } = await import('../src/prereq/loadout.ts');
+  const carried = snapshot({ inventory: { freeSlots: 26, items: [item(0, 1323, 'Iron scimitar')] } });
+  const wield = nextLoadoutStep(carried, [], null);
+  assert.ok(wield?.kind === 'subgoal' && /wield the Iron scimitar/.test(wield.subgoal.text));
+  assert.equal(nextLoadoutStep(snapshot(), [], null), null, 'nothing to wear: done');
+});
