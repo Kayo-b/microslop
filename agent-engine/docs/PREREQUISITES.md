@@ -63,6 +63,7 @@ The sell phase compares a quick Grand Exchange sale (70% of guide, minus 2% tax)
 
 `src/engine/drops.ts`: the engine offers `Drop` only for worthless items (burnt food, ashes, bronze/iron junk, empty jugs/pots/vials, bones, goblin mail). Gather presets that used to drop their product (`bank: false`) bank it instead, and the LLM planner prompt tells Claude to free space by banking, never by dropping.
 
-## Free accounts stay out of members areas
+## Free accounts stay out of members areas (quests and every walk)
 
 `src/strategy/f2p.ts` lists the free-to-play map (mainland, dungeons, Musa Point, Crandor, Corsair Cove, Camdozaal). A free account's quest run stops with `impossible` (and skip memory moves on) when Quest Helper's current step lies outside it, and the quest prompt tells the planner to stay in free areas. Quests the catalog does not know count as members quests. Members accounts are not restricted.
+The engine also drops every walk destination outside that map for free accounts (`allowDestination` in `src/engine/candidates.ts`), so a rescue proposing an unknown place such as "Varrock gold mine" (which resolved to Karamja Volcano) ends as "no options" instead of a long walk.
