@@ -9,7 +9,7 @@
  * the other tools). It only observes: findings go to data/watch/reviews.jsonl, the journal and, for
  * serious ones, a desktop notification. It never clicks.
  */
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -19,14 +19,19 @@ import { foldInventory } from '../engine/state.ts';
 import { createLlmClient } from '../llm/providers.ts';
 
 const { values } = parseArgs({
+  strict: false,
   options: {
     interval: { type: 'string', default: '180' },
     model: { type: 'string', default: process.env.WATCH_MODEL ?? 'claude-haiku-4-5-20251001' },
     char: { type: 'string', default: process.env.MICROBOT_CHARACTER_NO ?? '?' },
     once: { type: 'boolean', default: false },
     'no-notify': { type: 'boolean', default: false },
+    'no-act': { type: 'boolean', default: process.env.WATCH_ACT === '0' },
   },
 });
+
+export const ACTIONS = ['none', 'close_interfaces', 'cancel_walk', 'skip_activity'] as const;
+export type WatchAction = (typeof ACTIONS)[number];
 
 const ReviewSchema = z.object({
   status: z.enum(['ok', 'slow', 'stuck', 'wrong']).describe('ok: progressing as intended; slow: progressing badly; stuck: no progress or looping; wrong: doing something it should not (members area, dropping items, wrong target)'),
@@ -34,11 +39,12 @@ const ReviewSchema = z.object({
   diagnosis: z.string().describe('What is happening and why, in two or three sentences, naming the sub-goals and places involved'),
   suggestion: z.string().describe('The concrete fix: a manual action now, and the code change (planner, engine, catalog or prompt) that would prevent it'),
   lesson: z.string().describe('One reusable lesson for the agent, or empty'),
+  action: z.enum(ACTIONS).describe('What the watcher should do now: none (healthy or a fix needs code); close_interfaces (an open bank, shop or Grand Exchange window is in the way); cancel_walk (the walker is stalled or heading the wrong way); skip_activity (ends the current activity so the campaign starts the next one with a fresh planner: looping, wrong target, stuck for several reviews)'),
 });
 
 export type Review = z.infer<typeof ReviewSchema>;
 
-const SYSTEM = `You supervise an automated Old School RuneScape agent (planners + a fast click classifier) running one character. You see the last minutes of its log. Judge whether the run is healthy. Typical failures: loops (same action repeated), walking the wrong way or to members areas on a free account, opening and closing interfaces, dropping valuable items, planning to buy items from shops that do not sell them, using the wrong object of the same name, doing a slow LLM-driven loop that a script would do better, being logged out. Be specific: quote sub-goal texts and coordinates. If the run is fine, say ok with severity 0 and keep the other fields short.`;
+const SYSTEM = `You supervise an automated Old School RuneScape agent (planners + a fast click classifier) running one character. You see the last minutes of its log. Judge whether the run is healthy. Typical failures: loops (same action repeated), walking the wrong way or to members areas on a free account, opening and closing interfaces, dropping valuable items, planning to buy items from shops that do not sell them, using the wrong object of the same name, doing a slow LLM-driven loop that a script would do better, being logged out. Be specific: quote sub-goal texts and coordinates. If the run is fine, say ok with severity 0, action none, and keep the other fields short. Choose the gentlest action that unsticks the run; use skip_activity only when the same problem has lasted more than one review or the agent is clearly doing something harmful.`;
 
 function newest(dir: string): string | null {
   if (!existsSync(dir)) return null;
@@ -102,13 +108,60 @@ export async function gather(root = process.cwd(), backend = new MicrobotBackend
   return { run, activity, text, fingerprint: `${run}|${last?.time ?? ''}|${campaign.at(-1) ?? ''}` };
 }
 
+/** Gate for acting on a review: only stuck/wrong at severity 2+, soft actions first, skipping an activity only on a repeat and not more often than every 8 minutes. */
+export function decideIntervention(review: Pick<Review, 'status' | 'severity' | 'action'>, consecutiveBad: number, msSinceSkip: number): WatchAction {
+  if ((review.status !== 'stuck' && review.status !== 'wrong') || review.severity < 2 || review.action === 'none') return 'none';
+  if (review.action === 'skip_activity') {
+    if (consecutiveBad < 2) return 'close_interfaces';
+    return msSinceSkip >= 8 * 60_000 ? 'skip_activity' : 'none';
+  }
+  return review.action;
+}
+
+/** Ends the running `agent run` of this checkout; the campaign records it and starts the next activity. */
+export function skipActivity(root = process.cwd()): string {
+  for (const pid of readdirSync('/proc').filter((n) => /^\d+$/.test(n))) {
+    try {
+      const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ');
+      if (!/src\/cli\.ts run /.test(cmd)) continue;
+      if (readlinkSync(`/proc/${pid}/cwd`) !== root) continue;
+      process.kill(Number(pid), 'SIGTERM');
+      return `ended the running agent (pid ${pid})`;
+    } catch {
+      // Gone or not ours.
+    }
+  }
+  return 'no running agent process found';
+}
+
+async function intervene(action: WatchAction, backend: MicrobotBackend): Promise<string> {
+  switch (action) {
+    case 'none':
+      return '';
+    case 'close_interfaces': {
+      const results: string[] = [];
+      for (const op of ['bank_close', 'shop_close', 'ge_close'] as const) {
+        const r = await backend.act({ op }).catch((e) => ({ success: false, reason: String(e) }));
+        results.push(`${op}:${r.success ? 'ok' : (r as { reason?: string }).reason ?? 'failed'}`);
+      }
+      return results.join(' ');
+    }
+    case 'cancel_walk': {
+      const r = await backend.act({ op: 'walk_cancel' }).catch((e) => ({ success: false, reason: String(e) }));
+      return `walk_cancel:${r.success ? 'ok' : (r as { reason?: string }).reason ?? 'failed'}`;
+    }
+    case 'skip_activity':
+      return skipActivity();
+  }
+}
+
 function notify(title: string, body: string): void {
   execFile('notify-send', ['-a', 'Microbot', '-u', 'critical', title, body.slice(0, 300)], () => undefined);
 }
 
 async function main(): Promise<void> {
   const interval = Number(values.interval) * 1000;
-  const llm = createLlmClient({ provider: 'claude-code', model: values.model });
+  const llm = createLlmClient({ provider: 'claude-code', model: String(values.model) });
   if (!llm) throw new Error('no LLM available for the watcher');
   const outDir = path.join(process.cwd(), 'data', 'watch');
   mkdirSync(outDir, { recursive: true });
@@ -116,6 +169,8 @@ async function main(): Promise<void> {
   console.log(`[watch] char ${values.char}, ${llm.name}, every ${values.interval}s -> ${outFile}`);
   let prev = '';
   let unchanged = 0;
+  let consecutiveBad = 0;
+  let lastSkip = 0;
   for (;;) {
     try {
       const ev = await gather();
@@ -123,17 +178,29 @@ async function main(): Promise<void> {
       prev = ev.fingerprint;
       let review: Review;
       if (unchanged >= 3) {
-        review = { status: 'stuck', severity: 3, diagnosis: `No new agent step or campaign line for ${Math.round((unchanged * interval) / 60000)} minutes (run ${ev.run}).`, suggestion: 'The agent process may be hung or the client closed: check the unit and the client window.', lesson: '' };
+        review = { status: 'stuck', severity: 3, diagnosis: `No new agent step or campaign line for ${Math.round((unchanged * interval) / 60000)} minutes (run ${ev.run}).`, suggestion: 'The agent process may be hung or the client closed: check the unit and the client window.', lesson: '', action: 'skip_activity' };
       } else if (unchanged >= 1) {
-        review = { status: 'ok', severity: 0, diagnosis: 'no new activity since the last review', suggestion: '', lesson: '' };
+        review = { status: 'ok', severity: 0, diagnosis: 'no new activity since the last review', suggestion: '', lesson: '', action: 'none' };
       } else {
         const res = await llm.structured({ system: SYSTEM, user: ev.text, schema: ReviewSchema, schemaName: 'review', effort: 'medium', maxTokens: 700 });
-        review = res.kind === 'ok' ? res.value : { status: 'ok', severity: 0, diagnosis: `reviewer refused: ${res.reason}`, suggestion: '', lesson: '' };
+        review = res.kind === 'ok' ? res.value : { status: 'ok', severity: 0, diagnosis: `reviewer refused: ${res.reason}`, suggestion: '', lesson: '', action: 'none' };
       }
-      const record = { ts: new Date().toISOString(), char: values.char, run: ev.run, activity: ev.activity.replace(/^.*?▶\s*/, '').slice(0, 160), model: llm.name, ...review, evidence: unchanged === 0 ? ev.text.slice(-6000) : undefined };
+      consecutiveBad = (review.status === 'stuck' || review.status === 'wrong') && review.severity >= 2 ? consecutiveBad + 1 : 0;
+      // A silent agent (no steps for ~9 minutes) is hung already: no need to wait for a repeat.
+      const chosen = unchanged >= 3 ? (Date.now() - lastSkip >= 8 * 60_000 ? 'skip_activity' : 'none') : decideIntervention(review, consecutiveBad, Date.now() - lastSkip);
+      let acted = '';
+      if (chosen !== 'none' && !values['no-act']) {
+        acted = `${chosen}: ${await intervene(chosen, new MicrobotBackend())}`;
+        if (chosen === 'skip_activity') {
+          lastSkip = Date.now();
+          consecutiveBad = 0;
+        }
+        console.log(`[watch] acted -> ${acted}`);
+      }
+      const record = { acted: acted || undefined, ts: new Date().toISOString(), char: values.char, run: ev.run, activity: ev.activity.replace(/^.*?▶\s*/, '').slice(0, 160), model: llm.name, ...review, evidence: unchanged === 0 ? ev.text.slice(-6000) : undefined };
       appendFileSync(outFile, `${JSON.stringify(record)}\n`);
       console.log(`[watch] ${record.ts.slice(11, 19)} ${review.status} (sev ${review.severity}) ${review.diagnosis}${review.suggestion ? ` => ${review.suggestion}` : ''}`);
-      if (review.severity >= 2 && !values['no-notify']) notify(`Microbot char ${values.char}: ${review.status}`, review.diagnosis);
+      if (review.severity >= 2 && !values['no-notify']) notify(`Microbot char ${values.char}: ${review.status}${acted ? ` (${acted.slice(0, 40)})` : ''}`, review.diagnosis);
     } catch (e) {
       console.error(`[watch] review failed: ${e instanceof Error ? e.message : e}`);
     }
