@@ -23,7 +23,7 @@ and `data/rescues.jsonl` list what keeps needing rescue.
 ## The run watcher
 
 `src/campaign/watcher.ts` (started by `gold-run start`, so by every `make-gold` / `make-level` job; `NO_WATCH=1`
-skips it) asks Sonnet (`WATCH_MODEL`, default `claude-sonnet-5-5`) every `WATCH_INTERVAL` seconds (180) whether the run is
+skips it) asks Haiku (`WATCH_MODEL`, default `claude-haiku-4-5-20251001`; `claude-sonnet-5-5` reviews more carefully) every `WATCH_INTERVAL` seconds (180) whether the run is
 healthy, from the last 30 agent steps, the campaign log, the live snapshot and recent rescues. Output: the journal of
 `watch-char1|2`, `data/watch/reviews.jsonl` (with the evidence) and a desktop notification at severity 2+. It never
 clicks. `make-agent watch-last CHAR=2` shows the latest reviews; read `reviews.jsonl` when planning the next fixes.
