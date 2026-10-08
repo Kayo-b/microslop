@@ -4,7 +4,7 @@ import path from 'node:path';
 import { BankMemory, buildProfile, type Account } from '../src/strategy/account.ts';
 import { choosePhase, StrategyPlanner } from '../src/strategy/StrategyPlanner.ts';
 import { QuestPlanner } from '../src/strategy/QuestPlanner.ts';
-import type { Planner, PlannerContext } from '../src/planner/types.ts';
+import type { Planner, PlannerContext, PlanStep } from '../src/planner/types.ts';
 import type { Snapshot } from '../src/types.ts';
 import { item, snapshot } from './support/fixtures.ts';
 
@@ -237,4 +237,20 @@ test('quest planner rests to 80% HP before a step when low and without food', as
   s.player = { ...s.player!, hp: { current: 8, max: 33 } } as never;
   const step = await new QuestPlanner('Imp Catcher', api, llm, 1).next({ goal: 'g', snapshot: s, kb: null, reports: [] });
   assert.ok(step.kind === 'wait' && step.until.hpAtLeast === 0.8);
+});
+
+test('quest planner: a free account stops at a quest step in a members area; members continue', async () => {
+  const { inF2pArea } = await import('../src/strategy/f2p.ts');
+  assert.ok(inF2pArea({ x: 3210, y: 3215, plane: 0 }), 'Lumbridge');
+  assert.ok(inF2pArea({ x: 3110, y: 9570, plane: 0 }), 'Wizards Tower basement');
+  assert.ok(!inF2pArea({ x: 2650, y: 3300, plane: 0 }), 'Ardougne is members-only');
+  assert.ok(!inF2pArea({ x: 2590, y: 2975, plane: 0 }), 'Feldip Hills is members-only');
+
+  const llmStep: PlanStep = { kind: 'subgoal', subgoal: { text: 'go', targets: [], actions: [] } };
+  const llm: Planner = { name: 'llm', next: async () => llmStep };
+  const api = { questHelperStatus: async () => ({ selected: true, questName: 'Some Quest', stepText: 'Talk to the guide', stepPoint: { x: 2650, y: 3300, plane: 0 } }), questHelperStart: async () => undefined };
+  const free = await new QuestPlanner('Some Quest', api, llm, 1, async () => false).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.ok(free.kind === 'impossible' && /members-only area/.test(free.reason));
+  const paid = await new QuestPlanner('Some Quest', api, llm, 1, async () => true).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.equal(paid.kind, 'subgoal');
 });

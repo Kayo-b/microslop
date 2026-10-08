@@ -346,6 +346,7 @@ function report(): void {
 async function run(): Promise<void> {
   const kb = openKb();
   const backend = new MicrobotBackend();
+  const isMember = async () => (await readAccount(backend)).members;
   // Prerequisites flow (src/prereq/): an activity's tools, gear, food, coins and levels are met
   // before it starts; setups longer than --setup-budget minutes (default 30) skip the activity.
   const withPrereq = (exec: Execution, inner: Planner, o: { bank?: BankMemory; skip?: Set<string>; onFailed?: (id: string) => void } = {}): Planner => {
@@ -462,7 +463,7 @@ async function run(): Promise<void> {
         bank: planBank,
         prereq: (phase, inner) => withPrereq(phase.exec, inner, { bank: planBank, skip: failing, onFailed: (id) => recordFailure(paths.failures, id) }),
         llmPlanner: () => (tiers ? new LlmPlanner({ llm: guarded(1, 'plan') }) : null),
-        questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') })) : null),
+        questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') }), undefined, isMember) : null),
         tutorialPlanner: () => new TutorialPlanner(backend),
         onPhase: (phase, why) => {
           console.log(`[plan] ${phase.text} [${phase.exec.kind}]: ${why}`);
@@ -489,7 +490,7 @@ async function run(): Promise<void> {
       gePrice,
       prereq: (phase, inner) => withPrereq(phase.exec, inner, { skip: failing, onFailed: (id) => recordFailure(skipFile, id) }),
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
-      questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
+      questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! }), undefined, isMember) : null),
       onPhase: (phase, why) => {
         console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`);
         if (why.startsWith('gave up')) strategyFailed?.(phase.id);
@@ -513,7 +514,7 @@ async function run(): Promise<void> {
       bank,
       gePrice,
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
-      questPlanner: (q: string) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
+      questPlanner: (q: string) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! }), undefined, isMember) : null),
     };
     planner = new FlowPlanner(flow, values.option, {
       view: async (ctx) => ({ profile: buildProfile(await readAccount(backend), ctx.snapshot, bank), counts: prereqCounts(ctx.snapshot, bank) }),

@@ -25,6 +25,7 @@ lvl = $(if $(FG),$(AGENT) run $(2) $(LLM) $(ARGS),$(AGENTJOB) --char $(CHAR) --n
 LLM ?= --llm claude-code --rescue-model haiku --rescue
 WHO ?= both
 GOLDRUN := $(ENGINE)/scripts/linux/gold-run
+comma := ,
 need = $(if $($(1)),,$(error $(1) is required, e.g. make $@ $(1)=$(2)))
 
 .DEFAULT_GOAL := help

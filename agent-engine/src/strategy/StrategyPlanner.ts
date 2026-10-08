@@ -174,7 +174,8 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     };
   }
 
-  const named = goal.quest ? QUESTS.find((q) => q.name.toLowerCase() === goal.quest!.toLowerCase()) ?? { name: goal.quest, members: false, reward: '' } : undefined;
+  // A quest the catalog does not know counts as members content: a free account must not wander into it.
+  const named = goal.quest ? QUESTS.find((q) => q.name.toLowerCase() === goal.quest!.toLowerCase()) ?? { name: goal.quest, members: true, reward: '' } : undefined;
   const candidates = named ? [named] : QUESTS;
   for (const q of candidates) {
     if (p.account.quests.get(q.name) === 'FINISHED') {
