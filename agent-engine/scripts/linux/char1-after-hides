@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Waits until character 1's tanning stock is used up (no cowhides carried or banked), then switches it
+# from the gold campaign to the crafting-levels plan, and back to the gold campaign when the plan ends.
+#   char1-after-hides [plan.json] [campaign.json]
+# Run it detached:  systemd-run --user --unit=char1-switch scripts/linux/char1-after-hides
+set -uo pipefail
+ENGINE="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+PLAN="${1:-plans/char1-crafting-levels.json}"
+CAMPAIGN="${2:-data/campaign/char1-crafting.json}"
+UNIT=microbot-jev-data
+TOKEN="$HOME/.runelite/.agent-token"
+log() { echo "[char1-switch] $(date '+%F %T') $*"; }
+
+hides() {
+  python3 - "$ENGINE/data/bank-seen.json" <<'PY'
+import json, subprocess, sys, urllib.request
+banked = 0
+try:
+    banked = dict(json.load(open(sys.argv[1]))["items"]).get("Cowhide", 0)
+except Exception:
+    pass
+carried = 0
+try:
+    req = urllib.request.Request("http://127.0.0.1:8081/inventory", headers={"X-Agent-Token": open(sys.argv[2] if len(sys.argv) > 2 else __import__("os").path.expanduser("~/.runelite/.agent-token")).read().strip()})
+    carried = sum(i["quantity"] for i in json.load(urllib.request.urlopen(req, timeout=5))["items"] if i["name"] == "Cowhide")
+except Exception:
+    carried = -1
+print(banked, carried)
+PY
+}
+
+log "waiting for the cowhide stock to run out"
+quiet=0
+while :; do
+  systemctl --user is-active --quiet "$UNIT" || { log "$UNIT is not running; nothing to switch"; exit 0; }
+  read -r banked carried < <(hides)
+  if [[ "$banked" == 0 && "$carried" == 0 ]]; then quiet=$((quiet + 1)); else quiet=0; fi
+  ((quiet >= 3)) && break
+  sleep 45
+done
+log "no cowhides left: switching to $PLAN"
+"$ENGINE/scripts/linux/gold-run" stop 1
+for _ in $(seq 40); do systemctl --user is-active --quiet "$UNIT" || break; sleep 3; done
+systemctl --user reset-failed "$UNIT" 2>/dev/null
+"$ENGINE/scripts/linux/agent-job" --char 1 --name char1-crafting-levels -- --plan "$PLAN" || { log "could not start the plan job"; exit 1; }
+sleep 60
+while systemctl --user is-active --quiet "$UNIT"; do sleep 60; done
+log "plan job ended: back to $CAMPAIGN"
+systemctl --user reset-failed "$UNIT" 2>/dev/null
+CHAR1_CONFIG="$CAMPAIGN" "$ENGINE/scripts/linux/gold-run" start 1
