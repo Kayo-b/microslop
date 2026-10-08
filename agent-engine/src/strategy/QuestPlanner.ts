@@ -7,6 +7,7 @@
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { WorldPoint } from '../types.ts';
 import { foodSupply } from '../kb/resources.ts';
+import { inF2pArea } from './f2p.ts';
 
 export interface QuestHelperApi {
   questHelperStatus(): Promise<{ selected: boolean; questName?: string; completed?: boolean; stepText?: string | string[]; stepPoint?: WorldPoint }>;
@@ -23,9 +24,12 @@ export class QuestPlanner implements Planner {
   private readonly api: QuestHelperApi;
   private readonly llm: Planner;
   private readonly pollMs: number;
+  /** Whether the account is a member; free accounts never go to members-only areas. */
+  private readonly members: () => Promise<boolean>;
 
-  constructor(quest: string, api: QuestHelperApi, llm: Planner, pollMs = 600) {
+  constructor(quest: string, api: QuestHelperApi, llm: Planner, pollMs = 600, members: () => Promise<boolean> = async () => true) {
     this.pollMs = pollMs;
+    this.members = members;
     this.quest = quest;
     this.api = api;
     this.llm = llm;
@@ -54,11 +58,15 @@ export class QuestPlanner implements Planner {
     if (status.completed) return { kind: 'complete', reason: `${this.quest} completed` };
     if (!status.stepText?.length) return { kind: 'impossible', reason: `Quest Helper has no current step for ${this.quest}` };
     const at = status.stepPoint;
+    if (at && !inF2pArea(at) && !(await this.members())) {
+      return { kind: 'impossible', reason: `${this.quest}: the current step is at (${at.x}, ${at.y}, floor ${at.plane}), a members-only area, and this is a free account` };
+    }
     const goal = [
       `Complete the quest "${this.quest}".`,
       `Quest Helper's current step: ${status.stepText}`,
       ...(at ? [`The step takes place at (${at.x}, ${at.y}, floor ${at.plane}). To travel there, set the destination name to exactly "${STEP_PLACE}".`] : []),
       'Plan the next sub-goal toward this step only (gather the listed items, travel, talk to the named NPC, pick the dialogue options it names).',
+      ...((await this.members()) ? [] : ['This is a FREE-TO-PLAY account on a free world: never enter members-only areas, use members-only items or transport.']),
       `The player carries ${coins(ctx)} coins. Prefer shops and gathering over the Grand Exchange (it costs the guide price +30%); if an item is unaffordable, get it another way or earn coins first.`,
       ...(foodSupply(ctx.snapshot.inventory.items).count < 5
         ? ['The player carries little or no food. If this step means fighting anything, first withdraw cooked food (e.g. Shrimps) from the nearest bank, or buy some.']
