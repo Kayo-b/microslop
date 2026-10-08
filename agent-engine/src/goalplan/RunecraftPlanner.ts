@@ -26,15 +26,34 @@ export interface Altar {
   level: number;
   talisman: string;
   ruins: { id: number; point: WorldPoint };
+  /** Inside: the altar and the exit portal (ids and tiles from the KB); the altar can be farther than the snapshot's object radius. */
+  altar: { id: number; point: WorldPoint };
+  portal: { id: number; point: WorldPoint };
 }
 
 /** Free-to-play altars, the best the level allows first (Air from level 1: mind runes need level 2). Ruins ids/tiles are from the KB. */
 export const ALTARS: Altar[] = [
-  { name: 'Body', level: 20, talisman: 'Body talisman', ruins: { id: 34818, point: { x: 3052, y: 3444, plane: 0 } } },
-  { name: 'Earth', level: 9, talisman: 'Earth talisman', ruins: { id: 34816, point: { x: 3305, y: 3473, plane: 0 } } },
-  { name: 'Mind', level: 2, talisman: 'Mind talisman', ruins: { id: 34814, point: { x: 2981, y: 3513, plane: 0 } } },
-  { name: 'Air', level: 1, talisman: 'Air talisman', ruins: { id: 34813, point: { x: 2984, y: 3291, plane: 0 } } },
+  { name: 'Body', level: 20, talisman: 'Body talisman', ruins: { id: 34818, point: { x: 3052, y: 3444, plane: 0 } }, altar: { id: 34765, point: { x: 2522, y: 4839, plane: 0 } }, portal: { id: 34753, point: { x: 2521, y: 4833, plane: 0 } } },
+  { name: 'Earth', level: 9, talisman: 'Earth talisman', ruins: { id: 34816, point: { x: 3305, y: 3473, plane: 0 } }, altar: { id: 34763, point: { x: 2657, y: 4840, plane: 0 } }, portal: { id: 34751, point: { x: 2655, y: 4829, plane: 0 } } },
+  { name: 'Mind', level: 2, talisman: 'Mind talisman', ruins: { id: 34814, point: { x: 2981, y: 3513, plane: 0 } }, altar: { id: 34761, point: { x: 2785, y: 4840, plane: 0 } }, portal: { id: 34749, point: { x: 2793, y: 4827, plane: 0 } } },
+  { name: 'Air', level: 1, talisman: 'Air talisman', ruins: { id: 34813, point: { x: 2984, y: 3291, plane: 0 } }, altar: { id: 34760, point: { x: 2843, y: 4833, plane: 0 } }, portal: { id: 34748, point: { x: 2841, y: 4828, plane: 0 } } },
 ];
+
+/** Every free-to-play altar interior (ids and tiles from the KB): whichever room the player stands in, whatever was planned. */
+const INTERIORS: { name: string; level: number; altar: { id: number; point: WorldPoint }; portal: { id: number; point: WorldPoint } }[] = [
+  { name: 'Air', level: 1, altar: { id: 34760, point: { x: 2843, y: 4833, plane: 0 } }, portal: { id: 34748, point: { x: 2841, y: 4828, plane: 0 } } },
+  { name: 'Mind', level: 2, altar: { id: 34761, point: { x: 2785, y: 4840, plane: 0 } }, portal: { id: 34749, point: { x: 2793, y: 4827, plane: 0 } } },
+  { name: 'Water', level: 5, altar: { id: 34762, point: { x: 2715, y: 4835, plane: 0 } }, portal: { id: 34750, point: { x: 2727, y: 4832, plane: 0 } } },
+  { name: 'Earth', level: 9, altar: { id: 34763, point: { x: 2657, y: 4840, plane: 0 } }, portal: { id: 34751, point: { x: 2655, y: 4829, plane: 0 } } },
+  { name: 'Fire', level: 14, altar: { id: 34764, point: { x: 2584, y: 4837, plane: 0 } }, portal: { id: 34752, point: { x: 2574, y: 4850, plane: 0 } } },
+  { name: 'Body', level: 20, altar: { id: 34765, point: { x: 2522, y: 4839, plane: 0 } }, portal: { id: 34753, point: { x: 2521, y: 4833, plane: 0 } } },
+];
+
+/** The interior the player is in: the altar nearest to them (the rooms are 60+ tiles apart). */
+export function interiorAt(p: WorldPoint) {
+  const best = INTERIORS.map((i) => ({ i, d: Math.max(Math.abs(i.altar.point.x - p.x), Math.abs(i.altar.point.y - p.y)) })).sort((a, b) => a.d - b.d)[0]!;
+  return best.d <= 45 ? best.i : null;
+}
 
 export function altarFor(level: number): Altar {
   return ALTARS.find((a) => level >= a.level) ?? ALTARS.at(-1)!;
@@ -78,17 +97,22 @@ export class RunecraftPlanner implements Planner {
     const essence = count(ESSENCE, false);
     const talisman = count(altar.talisman, false);
 
-    // Inside an altar (the interiors lie far below the map's y): craft, then leave.
+    // Inside an altar (the interiors lie far below the map's y). The altar and portal are clicked by
+    // id and tile from the table: a live run stood 17 tiles from the mind altar, which the snapshot's
+    // object radius did not list, and waited for it forever.
     if (me && me.y >= 4000) {
-      if (essence > 0) {
-        const a = s.objects.find((o) => o.name === 'Altar' && o.actions.includes('Craft-rune'));
-        if (!a) return { kind: 'wait', reason: 'waiting for the altar to load', until: { objectNear: { name: 'Altar', radius: 20 } }, maxSeconds: 6 };
-        if (s.player?.animating || s.player?.moving) return { kind: 'wait', reason: 'crafting', until: { lacksItem: ESSENCE }, maxSeconds: 8 };
-        return { kind: 'act', action: { op: 'interact', target: { kind: 'object', id: a.id, x: a.position.x, y: a.position.y, plane: a.position.plane }, action: 'Craft-rune' }, reason: `craft ${altar.name.toLowerCase()} runes` };
+      if (s.player?.animating) return { kind: 'wait', reason: 'crafting', until: { lacksItem: ESSENCE }, maxSeconds: 8 };
+      const obj = (name: string, action: string, table: { id: number; point: WorldPoint }) => {
+        const seen = s.objects.find((o) => o.name === name && o.actions.includes(action));
+        return seen ? { id: seen.id, x: seen.position.x, y: seen.position.y, plane: seen.position.plane } : { id: table.id, x: table.point.x, y: table.point.y, plane: table.point.plane };
+      };
+      // The room the player is in decides (a talisman bought for another altar still got them here);
+      // below its level they leave instead of clicking an altar that refuses.
+      const room = interiorAt(me) ?? altar;
+      if (essence > 0 && level >= room.level) {
+        return { kind: 'act', action: { op: 'interact', target: { kind: 'object', ...obj('Altar', 'Craft-rune', room.altar) }, action: 'Craft-rune' }, reason: `craft ${room.name.toLowerCase()} runes` };
       }
-      const portal = s.objects.find((o) => o.name === 'Portal' && o.actions.includes('Use'));
-      if (!portal) return { kind: 'wait', reason: 'waiting for the portal to load', until: { objectNear: { name: 'Portal', radius: 20 } }, maxSeconds: 6 };
-      return { kind: 'act', action: { op: 'interact', target: { kind: 'object', id: portal.id, x: portal.position.x, y: portal.position.y, plane: portal.position.plane }, action: 'Use' }, reason: 'leave the altar through the portal' };
+      return { kind: 'act', action: { op: 'interact', target: { kind: 'object', ...obj('Portal', 'Use', room.portal) }, action: 'Use' }, reason: essence > 0 ? `leave the ${room.name.toLowerCase()} altar (Runecraft ${room.level} needed)` : 'leave the altar through the portal' };
     }
 
     // Ready: essence and the talisman in hand.
