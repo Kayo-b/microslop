@@ -254,3 +254,13 @@ test('quest planner: a free account stops at a quest step in a members area; mem
   const paid = await new QuestPlanner('Some Quest', api, llm, 1, async () => true).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
   assert.equal(paid.kind, 'subgoal');
 });
+
+test('quest planner: a step that can be bought tells the planner to buy when coins are on hand', async () => {
+  let seen = '';
+  const llm: Planner = { name: 'llm', next: async (ctx) => ((seen = ctx.goal), { kind: 'subgoal', subgoal: { text: 'go', targets: [], actions: [] } }) };
+  const api = { questHelperStatus: async () => ({ selected: true, questName: 'Imp Catcher', stepText: ['Collect one of each bead. You can kill imps for these beads, or buy them on the Grand Exchange.'] }), questHelperStart: async () => undefined };
+  await new QuestPlanner('Imp Catcher', api, llm, 1, async () => true, () => 5_000_000).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.match(seen, /BUY them instead of grinding drops/);
+  await new QuestPlanner('Imp Catcher', api, llm, 1, async () => true, () => 0).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.doesNotMatch(seen, /BUY them/, 'broke: grind the drops');
+});
