@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { foldInventory } from '../engine/state.ts';
 import type { Planner, PlannerContext, PlanStep, SubGoalReport } from '../planner/types.ts';
 
-export type RescueTrigger = 'impossible' | 'stuck' | 'loop';
+export type RescueTrigger = 'impossible' | 'stuck' | 'loop' | 'blocked';
 
 export interface RescueRequest {
   trigger: RescueTrigger;
@@ -86,6 +86,9 @@ export interface RescuingPlannerOptions {
 /** Watchdog verdicts end a sub-goal with "stuck: loop..." or "stuck: no progress..."; engine failure streaks are "stuck: N failed...". */
 const WATCHDOG_STUCK = /^stuck: (loop|no progress)/;
 
+/** Consecutive engine-level failures ("no options", "stuck: N failed actions") before a rescue; the gold rotation gives up at 3. */
+const BLOCKED_STREAK = 2;
+
 /** Wraps a scripted planner; calls the rescuer when it gives up or the watchdog ends a sub-goal. */
 export class RescuingPlanner implements Planner {
   readonly name: string;
@@ -127,6 +130,21 @@ export class RescuingPlanner implements Planner {
     if (last && ctx.reports.length > this.handledReports && last.result === 'blocked' && WATCHDOG_STUCK.test(last.reason)) {
       this.handledReports = ctx.reports.length;
       const step = await this.tryRescue(ctx, { trigger: 'stuck', reason: last.reason, planner: this.inner.name });
+      if (step) return step;
+    }
+
+    // The same sub-goal failing again and again at engine level (nothing to interact with, failed
+    // actions) is neither a watchdog verdict nor a planner give-up, but the strategy layer would
+    // soon abandon the whole route over it.
+    const tail = ctx.reports.slice(-BLOCKED_STREAK);
+    if (
+      ctx.reports.length > this.handledReports &&
+      tail.length === BLOCKED_STREAK &&
+      tail.every((r) => r.result === 'blocked' && !WATCHDOG_STUCK.test(r.reason) && !r.reason.startsWith('loop:'))
+    ) {
+      this.handledReports = ctx.reports.length;
+      const evidence = tail.flatMap((r) => r.trail.slice(-2));
+      const step = await this.tryRescue(ctx, { trigger: 'blocked', reason: `${BLOCKED_STREAK} sub-goals in a row blocked; last: ${tail.at(-1)!.subgoal} -> ${tail.at(-1)!.reason}`, planner: this.inner.name, evidence });
       if (step) return step;
     }
 
