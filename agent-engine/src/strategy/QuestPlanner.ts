@@ -26,14 +26,23 @@ export class QuestPlanner implements Planner {
   private readonly pollMs: number;
   /** Whether the account is a member; free accounts never go to members-only areas. */
   private readonly members: () => Promise<boolean>;
+  /** Coins in the bank (last seen); lets a step that can be bought be bought. */
+  private readonly bankCoins: () => number;
 
-  constructor(quest: string, api: QuestHelperApi, llm: Planner, pollMs = 600, members: () => Promise<boolean> = async () => true) {
+  constructor(quest: string, api: QuestHelperApi, llm: Planner, pollMs = 600, members: () => Promise<boolean> = async () => true, bankCoins: () => number = () => 0) {
+    this.bankCoins = bankCoins;
     this.pollMs = pollMs;
     this.members = members;
     this.quest = quest;
     this.api = api;
     this.llm = llm;
     this.name = `quest:${quest}`;
+  }
+
+  /** A step that names the Grand Exchange or buying, and coins on hand to pay for it. */
+  private canBuy(stepText: string | string[] | undefined, ctx: PlannerContext): boolean {
+    const text = Array.isArray(stepText) ? stepText.join(' ') : (stepText ?? '');
+    return /grand exchange|\bbuy\b|\bpurchase\b/i.test(text) && coins(ctx) + this.bankCoins() >= 2000;
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
@@ -65,6 +74,9 @@ export class QuestPlanner implements Planner {
       `Complete the quest "${this.quest}".`,
       `Quest Helper's current step: ${status.stepText}`,
       ...(at ? [`The step takes place at (${at.x}, ${at.y}, floor ${at.plane}). To travel there, set the destination name to exactly "${STEP_PLACE}".`] : []),
+      ...(this.canBuy(status.stepText, ctx)
+        ? [`The step says the items can be bought. The player has ${coins(ctx)} coins carried and ${this.bankCoins()} in the bank: BUY them instead of grinding drops. If the carried coins are not enough, first withdraw coins at the nearest bank, then buy each item at the Grand Exchange (north-west Varrock).`]
+        : []),
       'Plan the next sub-goal toward this step only (gather the listed items, travel, talk to the named NPC, pick the dialogue options it names).',
       ...((await this.members()) ? [] : ['This is a FREE-TO-PLAY account on a free world: never enter members-only areas, use members-only items or transport.']),
       `The player carries ${coins(ctx)} coins. Prefer shops and gathering over the Grand Exchange (it costs the guide price +30%); if an item is unaffordable, get it another way or earn coins first.`,
