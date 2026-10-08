@@ -14,7 +14,7 @@ import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { BuyScale } from './buyScale.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, coinTopUp } from './SellPlanner.ts';
 
 const VIAL = 'Vial of water';
 /** Things beside the GE bank that a processing step never wants (the poll booth's menu blocks the bank). */
@@ -240,7 +240,7 @@ export class HerblorePlanner implements Planner {
         const product = s.bank.items.find((b) => products.includes(b.name) && !inputs.includes(b.name));
         if (product) return { kind: 'act', action: { op: 'bank_withdraw', itemId: product.id, amount: 'all', noted: true }, reason: `withdraw the ${product.name} as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-        if (coinStack && coinStack.quantity > coins) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy herbs' };
+        if (coinStack && coinTopUp(coinStack.quantity, coins, 500_000) > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: coinTopUp(coinStack.quantity, coins, 500_000) }, reason: 'withdraw coins to buy herbs' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }

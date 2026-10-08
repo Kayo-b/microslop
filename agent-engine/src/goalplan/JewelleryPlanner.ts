@@ -14,7 +14,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { BuyScale } from './buyScale.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK, nearGrandExchange, SAFE_CARRY } from './SellPlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, nearGrandExchange, SAFE_CARRY, coinTopUp } from './SellPlanner.ts';
 
 /** A tile inside the bank (the booths themselves cannot be stood on). */
 export const EDGEVILLE_BANK = { name: 'Edgeville bank', point: { x: 3094, y: 3492, plane: 0 } };
@@ -213,7 +213,7 @@ export class JewelleryPlanner implements Planner {
         if (product) return { kind: 'act', action: { op: 'bank_withdraw', itemId: product.id, amount: 'all', noted: true }, reason: `withdraw the ${product.name} as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
         // Coins come out only at the Grand Exchange bank, where they are spent on the spot.
-        if (coinStack && coinStack.quantity > coins && !stocked && nearGrandExchange(s)) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy bars and gems' };
+        if (coinStack && coinTopUp(coinStack.quantity, coins, 300_000) > 0 && !stocked && nearGrandExchange(s)) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: coinTopUp(coinStack.quantity, coins, 300_000) }, reason: 'withdraw coins to buy bars and gems' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }

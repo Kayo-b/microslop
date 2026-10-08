@@ -16,7 +16,7 @@ import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot, WorldPoint } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { BuyScale } from './buyScale.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { carriedCoins, coinTopUp, GRAND_EXCHANGE_BANK, nearGrandExchange, SAFE_CARRY } from './SellPlanner.ts';
 
 const ESSENCE = 'Rune essence';
 
@@ -68,6 +68,8 @@ export interface RunecraftOptions {
 const RESERVE = 300;
 const OVERBID = 1.32;
 const TRIP = 27;
+/** Coins taken out of the bank for one buying trip (essence stock for ~10 trips costs about 16k). */
+const ESSENCE_BUDGET = 60_000;
 
 function step(text: string, targets: string[], actions: string[], doneWhen: DoneCondition, maxSteps: number, extra: object = {}): PlanStep {
   return { kind: 'subgoal', subgoal: { text, targets, actions, doneWhen, isDone: compile(doneWhen), maxSteps, keep: ['Coins', ESSENCE, 'talisman'], ...extra } };
@@ -117,6 +119,10 @@ export class RunecraftPlanner implements Planner {
 
     // Ready: essence and the talisman in hand.
     if (essence > 0 && talisman > 0 && !s.bank.open && !s.grandExchange?.open) {
+      // Never walk to an altar with a fortune in the bag: bank it first.
+      if (carriedCoins(s) > SAFE_CARRY && nearGrandExchange(s)) {
+        return step('open the Grand Exchange bank to bank the coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, { destination: GRAND_EXCHANGE_BANK });
+      }
       const r = altar.ruins;
       if (me && me.plane === r.point.plane && dist(me, r.point) <= 5 && !s.player?.moving) {
         // Using the talisman on the ruins is what opens them; the plain "Enter" click did nothing live.
@@ -145,14 +151,22 @@ export class RunecraftPlanner implements Planner {
       const keepNames = [ESSENCE, altar.talisman, 'Coins'];
       const junk = s.inventory.items.find((i) => i.noted || !keepNames.includes(i.name));
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
+      // More than a trip's budget in the bag (left over from an older run): back to the bank first.
+      const heldCoins = s.inventory.items.find((i) => i.name === 'Coins');
+      if (heldCoins && coins > ESSENCE_BUDGET * 2) return { kind: 'act', action: { op: 'bank_deposit', itemId: heldCoins.id, amount: coins - ESSENCE_BUDGET }, reason: 'bank the coins above the buying budget' };
       const tal = s.bank.items.find((b) => b.name === altar.talisman);
       if (tal && talisman === 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: tal.id, amount: 1 }, reason: `withdraw the ${altar.talisman}` };
       const ess = s.bank.items.find((b) => b.name === ESSENCE);
       const want = Math.min(TRIP - essence, ess?.quantity ?? 0, s.inventory.freeSlots);
       if (ess && want > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: ess.id, amount: want }, reason: 'withdraw rune essence' };
       const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-      if (essence === 0 && banked(ESSENCE) < TRIP && coinStack && coinStack.quantity > coins) {
-        return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy essence' };
+      if (essence === 0 && banked(ESSENCE) < TRIP && coinStack && coinTopUp(coinStack.quantity, coins, ESSENCE_BUDGET) > 0) {
+        return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: coinTopUp(coinStack.quantity, coins, ESSENCE_BUDGET) }, reason: 'withdraw coins to buy essence' };
+      }
+      // Stocked: the coins go back before anyone walks to an altar with them.
+      const coinsHeld = s.inventory.items.find((i) => i.name === 'Coins');
+      if (coinsHeld && coins > SAFE_CARRY && ((essence > 0 && talisman > 0) || banked(ESSENCE) >= TRIP)) {
+        return { kind: 'act', action: { op: 'bank_deposit', itemId: coinsHeld.id, amount: coins - 2_000 }, reason: 'bank the coins before walking' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }
