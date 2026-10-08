@@ -70,6 +70,20 @@ rebuild2() {
     JAVA_HOME="$j17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$j17")
 }
 
+# A Sonnet reviewer watches each started run (findings: data/watch/reviews.jsonl, journal of watch-charN).
+# NO_WATCH=1 skips it; WATCH_MODEL / WATCH_INTERVAL override model and seconds between reviews.
+start_watch() {
+  local n="$1" engine="$2"
+  [[ "${NO_WATCH:-0}" == 1 ]] && return 0
+  systemctl --user stop "watch-char$n" 2>/dev/null; systemctl --user reset-failed "watch-char$n" 2>/dev/null
+  mapfile -t env < <(setenv_common)
+  local port=(); [[ "$n" == 2 ]] && port=(--setenv=MICROBOT_PORT=8082 --setenv=MICROBOT_TOKEN_FILE="$TOKEN2")
+  systemd-run --user --unit="watch-char$n" --working-directory="$engine" "${port[@]}" "${env[@]}" \
+    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists=../.env \
+    src/campaign/watcher.ts --char "$n" --interval "${WATCH_INTERVAL:-180}" ${WATCH_MODEL:+--model "$WATCH_MODEL"} >/dev/null 2>&1 \
+    || echo "gold-run: could not start the watcher for char $n" >&2
+}
+
 pick() { case "${1:-both}" in 1|char1) echo 1;; 2|char2) echo 2;; both|"") echo both;; *) die "which character? 1, 2 or both";; esac; }
 
 cmd="${1:-}"; shift || true
@@ -84,14 +98,14 @@ case "$cmd" in
         *) die "unknown option $1";;
       esac
     done
-    [[ "$which" != 2 ]] && { start1 "$hours" "${extra[@]}" || exit 1; }
-    [[ "$which" != 1 ]] && { start2 "$hours" "${extra[@]}" || exit 1; }
+    [[ "$which" != 2 ]] && { start1 "$hours" "${extra[@]}" || exit 1; start_watch 1 "$ENGINE1"; }
+    [[ "$which" != 1 ]] && { start2 "$hours" "${extra[@]}" || exit 1; start_watch 2 "$ENGINE2"; }
     echo "started for ${hours}h. Watch: gold-run status | gold-run logs 1|2"
     ;;
   stop)
     which="$(pick "${1:-both}")"
-    [[ "$which" != 2 ]] && systemctl --user stop "$UNIT1"
-    [[ "$which" != 1 ]] && systemctl --user stop "$UNIT2"
+    [[ "$which" != 2 ]] && { systemctl --user stop "$UNIT1"; systemctl --user stop watch-char1 2>/dev/null; }
+    [[ "$which" != 1 ]] && { systemctl --user stop "$UNIT2"; systemctl --user stop watch-char2 2>/dev/null; }
     ;;
   status)
     which="$(pick "${1:-both}")"
