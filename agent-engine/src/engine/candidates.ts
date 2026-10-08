@@ -581,6 +581,13 @@ export function buildDestinations(s: Snapshot, kb: KnowledgeBase, goal: SubGoal,
     // fall through to the nearest targets rather than offering nothing.
     if (out.length) return out;
   }
+  // Coordinates the planner wrote into the sub-goal text ("ruins around 2985,3292") beat the nearest
+  // object of the same name: a live run walked to the wrong "Mysterious ruins" that way.
+  const coords = !goal.destination?.point ? /(?:around|at|\()\s*\(?(\d{4}),\s*(\d{4})\)?/.exec(goal.text) : null;
+  if (coords) {
+    push('Coordinates in the sub-goal', { x: Number(coords[1]), y: Number(coords[2]), plane: me.plane });
+    if (out.length) return out;
+  }
   if (goal.destination?.name && !goal.destination.point) {
     for (const p of kb.findPlaces(goal.destination.name, me, 2)) push(p.name, p.point);
   }

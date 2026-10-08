@@ -556,3 +556,12 @@ test('candidates: a free account is never offered a destination outside the free
   assert.equal(buildDestinations(s, kb, goal, 5).length, 1, 'members accounts are offered it');
   assert.equal(buildDestinations(s, kb, goal, 5, inF2pArea).length, 0, 'free accounts are not');
 });
+
+test('candidates: coordinates written in the sub-goal text beat the nearest object of that name', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const kb = { findPlaces: () => [], nearestBanks: () => [], nearestObjects: () => [{ name: 'Mysterious ruins', point: { x: 3052, y: 3444, plane: 0 } }], nearestSpawns: () => [] } as never;
+  const goal = { text: 'Walk to the Air Altar mysterious ruins around 2985,3292', targets: ['Mysterious ruins'] } as never;
+  const d = buildDestinations(snapshot(), kb, goal, 5);
+  assert.equal(d.length, 1);
+  assert.deepEqual([d[0]!.to.x, d[0]!.to.y], [2985, 3292]);
+});
