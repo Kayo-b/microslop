@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Thin front end for agent-engine/Makefile. One file, several names (symlinks, see `make dev-install-cli`):
-#   make-gold  make-agent  make-data-gathering  make-laya  make-dev
+#   make-gold  make-agent  make-data-gathering  make-laya  make-level  make-dev
 #   make-agent --help            list the commands of that group
 #   make-agent strategy CHAR=2   run `make agent-strategy CHAR=2`
 set -euo pipefail
@@ -11,6 +11,7 @@ case "$(basename "${BASH_SOURCE[0]}")" in
   make-agent) group=agent ;;
   make-data-gathering) group=data ;;
   make-laya) group=laya ;;
+  make-level) group=level ;;
   make-dev) group=dev ;;
   *) group="" ;;
 esac

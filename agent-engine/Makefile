@@ -26,7 +26,7 @@ need = $(if $($(1)),,$(error $(1) is required, e.g. make $@ $(1)=$(2)))
 
 .DEFAULT_GOAL := help
 .PHONY: help
-help: ## show every command (GROUP=gold|agent|data|laya|dev for one group)
+help: ## show every command (GROUP=gold|agent|data|laya|level|dev for one group)
 	@echo "Usage: make <group>-<target> [VAR=value ...]   |   make-<group> <target> [VAR=value ...]"
 	@awk -v g="$(GROUP)" 'BEGIN{FS=":.*## "} /^##@ /{split($$0,h," "); cur=h[2]; title=substr($$0,index($$0,"- ")+2); show=(g==""||g==cur); if(show) printf "\n%s\n",title; next} /^##\? /{ if(show) print "  " substr($$0,5); next} show && /^[a-z0-9-]+:.*## /{t=$$1; if(g!="") sub("^" g "-","",t); printf "  %-24s %s\n",t,$$2}' $(MAKEFILE_LIST)
 	@echo
@@ -137,6 +137,68 @@ laya-kaggle-version: ## push train/eval as a new Kaggle dataset version
 laya-kernel-status: ## status of the fine-tune kernel
 	kaggle kernels status <kaggle-user>/laya-osrs-agent-finetune
 
+##@ level - Level skills, free or paid: the account's membership decides which methods are used
+##? vars: TO=<target level, default: finish the method bracket>  CHAR=1|2  ARGS=<extra flags>  (LLM flags as in agent-*)
+##? list what exists first:  make-level list [SKILL=Fishing] [MEMBERS=f2p]   (script = scripted, llm = LLM-driven)
+.PHONY: level-list level-lowest level-quests level-skill level-attack level-strength level-defence level-hitpoints level-melee level-ranged level-magic level-prayer level-slayer level-cooking level-woodcutting level-fishing level-firemaking level-crafting level-smithing level-mining level-herblore level-agility level-thieving level-fletching level-farming level-runecraft level-hunter level-construction
+level-list: ## training methods per skill from the catalog; SKILL=Agility MEMBERS=f2p to filter
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/training-list.ts $(SKILL) $(MEMBERS)
+level-lowest: ## train whichever trainable skill is lowest, bracket by bracket
+	$(AGENT) run --strategy level $(LLM) $(ARGS)
+level-quests: ## do the next unfinished quest in the recommended order
+	$(AGENT) run --strategy quest $(LLM) $(ARGS)
+level-skill: ## any skill by name; SKILL=Fishing TO=40
+	$(call need,SKILL,Fishing)
+	$(AGENT) run --strategy level --skill $(SKILL) $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-attack: ## Attack: melee, via the best melee spot for your stats
+	$(AGENT) run --strategy level --skill Attack $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-strength: ## Strength: melee
+	$(AGENT) run --strategy level --skill Strength $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-defence: ## Defence: melee
+	$(AGENT) run --strategy level --skill Defence $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-hitpoints: ## Hitpoints: melee
+	$(AGENT) run --strategy level --skill Hitpoints $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-melee: ## Melee: all melee stats (Attack/Strength/Defence/HP) at the best spot
+	$(AGENT) run --strategy level --skill Melee $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-ranged: ## Ranged: cows with a shortbow, then sand crabs (P2P)
+	$(AGENT) run --strategy level --skill Ranged $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-magic: ## Magic: Wind Strike on chickens, sand crabs (P2P), High Alchemy 55+
+	$(AGENT) run --strategy level --skill Magic $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-prayer: ## Prayer: bury bones from combat
+	$(AGENT) run --strategy level --skill Prayer $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-slayer: ## Slayer: tasks from the best master (P2P)
+	$(AGENT) run --strategy level --skill Slayer $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-cooking: ## Cooking: shrimps then trout/salmon on fires
+	$(AGENT) run --strategy level --skill Cooking $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-woodcutting: ## Woodcutting: trees, oaks, willows
+	$(AGENT) run --strategy level --skill Woodcutting $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-fishing: ## Fishing: shrimps, fly fishing, lobsters; barbarian fishing (P2P)
+	$(AGENT) run --strategy level --skill Fishing $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-firemaking: ## Firemaking: burn banked logs
+	$(AGENT) run --strategy level --skill Firemaking $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-crafting: ## Crafting: quests then jewellery for sale
+	$(AGENT) run --strategy level --skill Crafting $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-smithing: ## Smithing: bronze/iron gear, steel bars
+	$(AGENT) run --strategy level --skill Smithing $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-mining: ## Mining: copper/tin then iron
+	$(AGENT) run --strategy level --skill Mining $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-herblore: ## Herblore: clean herbs and mix potions (P2P)
+	$(AGENT) run --strategy level --skill Herblore $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-agility: ## Agility: rooftop courses (P2P)
+	$(AGENT) run --strategy level --skill Agility $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-thieving: ## Thieving: men, Al Kharid warriors, Ardougne knights (P2P)
+	$(AGENT) run --strategy level --skill Thieving $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-fletching: ## Fletching: arrow shafts, bows, stringing
+	$(AGENT) run --strategy level --skill Fletching $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-farming: ## Farming: herb and allotment runs (P2P)
+	$(AGENT) run --strategy level --skill Farming $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-runecraft: ## Runecraft: essence to runes, Guardians of the Rift (P2P)
+	$(AGENT) run --strategy level --skill Runecraft $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-hunter: ## Hunter: bird snares, butterflies (P2P)
+	$(AGENT) run --strategy level --skill Hunter $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+level-construction: ## Construction: Mahogany Homes (P2P)
+	$(AGENT) run --strategy level --skill Construction $(if $(TO),--level $(TO)) $(LLM) $(ARGS)
+
 ##@ dev - Build, test and set up
 .PHONY: dev-typecheck dev-test dev-install-cli dev-kb-build dev-live-jev
 dev-typecheck: ## tsc
@@ -147,7 +209,7 @@ dev-kb-build: ## rebuild the knowledge base sqlite
 	cd $(ENGINE) && npm run -s kb:build
 dev-live-jev: ## live Jev API test (needs JEV_API_KEY)
 	cd $(ENGINE) && npm run -s test:live-jev
-dev-install-cli: ## symlink make-gold/-agent/-data-gathering/-laya/-dev and the launchers into ~/.local/bin
+dev-install-cli: ## symlink make-gold/-agent/-data-gathering/-laya/-level/-dev and the launchers into ~/.local/bin
 	mkdir -p $(HOME)/.local/bin
-	for n in make-gold make-agent make-data-gathering make-laya make-dev; do ln -sf $(ENGINE)/scripts/linux/make-agent $(HOME)/.local/bin/$$n; done
+	for n in make-gold make-agent make-data-gathering make-laya make-level make-dev; do ln -sf $(ENGINE)/scripts/linux/make-agent $(HOME)/.local/bin/$$n; done
 	@echo installed; echo "try: make-agent --help"
