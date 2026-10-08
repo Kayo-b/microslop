@@ -65,3 +65,16 @@ holds the current level (`make-level list SKILL=Mining` shows them):
 
 Mithril and adamant smithing, the Dwarven Mine presets and the finished-potion recipes are new and
 untested on a live client.
+
+## Data-gathering rotations
+
+`data/campaign/gather-free.json` (27 activities) and `gather-members.json` (34) rotate through every skill
+(`--strategy level --skill X`, so each follows the character's brackets), the combat presets, the gold
+flows, money and quests, 20-35 minutes each with weighted random picks (never the same one twice in a row;
+failed ones sit out 3 rounds). The dataset is rebuilt every 4 activities.
+
+```bash
+make-data-gathering gather-free CHAR=1 HOURS=12      # free account
+make-data-gathering gather-members CHAR=2 HOURS=12   # members account
+make-data-gathering dataset-all                      # build one dataset from both characters' step logs
+```
