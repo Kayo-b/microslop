@@ -164,6 +164,8 @@ export class Agent {
         }
 
         const sg = plan.subgoal;
+        // A sub-goal in between means the world was acted on: repeated direct actions start counting again.
+        actRepeat = { key: '', sig: '', n: 0 };
         subgoals++;
         this.o.onEvent?.({ type: 'subgoal', subgoal: sg });
 

@@ -85,3 +85,14 @@ test('jewellery: a recipe picked before the bank was seen (poor on paper) is pic
   const seen = await next(p, bankOpen(5, [coins(100)], [{ id: 995, name: 'Coins', quantity: 800_000 }]));
   assert.notEqual(seen.kind, 'impossible', JSON.stringify(seen));
 });
+
+test('jewellery: carrying the recipe\'s bars without its mould goes to buy the mould, not round the bank forever', async () => {
+  // Crafting 11 picks a necklace (Necklace mould, not owned); 26 gold bars are carried; coins are in the bank.
+  const bars = Array.from({ length: 26 }, (_, i) => item(i + 1, 2357, 'Gold bar'));
+  const bankItems = [{ id: 995, name: 'Coins', quantity: 900_000 }, { id: 2357, name: 'Gold bar', quantity: 700 }];
+  const p = new JewelleryPlanner({ price });
+  const atBank = state(11, [coins(18), ...bars], { bank: { open: true, items: bankItems.map((b, slot) => ({ slot, ...b })) } } as Partial<Snapshot>);
+  assert.equal(act(await next(p, atBank))?.op, 'bank_close', 'nothing to take out');
+  const closed = await next(p, state(11, [coins(18), ...bars]));
+  assert.ok(closed.kind === 'subgoal' && !/open the Edgeville bank/.test(closed.subgoal.text), `went round the bank again: ${JSON.stringify(closed).slice(0, 200)}`);
+});

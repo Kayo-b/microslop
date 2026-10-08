@@ -237,7 +237,12 @@ export class JewelleryPlanner implements Planner {
     if (stocked && coins > SAFE_CARRY && nearGrandExchange(s)) {
       return step('open the Grand Exchange bank to bank the coins', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [], { destination: GRAND_EXCHANGE_BANK });
     }
-    if (others.length || bank === null || stockBanked) {
+    // Inputs and the mould in the bag are meant to stay: counting them as "something to bank" looped
+    // open bank -> nothing to do -> close bank for good when the recipe's mould was not owned yet.
+    const toBank = others.filter((i) => !(!i.noted && (inputs.includes(i.name) || i.name === r?.mould)));
+    const carryingTrip = !!r && inputs.every((n) => count(n, false) > 0);
+    const mouldBanked = !!r && count(r.mould, false) === 0 && banked(r.mould) > 0;
+    if (toBank.length || bank === null || (stockBanked && !carryingTrip) || (carryingTrip && mouldBanked)) {
       return step('open the Edgeville bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, [...inputs, ...(r ? [r.mould] : [])], { destination: EDGEVILLE_BANK });
     }
     if (!r) return { kind: 'impossible', reason: `no jewellery recipe pays at Crafting ${level} with current prices` };
