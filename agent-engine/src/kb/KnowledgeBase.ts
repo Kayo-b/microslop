@@ -103,6 +103,12 @@ export class KnowledgeBase {
     return this.stmt('SELECT id FROM items WHERE name = ? COLLATE NOCASE AND noted = 0').all(name).map((r) => r.id as number);
   }
 
+  /** Base store value (coins) of an item by name, or null when unknown. Shops pay a fraction of it; High Alchemy 60%. */
+  itemValue(name: string): number | null {
+    const r = this.stmt('SELECT cost FROM items WHERE name = ? COLLATE NOCASE AND noted = 0 AND cost IS NOT NULL LIMIT 1').get(name);
+    return r ? (r.cost as number) : null;
+  }
+
   npc(id: number): { id: number; name: string | null; combatLevel: number; actions: string[]; wikiPage: string | null } | null {
     const r = this.stmt('SELECT id, name, combat_level, actions, wiki_page FROM npcs WHERE id = ?').get(id);
     if (!r) return null;

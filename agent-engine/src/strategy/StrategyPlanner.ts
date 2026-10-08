@@ -274,7 +274,9 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
     }
     case 'sell': {
       const bank = deps.bank;
-      return new SellPlanner({ items: e.items, bank: () => (bank?.seenAt ? bank.items : null) });
+      const ge = deps.gePrice;
+      const kb = deps.kb;
+      return new SellPlanner({ items: e.items, bank: () => (bank?.seenAt ? bank.items : null), prices: ge && kb ? { guide: ge, store: (i) => kb.itemValue(i), log: (m) => console.log(m) } : undefined });
     }
   }
 }
