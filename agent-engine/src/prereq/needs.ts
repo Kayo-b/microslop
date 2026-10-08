@@ -43,13 +43,16 @@ export interface ActivityNeeds {
   /** Pieces of cooked food owned (carried + banked) before fighting. */
   food: number;
   /** Combat gear: these slots must hold usable gear for the style (bought when none is owned). */
-  gear?: { style: CombatStyle; slots: GearSlot[] };
+  gear?: { style: CombatStyle; slots: GearSlot[]; /** Loadout for non-combat work: buy only what the coins on hand cover, never block or earn coins for it. */ soft?: boolean };
   /** Ranged/magic kit; its coins come from `planKit`. */
   style?: Exclude<CombatStyle, 'melee'>;
   inputs: InputNeed[];
 }
 
 const TOOL_BUY: Record<string, string> = { axe: 'Bronze axe', pickaxe: 'Bronze pickaxe', 'small fishing net': 'Small fishing net', 'fly fishing rod': 'Fly fishing rod', hammer: 'Hammer', tinderbox: 'Tinderbox' };
+
+/** Executions that run before the character has (or sells) gear: no loadout check. */
+const NO_LOADOUT = new Set<Execution['kind']>(['tutorial', 'sell', 'acquire']);
 
 /** Food to have before a fight: none against monsters that cannot really hurt (chickens, cows). */
 const HARMLESS = /^(chicken|cow|cow calf|goblin|man|woman|rat|giant rat)$/i;
@@ -130,8 +133,11 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
       break;
     }
     default:
-      n = catalogReq ? empty(exec.kind) : null;
+      n = catalogReq || !NO_LOADOUT.has(exec.kind) ? empty(exec.kind) : null;
   }
+  // Every activity starts fully geared: a weapon and armour in every slot, worn (PrereqPlanner's
+  // equip step). Combat already needs it hard; elsewhere it is bought only when affordable.
+  if (n && !n.gear && !NO_LOADOUT.has(exec.kind)) n.gear = { style: 'melee', slots: requiredSlots('melee'), soft: true };
   if (n && catalogReq) n.req = mergeReq(n.req, catalogReq);
   return n;
 }

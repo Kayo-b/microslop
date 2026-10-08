@@ -103,7 +103,7 @@ const gearLevels = (v: AccountView) => {
 
 /** Every required gear slot holds something usable. */
 function gearMet(n: ActivityNeeds, v: AccountView): boolean {
-  if (!n.gear) return true;
+  if (!n.gear || n.gear.soft) return true;
   const levels = gearLevels(v);
   return n.gear.slots.every((slot) => [...v.counts.keys()].some((name) => fillsSlot(name, slot, n.gear!.style, levels)));
 }
@@ -175,7 +175,8 @@ export function resolveSetup(needs: ActivityNeeds, v: AccountView, o: ResolveOpt
       if ([...v.counts.keys()].some((n) => fillsSlot(n, slot, needs.gear!.style, levels))) continue;
       const options = gearCandidates(slot, levels).map((item) => acquire(item, 1, `${needs.name}: nothing to wear in the ${slot} slot`)).filter((b) => b !== null);
       const pick = options.sort((a, b) => a.value - b.value)[0];
-      if (pick) buys.push(pick);
+      // A soft loadout never blocks and never sends the character earning coins for armour.
+      if (pick && (!needs.gear.soft || pick.cost <= v.profile.coins - buys.reduce((n, b) => n + b.cost, 0))) buys.push(pick);
     }
   }
 

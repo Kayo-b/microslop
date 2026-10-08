@@ -269,7 +269,7 @@ const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker'];
 /** Look-alikes that are not banks: a poll booth ("Use") opens the poll menu, a deposit box only deposits. */
 export const NOT_BANKS = ['Poll booth', 'Bank Deposit Box', 'Bank deposit box', 'Deposit Box'];
 
-function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
+export function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
   return { text, targets, actions, doneWhen, isDone: compile(doneWhen), maxSteps, keep };
 }
 
