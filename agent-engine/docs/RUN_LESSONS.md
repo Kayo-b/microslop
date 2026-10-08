@@ -36,3 +36,11 @@ Each review also picks an action. Only `stuck`/`wrong` at severity 2+ act (`WATC
 checkout's `agent run`, so the campaign starts the next activity with a fresh planner) needs the same problem in two
 reviews in a row and at most one skip per 8 minutes. A run with no new steps for ~9 minutes is skipped without waiting.
 What it did is in `reviews.jsonl` (`acted`) and the journal. Fixes that need code stay as suggestions.
+
+### Watcher and rescue work together
+
+The watcher writes each review to `data/watch/latest.json`. The rescue (Haiku, `--rescue-model`) reads it between
+sub-goals: a stuck/wrong verdict at severity 2+, newer than the run's start and under 8 minutes old, triggers a
+`watcher` rescue straight away, with the review's diagnosis and suggested fix in the prompt. So the first stuck
+verdict goes to the rescue; the watcher's own actions come later: soft ones (close windows, cancel the walk) when the
+next review still says stuck, ending the activity at the third.

@@ -9,7 +9,7 @@
  * the other tools). It only observes: findings go to data/watch/reviews.jsonl, the journal and, for
  * serious ones, a desktop notification. It never clicks.
  */
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -110,9 +110,11 @@ export async function gather(root = process.cwd(), backend = new MicrobotBackend
 
 /** Gate for acting on a review: only stuck/wrong at severity 2+, soft actions first, skipping an activity only on a repeat and not more often than every 8 minutes. */
 export function decideIntervention(review: Pick<Review, 'status' | 'severity' | 'action'>, consecutiveBad: number, msSinceSkip: number): WatchAction {
-  if ((review.status !== 'stuck' && review.status !== 'wrong') || review.severity < 2 || review.action === 'none') return 'none';
+  // The first stuck verdict goes to the rescue (src/llm/watchFeed.ts); the watcher itself steps in
+  // only when the same problem is still there at the next review, and ends the activity at the third.
+  if ((review.status !== 'stuck' && review.status !== 'wrong') || review.severity < 2 || review.action === 'none' || consecutiveBad < 2) return 'none';
   if (review.action === 'skip_activity') {
-    if (consecutiveBad < 2) return 'close_interfaces';
+    if (consecutiveBad < 3) return 'close_interfaces';
     return msSinceSkip >= 8 * 60_000 ? 'skip_activity' : 'none';
   }
   return review.action;
@@ -199,6 +201,8 @@ async function main(): Promise<void> {
       }
       const record = { acted: acted || undefined, ts: new Date().toISOString(), char: values.char, run: ev.run, activity: ev.activity.replace(/^.*?▶\s*/, '').slice(0, 160), model: llm.name, ...review, evidence: unchanged === 0 ? ev.text.slice(-6000) : undefined };
       appendFileSync(outFile, `${JSON.stringify(record)}\n`);
+      // The rescue inside the run reads this (src/llm/watchFeed.ts).
+      writeFileSync(path.join(outDir, 'latest.json'), JSON.stringify(record));
       console.log(`[watch] ${record.ts.slice(11, 19)} ${review.status} (sev ${review.severity}) ${review.diagnosis}${review.suggestion ? ` => ${review.suggestion}` : ''}`);
       if (review.severity >= 2 && !values['no-notify']) notify(`Microbot char ${values.char}: ${review.status}${acted ? ` (${acted.slice(0, 40)})` : ''}`, review.diagnosis);
     } catch (e) {

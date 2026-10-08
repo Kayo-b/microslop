@@ -11,11 +11,12 @@ test('watcher: healthy or mild reviews never act', () => {
   assert.equal(decideIntervention(stuck('none'), 5, 1e9), 'none');
 });
 
-test('watcher: soft actions run at once; skipping the activity waits for a repeat and a cooldown', () => {
-  assert.equal(decideIntervention(stuck('close_interfaces'), 1, 0), 'close_interfaces');
-  assert.equal(decideIntervention(stuck('cancel_walk'), 1, 0), 'cancel_walk');
-  assert.equal(decideIntervention(stuck('skip_activity'), 1, 1e9), 'close_interfaces', 'first sighting: only the soft fix');
-  assert.equal(decideIntervention(stuck('skip_activity'), 2, 1e9), 'skip_activity');
-  assert.equal(decideIntervention(stuck('skip_activity'), 3, 60_000), 'none', 'just skipped one a minute ago');
-  assert.equal(decideIntervention({ status: 'wrong', severity: 2, action: 'skip_activity' }, 2, 1e9), 'skip_activity');
+test('watcher: the first stuck verdict is left to the rescue; the watcher acts on repeats, skipping last', () => {
+  assert.equal(decideIntervention(stuck('close_interfaces'), 1, 0), 'none', 'first review: the rescue gets it');
+  assert.equal(decideIntervention(stuck('close_interfaces'), 2, 0), 'close_interfaces');
+  assert.equal(decideIntervention(stuck('cancel_walk'), 2, 0), 'cancel_walk');
+  assert.equal(decideIntervention(stuck('skip_activity'), 2, 1e9), 'close_interfaces', 'second review: only the soft fix');
+  assert.equal(decideIntervention(stuck('skip_activity'), 3, 1e9), 'skip_activity');
+  assert.equal(decideIntervention(stuck('skip_activity'), 4, 60_000), 'none', 'just skipped one a minute ago');
+  assert.equal(decideIntervention({ status: 'wrong', severity: 2, action: 'skip_activity' }, 3, 1e9), 'skip_activity');
 });
