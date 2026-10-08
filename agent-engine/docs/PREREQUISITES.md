@@ -22,6 +22,7 @@ Derived from the activity definition, so new presets need no extra table:
 | consumables | feathers for fly fishing | owned count >= min |
 | gear | fights against monsters that hit back: weapon, head, body, legs, shield per style | each slot has usable gear owned |
 | loadout | every activity except tutorial, selling and buying | a weapon and head/body/legs/shield owned (bought when missing and affordable; never blocks or earns coins), then **worn**: carried gear is wielded, better banked gear fetched (`src/prereq/loadout.ts`, up to 8 steps before the activity) |
+| bank materials | quest and LLM activities | potions, herbs, ore, bars, logs, raw food and hides carried at the start are deposited first (`MATERIALS` in `src/engine/drops.ts`) |
 | food | `minFood`, or 5 for monsters that hit back | cooked food owned >= that |
 | ranged/magic kit | combat style | coins cover bow/staff + 100 arrows/casts (the kit planner buys them) |
 | inputs | cooking presets (raw fish) | banked |
@@ -53,3 +54,7 @@ activity ends `impossible` with the plan as the reason, so the campaign and stra
 something cheaper; a setup phase that fails goes to skip memory (`data/strategy-failures.json`).
 The check runs again after setup, and when the activity gives up for a fixable reason (out of
 arrows, no coins, no tool).
+
+## Nothing valuable is dropped
+
+`src/engine/drops.ts`: the engine offers `Drop` only for worthless items (burnt food, ashes, bronze/iron junk, empty jugs/pots/vials, bones, goblin mail). Gather presets that used to drop their product (`bank: false`) bank it instead, and the LLM planner prompt tells Claude to free space by banking, never by dropping.

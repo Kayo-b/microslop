@@ -145,7 +145,7 @@ export class PrereqPlanner implements Planner {
 
   /** Wears the best owned gear before the activity; a few steps at most, then the activity starts anyway. */
   private equip(ctx: PlannerContext): PlanStep | null {
-    const step = this.equipSteps < 8 && this.needs.gear ? nextLoadoutStep(ctx.snapshot, [...this.bank.items.keys()], this.d.kb ?? null) : null;
+    const step = this.equipSteps < 8 && (this.needs.gear || this.needs.bankMaterials) ? nextLoadoutStep(ctx.snapshot, [...this.bank.items.keys()], this.d.kb ?? null, { bankMaterials: this.needs.bankMaterials }) : null;
     if (step) {
       this.equipSteps++;
       this.log(`loadout: ${step.kind === 'subgoal' ? step.subgoal.text : step.kind}`);

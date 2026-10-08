@@ -47,6 +47,8 @@ export interface ActivityNeeds {
   /** Ranged/magic kit; its coins come from `planKit`. */
   style?: Exclude<CombatStyle, 'melee'>;
   inputs: InputNeed[];
+  /** Deposit carried materials (potions, herbs, ore, logs...) at the bank before the activity starts. */
+  bankMaterials?: boolean;
 }
 
 const TOOL_BUY: Record<string, string> = { axe: 'Bronze axe', pickaxe: 'Bronze pickaxe', 'small fishing net': 'Small fishing net', 'fly fishing rod': 'Fly fishing rod', hammer: 'Hammer', tinderbox: 'Tinderbox' };
@@ -137,6 +139,7 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
   }
   // Every activity starts fully geared: a weapon and armour in every slot, worn (PrereqPlanner's
   // equip step). Combat already needs it hard; elsewhere it is bought only when affordable.
+  if (n && (exec.kind === 'quest' || exec.kind === 'llm')) n.bankMaterials = true;
   if (n && !n.gear && !NO_LOADOUT.has(exec.kind)) n.gear = { style: 'melee', slots: requiredSlots('melee'), soft: true };
   if (n && catalogReq) n.req = mergeReq(n.req, catalogReq);
   return n;

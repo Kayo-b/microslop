@@ -5,6 +5,7 @@
  * The gathering template covers the classic loop: gather until full -> bank (or drop) -> repeat,
  * optionally until a skill level is reached.
  */
+import { isDroppable } from '../engine/drops.ts';
 import type { Snapshot, WorldPoint } from '../types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { FOOD_HEAL, foodSupply, RESOURCES } from '../kb/resources.ts';
@@ -334,7 +335,8 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
   }
 
   if (full && (hasProduct || junk.length)) {
-    if (task.bank) {
+    // Only worthless leftovers are ever dropped; everything else is banked.
+    if (task.bank || ![...(hasProduct ? [task.product] : junk)].every(isDroppable)) {
       return {
         kind: 'subgoal',
         subgoal: { ...goal('go to the nearest bank and open it', BANK_TARGETS, ['Bank'], { bankOpen: true }, 300, task.keep), avoid: NOT_BANKS },
