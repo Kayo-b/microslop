@@ -23,6 +23,9 @@ export interface CookTask {
 export const COOK_PRESETS: Record<string, CookTask> = {
   'cook-shrimps': { raw: 'Raw shrimps', batch: 25, trees: ['Tree', 'Dead tree', 'Evergreen tree', 'Oak tree'] },
   'cook-trout': { raw: 'Raw trout', batch: 25, trees: ['Tree', 'Dead tree', 'Evergreen tree', 'Oak tree'] },
+  'cook-tuna': { raw: 'Raw tuna', batch: 25, trees: ['Tree', 'Dead tree', 'Evergreen tree', 'Oak tree'] },
+  'cook-lobsters': { raw: 'Raw lobster', batch: 25, trees: ['Tree', 'Dead tree', 'Evergreen tree', 'Oak tree'] },
+  'cook-swordfish': { raw: 'Raw swordfish', batch: 25, trees: ['Tree', 'Dead tree', 'Evergreen tree', 'Oak tree'] },
 };
 
 const TOOLS = ['Bronze axe', 'Tinderbox'];

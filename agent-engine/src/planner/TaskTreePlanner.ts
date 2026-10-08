@@ -42,6 +42,7 @@ export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = 
   // A fixed spot: the nearest trees are often next to aggressive NPCs (Draynor's jail guards).
   'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'], area: { name: 'trees by Varrock West bank', point: { x: 3170, y: 3450, plane: 0 } } },
   'chop-oaks': { activity: 'chop oak trees for oak logs', targets: ['Oak tree'], action: 'Chop down', product: 'Oak logs', skill: 'Woodcutting', keep: ['axe'] },
+  'chop-yews': { activity: 'chop yew trees for yew logs', targets: ['Yew tree'], action: 'Chop down', product: 'Yew logs', skill: 'Woodcutting', keep: ['axe'], area: { name: 'Edgeville yew trees', point: { x: 3087, y: 3470, plane: 0 } } },
   'chop-willows': { activity: 'chop willow trees for willow logs', targets: ['Willow tree'], action: 'Chop down', product: 'Willow logs', skill: 'Woodcutting', keep: ['axe'] },
   'mine-copper': { activity: 'mine copper ore', targets: ['Copper rocks'], action: 'Mine', product: 'Copper ore', skill: 'Mining', keep: ['pickaxe'] },
   'mine-tin': { activity: 'mine tin ore', targets: ['Tin rocks'], action: 'Mine', product: 'Tin ore', skill: 'Mining', keep: ['pickaxe'] },

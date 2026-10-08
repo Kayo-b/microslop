@@ -278,3 +278,21 @@ test('strategy level: mining switches ore as the level rises; smithing gear foll
   const smith = choosePhase({ kind: 'level', skill: 'Smithing', level: 70 }, buildProfile(account(), state({ Smithing: 52, Mining: 60 }), bankWith([])), new Set());
   assert.ok(smith && 'phase' in smith && smith.phase.exec.kind === 'preset' && smith.phase.exec.preset === 'smith-progression');
 });
+
+test('strategy level: fishing, woodcutting and cooking change method with the level, members taking better ones', () => {
+  const pick = (skill: string, levels: Record<string, number>, members = false, owned: string[] = []) => {
+    const p = buildProfile(account(members), state({ Fishing: 1, Cooking: 1, Woodcutting: 1, ...levels }), bankWith(owned));
+    const c = choosePhase({ kind: 'level', skill, level: 99 }, p, new Set());
+    return c && 'phase' in c ? c.phase.text : String(c);
+  };
+  assert.match(pick('Woodcutting', { Woodcutting: 20 }), /oaks/);
+  assert.match(pick('Woodcutting', { Woodcutting: 40 }), /willows/);
+  assert.match(pick('Woodcutting', { Woodcutting: 65 }), /yews/);
+  assert.match(pick('Woodcutting', { Woodcutting: 80 }), /yews/, 'free accounts stay on yews');
+  assert.match(pick('Woodcutting', { Woodcutting: 80 }, true), /magic trees/);
+  assert.match(pick('Cooking', { Cooking: 20 }, false, ['Raw trout']), /trout/);
+  assert.match(pick('Cooking', { Cooking: 35 }), /tuna/);
+  assert.match(pick('Cooking', { Cooking: 42 }), /lobsters/);
+  assert.match(pick('Cooking', { Cooking: 60 }), /swordfish/);
+  assert.match(pick('Fishing', { Fishing: 40 }, false, ['Harpoon', 'Coins']), /harpoon/);
+});
