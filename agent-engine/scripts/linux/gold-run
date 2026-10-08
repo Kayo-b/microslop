@@ -5,6 +5,7 @@
 #   gold-run stop   [1|2|both]
 #   gold-run status [1|2|both]
 #   gold-run logs   1|2
+#   gold-run watch  [1|2|both]     start the Sonnet run watcher alone (also started by `start`)
 #   gold-run rebuild-char2          merge feat/agent-engine into feat/char2 and rebuild its shaded jar
 #
 # Character 1 (<char1-name>): ~/projects/Microbot_,       unit microbot-jev-data, port 8081, world 316
@@ -114,6 +115,12 @@ case "$cmd" in
     ;;
   logs)
     case "$(pick "${1:-}")" in 1) exec journalctl --user -u "$UNIT1" -f;; 2) exec journalctl --user -u "$UNIT2" -f;; *) die "logs needs 1 or 2";; esac
+    ;;
+  watch)
+    which="$(pick "${1:-both}")"
+    [[ "$which" != 2 ]] && start_watch 1 "$ENGINE1"
+    [[ "$which" != 1 ]] && start_watch 2 "$ENGINE2"
+    echo "watchers started: journalctl --user -u watch-char1|2 -f ; findings in data/watch/reviews.jsonl"
     ;;
   rebuild-char2) rebuild2;;
   *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2;;
