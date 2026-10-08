@@ -8,7 +8,7 @@ strategy   (level | money | gold | quest)  picks a phase from the catalog + live
     sub-goal   planner output, run by the engine
       tick     reflexes -> gates -> Jev/Laya picks one option -> /act -> verify
 watchdog   ends sub-goals that stop making progress
-rescue     Claude proposes one sub-goal when a planner gives up or the watchdog trips
+rescue     Claude proposes one sub-goal when a planner gives up, the watchdog trips, or two sub-goals in a row are blocked
 ```
 
 For a whole build (target levels, quests, items) run from a fresh account, see

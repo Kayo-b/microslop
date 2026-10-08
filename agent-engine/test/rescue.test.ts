@@ -93,3 +93,18 @@ test('rescue: a loop report goes to the rescuer with its evidence; loops share o
   assert.deepEqual(await p.next(ctx(reports)), chop);
   assert.equal(seen.length, 2);
 });
+
+test('rescue: the same sub-goal blocked twice in a row at engine level is rescued before the route is abandoned', async () => {
+  const inner = new Fixed(chop);
+  const rescuer = new Scripted();
+  const log = new MemoryRescueLog();
+  const p = new RescuingPlanner(inner, rescuer, log);
+
+  const noOptions: SubGoalReport = { subgoal: 'smelt the bars', result: 'blocked', reason: 'no options (nothing interactable nearby and no known destination)', steps: 1, trail: [] };
+  assert.deepEqual(await p.next(ctx([noOptions])), chop, 'one failure is left to the scripted planner');
+  assert.deepEqual(await p.next(ctx([noOptions, noOptions])), walkAround);
+  const rec = log.records[0]!;
+  assert.ok(rec.kind === 'rescue' && rec.trigger === 'blocked');
+  assert.deepEqual(await p.next(ctx([noOptions, noOptions])), chop, 'the same streak is not rescued twice');
+  assert.equal(rescuer.calls, 1);
+});
