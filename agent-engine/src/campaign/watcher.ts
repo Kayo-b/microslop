@@ -1,9 +1,9 @@
 /**
- * Run watcher: a Sonnet reviewer that looks over a running character every few minutes, says whether
+ * Run watcher: a Haiku reviewer that looks over a running character every few minutes, says whether
  * the run is healthy, and records what it saw for later improvements (planner fixes, scripted
  * replacements for LLM-driven methods, training data).
  *
- *   node src/campaign/watcher.ts [--interval 180] [--model claude-sonnet-5-5] [--char 2] [--once]
+ *   node src/campaign/watcher.ts [--interval 180] [--model claude-haiku-4-5-20251001] [--char 2] [--once]
  *
  * Run it from a character's agent-engine directory (it uses MICROBOT_PORT / MICROBOT_TOKEN_FILE like
  * the other tools). It only observes: findings go to data/watch/reviews.jsonl, the journal and, for
@@ -21,7 +21,7 @@ import { createLlmClient } from '../llm/providers.ts';
 const { values } = parseArgs({
   options: {
     interval: { type: 'string', default: '180' },
-    model: { type: 'string', default: process.env.WATCH_MODEL ?? 'claude-sonnet-5-5' },
+    model: { type: 'string', default: process.env.WATCH_MODEL ?? 'claude-haiku-4-5-20251001' },
     char: { type: 'string', default: process.env.MICROBOT_CHARACTER_NO ?? '?' },
     once: { type: 'boolean', default: false },
     'no-notify': { type: 'boolean', default: false },

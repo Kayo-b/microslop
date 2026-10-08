@@ -71,7 +71,7 @@ rebuild2() {
     JAVA_HOME="$j17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$j17")
 }
 
-# A Sonnet reviewer watches each started run (findings: data/watch/reviews.jsonl, journal of watch-charN).
+# A Haiku reviewer watches each started run (findings: data/watch/reviews.jsonl, journal of watch-charN).
 # NO_WATCH=1 skips it; WATCH_MODEL / WATCH_INTERVAL override model and seconds between reviews.
 start_watch() {
   local n="$1" engine="$2"
