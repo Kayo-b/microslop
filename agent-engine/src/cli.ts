@@ -561,6 +561,7 @@ async function run(): Promise<void> {
     decisionEngine: createDecisionEngine(values.engine),
     kb,
     escalator: values.escalate ? new LlmEscalator({ llm: llm() ?? undefined }) : null,
+    fallbackEscalator: hasLlm() ? new LlmEscalator({ llm: llm() ?? undefined }) : null,
     logger,
     runId: logger.runId,
     minConfidence: values['min-confidence'] ? Number(values['min-confidence']) : undefined,

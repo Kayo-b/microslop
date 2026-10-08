@@ -45,6 +45,8 @@ export interface GameIntentEngineOptions {
   decisionEngine: DecisionEngineAdapter;
   kb?: KnowledgeBase | null;
   escalator?: Escalator | null;
+  /** Used only when the decision engine is down (hosted Jev returned 503/timeouts): the LLM picks instead of the run blocking. */
+  fallbackEscalator?: Escalator | null;
   logger?: StepLogger | null;
   runId?: string;
   reflexes?: ReflexConfig;
@@ -81,8 +83,8 @@ const OP_DESCRIPTIONS: Record<Op, string> = {
 };
 
 export class GameIntentEngine {
-  private readonly o: Required<Omit<GameIntentEngineOptions, 'kb' | 'escalator' | 'logger' | 'runId' | 'candidates' | 'verify'>> &
-    Pick<GameIntentEngineOptions, 'kb' | 'escalator' | 'logger' | 'candidates' | 'verify'>;
+  private readonly o: Required<Omit<GameIntentEngineOptions, 'kb' | 'escalator' | 'fallbackEscalator' | 'logger' | 'runId' | 'candidates' | 'verify'>> &
+    Pick<GameIntentEngineOptions, 'kb' | 'escalator' | 'fallbackEscalator' | 'logger' | 'candidates' | 'verify'>;
   private readonly runId: string;
   private goalKey: string | null = null;
   private history: HistoryEntry[] = [];
@@ -219,6 +221,7 @@ export class GameIntentEngine {
     }
 
     let decision;
+    let engineDown = false;
     // Hosted engines occasionally time out; a stalled tick is cheap, a blocked sub-goal is not.
     for (let attempt = 1; ; attempt++) {
       try {
@@ -226,6 +229,12 @@ export class GameIntentEngine {
         break;
       } catch (err) {
         if (attempt >= this.o.decisionRetries + 1) {
+          // Jev returned 503 for minutes in a live run and every sub-goal ended blocked: let the LLM pick.
+          if (this.o.escalator ?? this.o.fallbackEscalator) {
+            decision = { answers: {}, model: 'decision-engine-down', latencyMs: 0 } as never;
+            engineDown = true;
+            break;
+          }
           return { kind: 'blocked', reason: `decision engine error: ${err instanceof Error ? err.message : err}`, snapshot: snap };
         }
         await new Promise((r) => setTimeout(r, 1000 * attempt));
@@ -240,10 +249,11 @@ export class GameIntentEngine {
 
     let chosen: { op: Op; optionId?: string; source: DecisionSource; confidence?: number } = { op, optionId: optionAns?.choice, source: 'model', confidence };
     let escalation: StepRecord['escalation'];
-    const lowConfidence = confidence < this.o.minConfidence || (op === 'done' && opConfidence < this.o.doneConfidence);
-    if (lowConfidence && this.o.escalator) {
-      const reason = `low confidence (${confidence.toFixed(2)})`;
-      const esc = await this.o.escalator
+    const lowConfidence = engineDown || confidence < this.o.minConfidence || (op === 'done' && opConfidence < this.o.doneConfidence);
+    const escalator = this.o.escalator ?? (engineDown ? this.o.fallbackEscalator : null);
+    if (lowConfidence && escalator) {
+      const reason = engineDown ? 'decision engine unavailable' : `low confidence (${confidence.toFixed(2)})`;
+      const esc = await escalator
         .choose({ goal, state, candidates, destinations, reason, modelChoice: { op, optionId: optionAns?.choice, confidence } })
         .catch(() => null);
       if (esc && isValidChoice(esc, candidates, destinations)) {
@@ -251,6 +261,8 @@ export class GameIntentEngine {
         escalation = { reason, op: esc.op, optionId: esc.optionId, note: esc.note };
       }
     }
+
+    if (engineDown && !escalation) return { kind: 'blocked', reason: 'decision engine unavailable and the LLM fallback gave no valid choice', snapshot: snap };
 
     const base: Partial<StepRecord> = { state, questions, answers: decision.answers, model: decision.model, escalation };
     const decisionMs = decision.latencyMs;

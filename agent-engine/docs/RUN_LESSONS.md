@@ -13,6 +13,8 @@ prefer a rule in code (planner, engine, catalog) over a hint in a prompt.
 | Furnace (char 2) | `blocked: no options` three times, no LLM rescue | `blocked` rescue trigger after two blocked sub-goals in a row |
 | Runecraft (char 2, scripted) | Level 1 picked the level-2 mind altar; the plain `Enter` click did nothing, the user had to use the talisman on the ruins by hand | Air altar added for level 1; the planner uses the talisman on the ruins (`use_item_on`) |
 | Jewellery (char 1) | `use_item_on` bar -> furnace opened the jewellery interface (group 446), which the snapshot did not report, so the bar was used again every 2 s; separately a recipe picked before the bank was seen stayed null ('no recipe pays' with 800k banked) | snapshot/`production_select` support the jewellery interface; recipe re-picked while null; Agent ends the same direct action sent 8 times with nothing changing |
+| Runecraft (char 2, watcher: stuck in the altar) | Inside the mind altar with Runecraft 1 and a mind talisman bought by an earlier run: the altar was 17 tiles away (beyond the snapshot's object radius), the planner waited for it forever, then the game said "need a Runecrafting level of at least 2" | the room the player stands in decides; altar and portal clicked by KB id and tile (walking included); a room the level cannot use is left by its portal |
+| Jev down (char 2) | `api.typesafe.ai` returned 503 and timeouts for minutes: every sub-goal ended blocked | `fallbackEscalator`: with an LLM configured, Claude picks when the decision engine is unreachable |
 
 Pattern: when an LLM-driven method repeats the same mistake, script it. `npm run agent -- llm-report`
 and `data/rescues.jsonl` list what keeps needing rescue.
