@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Run one `agent run ...` as an unattended job: starts the client, logs in, restarts on crashes,
+# runs as a systemd user unit (same machinery as gold-run).
+#
+#   agent-job --char 1|2 [--hours H] [--name N] -- run --strategy level --skill Fishing --level 40
+#
+# AGENT_JOB_DRY=1 writes the config only. LLM flags come from gold-run (LLM_ARGS).
+# Watch/stop with `gold-run status|logs|stop 1|2`.
+set -euo pipefail
+char=1; hours=""; name=""
+while (($#)); do
+  case "$1" in
+    --char) char="$2"; shift 2;;
+    --hours) hours="$2"; shift 2;;
+    --name) name="$2"; shift 2;;
+    --) shift; break;;
+    *) echo "agent-job: unknown option $1" >&2; exit 2;;
+  esac
+done
+[[ "$char" =~ ^[12]$ ]] || { echo "agent-job: --char must be 1 or 2" >&2; exit 2; }
+(($#)) || { echo "agent-job: nothing to run (put the agent run args after --)" >&2; exit 2; }
+[[ "${1:-}" == run ]] && shift   # accept either "run ..." or just the run args
+name="${name:-job-$(date +%H%M%S)}"
+self="$(readlink -f "${BASH_SOURCE[0]}")"
+engine_main="$(cd "$(dirname "$self")/../.." && pwd)"
+if [[ "$char" == 2 ]]; then engine="${MICROBOT_DIR_CHAR2:-$HOME/projects/Microbot_-char2}/agent-engine"; else engine="$engine_main"; fi
+[[ -d "$engine" ]] || { echo "agent-job: missing checkout $engine" >&2; exit 1; }
+rel="data/campaign/jobs/$name.json"
+mkdir -p "$engine/data/campaign/jobs"
+python3 - "$engine/$rel" "$name" "$@" <<'PY'
+import json, sys
+out, name, *args = sys.argv[1:]
+json.dump({"breakMinutes": [1, 2], "activities": [{"name": name, "args": args, "weight": 1, "minutes": 45, "final": True}]}, open(out, "w"), indent=2)
+PY
+echo "job $name -> $rel (char $char): agent run $*"
+[[ "${AGENT_JOB_DRY:-0}" == 1 ]] && { echo "(dry run: not started)"; exit 0; }
+gold_run="$engine_main/scripts/linux/gold-run"
+hargs=(); [[ -n "$hours" ]] && hargs=(--hours "$hours")
+if [[ "$char" == 1 ]]; then CHAR1_CONFIG="$rel" "$gold_run" start 1 "${hargs[@]}"; else CHAR2_CONFIG="$rel" "$gold_run" start 2 "${hargs[@]}"; fi

@@ -34,6 +34,11 @@ make-level skill SKILL=Smithing TO=50                      # any skill by name
 make-level lowest                                          # whichever skill is lowest
 ```
 
+`make-level` starts an **unattended job** by default (`scripts/linux/agent-job`): it starts the client,
+logs in, runs as a systemd unit and restarts after crashes, like `make-gold`. Watch and stop it with
+`make-gold status|logs|stop WHO=<char>`. `HOURS=` limits it. `FG=1` runs in your terminal against an
+already running client instead. One job per character at a time (they share the character's unit).
+
 Free vs paid: `make-level` uses the logged-in account's membership (varp 1780) and skips members-only
 methods on a free account, so the same command works for both. Methods marked `llm` in
 `make-level list` are driven by Claude plus Jev/Laya and are less tested than the `script` ones.
