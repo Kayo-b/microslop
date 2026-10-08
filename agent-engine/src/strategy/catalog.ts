@@ -90,12 +90,15 @@ export const TRAINING: TrainingMethod[] = [
 
   // Gathering.
   { skill: 'Fishing', from: 1, to: 20, members: false, name: 'net shrimps and anchovies at Draynor', exec: { kind: 'preset', preset: 'fish-shrimp', bank: true }, req: { items: ['Small fishing net'] } },
-  { skill: 'Fishing', from: 20, to: 40, members: false, name: 'fly fish trout and salmon at Barbarian Village', exec: { kind: 'preset', preset: 'fish-trout', bank: true }, req: { items: ['Fly fishing rod', 'Feather'] } },
-  { skill: 'Fishing', from: 40, to: 99, members: false, name: 'lobsters at Musa Point, Karamja', exec: { kind: 'llm', goal: 'fish lobsters at Musa Point on Karamja with a lobster pot, taking the Port Sarim boat (30 coins) and banking at the deposit box on the Port Sarim docks' }, req: { items: ['Lobster pot', 'Coins'] } },
-  { skill: 'Fishing', from: 58, to: 99, members: true, name: 'barbarian fishing at Otto\'s Grotto', exec: { kind: 'llm', goal: 'barbarian fish with a barbarian rod and feathers at Otto\'s Grotto, dropping the fish' }, req: { skills: { Agility: 15, Strength: 15 }, items: ['Barbarian rod', 'Feather'] } },
+  { skill: 'Fishing', from: 20, to: 35, members: false, name: 'fly fish trout and salmon at Barbarian Village', exec: { kind: 'preset', preset: 'fish-trout', bank: true }, req: { items: ['Fly fishing rod', 'Feather'] } },
+  { skill: 'Fishing', from: 58, to: 99, members: true, name: 'barbarian fishing at Otto\'s Grotto', exec: { kind: 'llm', goal: 'barbarian fish with a barbarian rod and feathers at Otto\'s Grotto, and bank the fish at the nearest bank when the inventory is full' }, req: { skills: { Agility: 15, Strength: 15 }, items: ['Barbarian rod', 'Feather'] } },
+  { skill: 'Fishing', from: 35, to: 99, members: false, name: 'tuna and swordfish with a harpoon at Musa Point, Karamja', exec: { kind: 'llm', goal: 'fish tuna and swordfish at Musa Point on Karamja with a harpoon, taking the Port Sarim boat (30 coins) and banking the fish at the deposit box on the Port Sarim docks or the nearest bank' }, req: { items: ['Harpoon', 'Coins'] } },
   { skill: 'Woodcutting', from: 1, to: 15, members: false, name: 'normal trees', exec: { kind: 'preset', preset: 'chop-trees', bank: true } },
   { skill: 'Woodcutting', from: 15, to: 30, members: false, name: 'oaks', exec: { kind: 'preset', preset: 'chop-oaks', bank: true } },
-  { skill: 'Woodcutting', from: 30, to: 99, members: false, name: 'willows at Draynor', exec: { kind: 'preset', preset: 'chop-willows', bank: true } },
+  { skill: 'Woodcutting', from: 30, to: 60, members: false, name: 'willows at Draynor', exec: { kind: 'preset', preset: 'chop-willows', bank: true } },
+  // Members get magic trees from 75 (listed first); free accounts stay on yews.
+  { skill: 'Woodcutting', from: 75, to: 99, members: true, name: 'magic trees at Seers\' Village', exec: { kind: 'llm', goal: 'chop magic trees west of Seers\' Village (next to the Seers bank at the Sorcerer\'s Tower) and bank the magic logs when the inventory is full' } },
+  { skill: 'Woodcutting', from: 60, to: 99, members: false, name: 'yews at Edgeville', exec: { kind: 'preset', preset: 'chop-yews', bank: true } },
   { skill: 'Mining', from: 1, to: 15, members: false, name: 'copper and tin', exec: { kind: 'preset', preset: 'mine-copper', bank: true } },
   { skill: 'Mining', from: 15, to: 30, members: false, name: 'iron ore', exec: { kind: 'preset', preset: 'mine-iron', bank: true } },
   { skill: 'Mining', from: 30, to: 55, members: false, name: 'coal in the Dwarven Mine', exec: { kind: 'preset', preset: 'mine-coal', bank: true }, notes: 'coal gives 50 XP an ore against iron\'s 35; the ore is also the steel/mithril smelting input' },
@@ -103,8 +106,11 @@ export const TRAINING: TrainingMethod[] = [
   { skill: 'Mining', from: 70, to: 99, members: false, name: 'adamantite ore in the Dwarven Mine', exec: { kind: 'preset', preset: 'mine-adamant', bank: true }, notes: '95 XP an ore' },
 
   // Processing: fed by the gathering loops' banked output.
-  { skill: 'Cooking', from: 1, to: 25, members: false, name: 'cook banked shrimps on fires', exec: { kind: 'preset', preset: 'cook-shrimps' }, req: { items: ['Raw shrimps'] } },
-  { skill: 'Cooking', from: 15, to: 99, members: false, name: 'cook banked trout and salmon on fires', exec: { kind: 'preset', preset: 'cook-trout' }, req: { items: ['Raw trout'] } },
+  { skill: 'Cooking', from: 1, to: 15, members: false, name: 'cook banked shrimps on fires', exec: { kind: 'preset', preset: 'cook-shrimps' }, req: { items: ['Raw shrimps'] } },
+  { skill: 'Cooking', from: 15, to: 30, members: false, name: 'cook banked trout and salmon on fires', exec: { kind: 'preset', preset: 'cook-trout' }, req: { items: ['Raw trout'] } },
+  { skill: 'Cooking', from: 30, to: 40, members: false, name: 'cook tuna on fires', exec: { kind: 'preset', preset: 'cook-tuna' }, notes: 'raw tuna comes from the harpoon fishing goal when the bank has none' },
+  { skill: 'Cooking', from: 40, to: 45, members: false, name: 'cook lobsters on fires', exec: { kind: 'preset', preset: 'cook-lobsters' }, notes: 'raw lobsters come from the lobster pot goal when the bank has none' },
+  { skill: 'Cooking', from: 45, to: 99, members: false, name: 'cook swordfish on fires', exec: { kind: 'preset', preset: 'cook-swordfish' }, notes: 'raw swordfish come from the harpoon fishing goal when the bank has none' },
   { skill: 'Smithing', from: 1, to: 99, members: false, name: 'mine, smelt and smith bronze, iron, steel, then mithril and adamant gear (by Smithing and Mining level)', exec: { kind: 'preset', preset: 'smith-progression' } },
   { skill: 'Firemaking', from: 1, to: 99, members: false, name: 'burn banked logs in lines', exec: { kind: 'llm', goal: 'withdraw logs from the nearest bank and burn them in a line on open ground with a tinderbox, repeating until no logs are left' }, req: { items: ['Tinderbox', 'Logs'] } },
   { skill: 'Crafting', from: 1, to: 4, members: false, name: 'Sheep Shearer for Crafting XP', exec: { kind: 'quest', quest: 'Sheep Shearer' }, notes: '150 Crafting XP' },
@@ -289,6 +295,7 @@ export const ACQUIRE: AcquireInfo[] = [
   { item: 'Feather', members: false, price: 2, source: TOOL_SHOPS.gerrant },
   { item: 'Knife', members: false, price: 10, source: GE },
   { item: 'Lobster pot', members: false, price: 40, source: GE },
+  { item: 'Harpoon', members: false, price: 3, source: TOOL_SHOPS.gerrant },
   { item: 'Barbarian rod', members: true, price: 50, source: GE },
 ];
 

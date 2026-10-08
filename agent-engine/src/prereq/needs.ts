@@ -59,6 +59,13 @@ const NO_LOADOUT = new Set<Execution['kind']>(['tutorial', 'sell', 'acquire']);
 /** Food to have before a fight: none against monsters that cannot really hurt (chickens, cows). */
 const HARMLESS = /^(chicken|cow|cow calf|goblin|man|woman|rat|giant rat)$/i;
 
+/** Raw fish with no gathering preset: caught by an LLM-driven goal at Musa Point, Karamja. */
+const FISH_GOALS: Record<string, string> = {
+  'Raw tuna': 'fish tuna and swordfish at Musa Point on Karamja with a harpoon, taking the Port Sarim boat (30 coins), and bank the fish when the inventory is full',
+  'Raw swordfish': 'fish tuna and swordfish at Musa Point on Karamja with a harpoon, taking the Port Sarim boat (30 coins), and bank the fish when the inventory is full',
+  'Raw lobster': 'fish lobsters at Musa Point on Karamja with a lobster pot, taking the Port Sarim boat (30 coins), and bank the fish when the inventory is full',
+};
+
 function empty(name: string): ActivityNeeds {
   return { name, req: {}, tools: [], supplies: [], food: 0, inputs: [] };
 }
@@ -105,6 +112,7 @@ function presetNeeds(preset: string): ActivityNeeds | null {
     n.tools.push(toolFor('axe')!, toolFor('tinderbox')!);
     const fish = cook.raw === 'Raw shrimps' ? 'fish-shrimp' : cook.raw === 'Raw trout' ? 'fish-trout' : null;
     if (fish) n.inputs.push({ item: cook.raw, min: 1, produce: { kind: 'preset', preset: fish, bank: true }, minutes: 15 });
+    else if (FISH_GOALS[cook.raw]) n.inputs.push({ item: cook.raw, min: 1, produce: { kind: 'llm', goal: FISH_GOALS[cook.raw]! }, minutes: 20 });
     return n;
   }
   if (preset === 'smith-progression') {

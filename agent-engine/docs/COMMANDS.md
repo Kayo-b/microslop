@@ -59,5 +59,9 @@ holds the current level (`make-level list SKILL=Mining` shows them):
 | Smithing | one `smith-progression` method: bronze, iron, steel, then mithril (Smithing 50 and Mining 55) and adamant (70 and 70) bars and gear |
 | Herblore | `herblore-train`: the recipe with the most XP an hour that the coins can buy and that loses at most 250 gp a potion: cleaning, then finished potions (attack at 3 up to magic at 76) |
 
+| Fishing | shrimps 1-20, fly fishing 20-35, harpoon tuna/swordfish at Musa Point 35-99 (LLM-driven); members from 58: barbarian fishing |
+| Woodcutting | trees 1-15, oaks 15-30, willows 30-60, yews at Edgeville 60-99; members from 75: magic trees (LLM-driven) |
+| Cooking | shrimps 1-15, trout/salmon 15-30, tuna 30-40, lobsters 40-45, swordfish 45-99; raw fish not banked is caught first |
+
 Mithril and adamant smithing, the Dwarven Mine presets and the finished-potion recipes are new and
 untested on a live client.
