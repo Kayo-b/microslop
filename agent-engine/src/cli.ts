@@ -16,6 +16,7 @@ import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
 import { chooseOption, FlowPlanner, FLOWS, flowStatus } from './flows/FlowPlanner.ts';
 import { transferCoins } from './tools/transfer.ts';
 import { inF2pArea } from './strategy/f2p.ts';
+import { readWatchHint } from './llm/watchFeed.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -348,6 +349,9 @@ async function run(): Promise<void> {
   const kb = openKb();
   const backend = new MicrobotBackend();
   const isMember = async () => (await readAccount(backend)).members;
+  // The run watcher's verdicts about this process's run reach the rescue (src/llm/watchFeed.ts).
+  const startedAt = Date.now();
+  const watchFeed = () => readWatchHint(path.join(ROOT, 'data', 'watch', 'latest.json'), startedAt);
   const bankCoins = () => new BankMemory().items.get('Coins') ?? 0;
   // Prerequisites flow (src/prereq/): an activity's tools, gear, food, coins and levels are met
   // before it starts; setups longer than --setup-budget minutes (default 30) skip the activity.
@@ -545,14 +549,14 @@ async function run(): Promise<void> {
 
   if (planRescue) {
     const log = new JsonlRescueLog(planRescue.log);
-    planner = new RescuingPlanner(planner, planRescue.rescuer, log);
+    planner = new RescuingPlanner(planner, planRescue.rescuer, log, { watchFeed });
     console.log(`[agent] tiered LLM rescue on (${planRescue.rescuer.name}); rescues logged to ${log.file}`);
   } else if (values.rescue) {
     if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();
     // Rescues can run on their own (cheaper, faster) model while planning keeps --llm-model.
     const rescueLlm = values['rescue-model'] ? createLlmClient({ provider: values.llm, model: values['rescue-model'] })! : llm()!;
-    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: rescueLlm }), log);
+    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: rescueLlm }), log, { watchFeed });
     console.log(`[agent] LLM rescue on (${rescueLlm.name}); rescues logged to ${log.file}`);
   }
   const logger = new JsonlStepLogger(values['log-dir']);

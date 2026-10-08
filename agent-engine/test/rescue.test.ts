@@ -120,3 +120,33 @@ test('rescue: a loop that alternates done and blocked reports (open the bank / f
   assert.deepEqual(await p.next(ctx([...reports, blocked])), walkAround, 'three blocked in the last six is');
   assert.equal(rescuer.calls, 1);
 });
+
+test('rescue: a fresh stuck verdict from the run watcher triggers a rescue once, with its diagnosis and fix as the evidence', async () => {
+  const { readWatchHint } = await import('../src/llm/watchFeed.ts');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'watch-')), 'latest.json');
+  const now = Date.now();
+  const write = (o: object) => writeFileSync(file, JSON.stringify(o));
+  write({ ts: new Date(now - 30_000).toISOString(), status: 'stuck', severity: 3, diagnosis: 'open the bank loops', suggestion: 'withdraw the mould' });
+  assert.equal(readWatchHint(file, now - 60_000, 8 * 60_000, now)?.status, 'stuck');
+  assert.equal(readWatchHint(file, now, 8 * 60_000, now), null, 'a review from before this run started is ignored');
+  write({ ts: new Date(now - 20 * 60_000).toISOString(), status: 'stuck', severity: 3, diagnosis: 'x', suggestion: '' });
+  assert.equal(readWatchHint(file, 0, 8 * 60_000, now), null, 'stale');
+  write({ ts: new Date(now - 30_000).toISOString(), status: 'slow', severity: 3, diagnosis: 'x', suggestion: '' });
+  assert.equal(readWatchHint(file, 0, 8 * 60_000, now), null, 'only stuck or wrong');
+
+  let hint: ReturnType<typeof readWatchHint> = { id: 't1', status: 'stuck', severity: 3, diagnosis: 'open the bank loops', suggestion: 'withdraw the mould' };
+  const seen: string[][] = [];
+  const rescuer: Rescuer = { name: 'r', rescue: async (_c, req) => { seen.push([req.trigger, req.reason, ...(req.evidence ?? [])]); return walkAround; } };
+  const log = new MemoryRescueLog();
+  const p = new RescuingPlanner(new Fixed(chop), rescuer, log, { watchFeed: () => hint });
+  assert.deepEqual(await p.next(ctx()), walkAround);
+  assert.equal(seen[0]![0], 'watcher');
+  assert.match(seen[0]![1]!, /open the bank loops/);
+  assert.match(seen[0]![2]!, /withdraw the mould/);
+  assert.deepEqual(await p.next(ctx()), chop, 'the same verdict is not acted on twice');
+  hint = { id: 't2', status: 'wrong', severity: 2, diagnosis: 'another', suggestion: '' };
+  assert.deepEqual(await p.next(ctx()), walkAround, 'a new verdict is');
+});
