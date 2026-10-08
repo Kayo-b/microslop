@@ -264,3 +264,17 @@ test('quest planner: a step that can be bought tells the planner to buy when coi
   await new QuestPlanner('Imp Catcher', api, llm, 1, async () => true, () => 0).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
   assert.doesNotMatch(seen, /BUY them/, 'broke: grind the drops');
 });
+
+test('strategy level: mining switches ore as the level rises; smithing gear follows Smithing and Mining', () => {
+  const method = (levels: Record<string, number>) => {
+    const p = buildProfile(account(), state(levels), bankWith([]));
+    const c = choosePhase({ kind: 'level', skill: 'Mining', level: 99 }, p, new Set());
+    return c && 'phase' in c ? c.phase.text : String(c);
+  };
+  assert.match(method({ Mining: 20 }), /iron/);
+  assert.match(method({ Mining: 40 }), /coal/);
+  assert.match(method({ Mining: 60 }), /mithril/);
+  assert.match(method({ Mining: 75 }), /adamantite/);
+  const smith = choosePhase({ kind: 'level', skill: 'Smithing', level: 70 }, buildProfile(account(), state({ Smithing: 52, Mining: 60 }), bankWith([])), new Set());
+  assert.ok(smith && 'phase' in smith && smith.phase.exec.kind === 'preset' && smith.phase.exec.preset === 'smith-progression');
+});

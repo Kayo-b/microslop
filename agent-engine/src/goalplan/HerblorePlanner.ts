@@ -20,6 +20,9 @@ const VIAL = 'Vial of water';
 /** Things beside the GE bank that a processing step never wants (the poll booth's menu blocks the bank). */
 export const GE_DISTRACTIONS = ['Poll booth', 'Fire', 'Bank deposit box', 'Grand Exchange Clerk', 'Banker'];
 
+/** Cleaning XP per herb, in HERBS order. */
+const CLEAN_XP = [2.5, 3.8, 5, 6.3, 7.5, 8, 8.8, 10, 11.3, 11.8, 12.5, 13.1, 13.8, 15];
+
 /** [clean herb, grimy herb, level to clean, unfinished potion, level to mix it]. */
 const HERBS: [string, string, number, string, number][] = [
   ['Guam leaf', 'Grimy guam leaf', 3, 'Guam potion (unf)', 3],
@@ -50,13 +53,41 @@ export interface HerbRecipe {
   perTrip: number;
   /** Rough products per hour, to compare recipes by profit per hour. */
   perHour: number;
+  /** Herblore XP per product (cleaning and finished potions; unfinished potions give none). */
+  xp: number;
+  /** Mix step with two named items: use the first on the second (finished potions). Default: a vial of water on the herb. */
+  combine?: [string, string];
 }
 
-export const HERB_RECIPES: HerbRecipe[] = HERBS.flatMap(([clean, grimy, cleanLvl, unf, unfLvl]) => [
-  { id: `clean:${clean}`, level: cleanLvl, inputs: [grimy], output: clean, steps: ['clean'], perTrip: 27, perHour: 1200 },
-  { id: `unf:${clean}`, level: Math.max(cleanLvl, unfLvl), inputs: [grimy, VIAL], output: unf, steps: ['clean', 'mix'], perTrip: 13, perHour: 900 },
-  { id: `mix:${clean}`, level: unfLvl, inputs: [clean, VIAL], output: unf, steps: ['mix'], perTrip: 13, perHour: 1800 },
-]);
+/** Finished potions: [name, level, unfinished potion, secondary ingredient, XP]. The secondary is bought at the GE. */
+const POTIONS: [string, number, string, string, number][] = [
+  ['Attack potion(3)', 3, 'Guam potion (unf)', 'Eye of newt', 25],
+  ['Antipoison(3)', 5, 'Marrentill potion (unf)', 'Unicorn horn dust', 37.5],
+  ['Strength potion(3)', 12, 'Tarromin potion (unf)', 'Limpwurt root', 50],
+  ['Restore potion(3)', 22, 'Harralander potion (unf)', "Red spiders' eggs", 62.5],
+  ['Energy potion(3)', 26, 'Harralander potion (unf)', 'Chocolate dust', 67.5],
+  ['Defence potion(3)', 30, 'Ranarr potion (unf)', 'White berries', 75],
+  ['Prayer potion(3)', 38, 'Ranarr potion (unf)', 'Snape grass', 87.5],
+  ['Super attack(3)', 45, 'Irit potion (unf)', 'Eye of newt', 100],
+  ['Superantipoison(3)', 48, 'Irit potion (unf)', 'Unicorn horn dust', 106.3],
+  ['Fishing potion(3)', 50, 'Avantoe potion (unf)', 'Snape grass', 112.5],
+  ['Super energy(3)', 52, 'Avantoe potion (unf)', 'Mort myre fungus', 117.5],
+  ['Super strength(3)', 55, 'Kwuarm potion (unf)', 'Limpwurt root', 125],
+  ['Super restore(3)', 63, 'Snapdragon potion (unf)', "Red spiders' eggs", 142.5],
+  ['Super defence(3)', 66, 'Cadantine potion (unf)', 'White berries', 150],
+  ['Antifire potion(3)', 69, 'Lantadyme potion (unf)', 'Dragon scale dust', 157.5],
+  ['Ranging potion(3)', 72, 'Dwarf weed potion (unf)', 'Wine of zamorak', 162.5],
+  ['Magic potion(3)', 76, 'Lantadyme potion (unf)', 'Potato cactus', 172.5],
+];
+
+export const HERB_RECIPES: HerbRecipe[] = [
+  ...HERBS.flatMap(([clean, grimy, cleanLvl, unf, unfLvl], i) => [
+    { id: `clean:${clean}`, level: cleanLvl, inputs: [grimy], output: clean, steps: ['clean'], perTrip: 27, perHour: 1200, xp: CLEAN_XP[i]! } as HerbRecipe,
+    { id: `unf:${clean}`, level: Math.max(cleanLvl, unfLvl), inputs: [grimy, VIAL], output: unf, steps: ['clean', 'mix'], perTrip: 13, perHour: 900, xp: CLEAN_XP[i]! } as HerbRecipe,
+    { id: `mix:${clean}`, level: unfLvl, inputs: [clean, VIAL], output: unf, steps: ['mix'], perTrip: 13, perHour: 1800, xp: 0 } as HerbRecipe,
+  ]),
+  ...POTIONS.map(([potion, lvl, unf, secondary, xp]): HerbRecipe => ({ id: `potion:${potion}`, level: lvl, inputs: [unf, secondary], output: potion, steps: ['mix'], perTrip: 13, perHour: 2000, xp, combine: [secondary, unf] })),
+];
 
 /** Profit per product after the GE tax; null when a price is missing. */
 export function recipeProfit(r: HerbRecipe, price: (item: string) => number | null): number | null {
@@ -102,6 +133,21 @@ export function nextRecipe(level: number, price: (item: string) => number | null
   return train ?? best;
 }
 
+/** Training: a potion may lose up to this many coins each while it trains. */
+const TRAIN_MAX_LOSS = 250;
+
+/**
+ * Herblore XP per hour is what a level-up run wants: the recipe at this level with the most XP per
+ * hour that the coins can buy a first batch of and that loses at most TRAIN_MAX_LOSS per product.
+ * Cleaning herbs and mixing finished potions give XP; unfinished potions give none.
+ */
+export function trainingRecipe(level: number, price: (item: string) => number | null, coins = Infinity): (HerbRecipe & { profit: number; cost: number }) | null {
+  return HERB_RECIPES.filter((r) => r.level <= level && r.xp > 0)
+    .map((r) => ({ ...r, profit: recipeProfit(r, price) ?? Number.NEGATIVE_INFINITY, cost: r.inputs.reduce((n, i) => n + (price(i) ?? 0), 0) }))
+    .filter((r) => r.profit >= -TRAIN_MAX_LOSS && r.cost > 0 && r.cost * MIN_BUY <= coins - RESERVE)
+    .sort((a, b) => b.xp * b.perHour - a.xp * a.perHour)[0] ?? null;
+}
+
 const RESERVE = 500;
 /** ge_buy offers the client's guide price +30%; a little more covers the wiki price differing. */
 const OVERBID = 1.32;
@@ -112,6 +158,8 @@ const MAX_BUY = 1000;
 
 export interface HerbloreOptions {
   price: (item: string) => number | null;
+  /** Level up: pick recipes by XP per hour instead of profit. */
+  train?: boolean;
 }
 
 function step(text: string, targets: string[], actions: string[], doneWhen: DoneCondition, maxSteps: number, keep: string[], extra: object = {}): PlanStep {
@@ -141,7 +189,8 @@ export class HerblorePlanner implements Planner {
     // at the next purchase instead of the next run.
     const stockLeft = (x: NonNullable<typeof this.recipe>) => x.inputs.some((n) => count(n) > 0 || (bank?.get(n) ?? 0) > 0);
     if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && s.grandExchange?.open)) {
-      this.recipe = nextRecipe(level, this.o.price, carriedCoins(s) + (bank?.get('Coins') ?? 0));
+      const wallet = carriedCoins(s) + (bank?.get('Coins') ?? 0);
+      this.recipe = this.o.train ? trainingRecipe(level, this.o.price, wallet) : nextRecipe(level, this.o.price, wallet);
     }
     const r = this.recipe;
     const products = [...new Set(HERB_RECIPES.map((x) => x.output))];
@@ -202,7 +251,14 @@ export class HerblorePlanner implements Planner {
       if (r.steps.includes('clean') && grimy && count(grimy, false) > 0) {
         return step(`clean all the ${grimy.toLowerCase()}s`, [grimy], ['Clean'], { lacksItem: grimy }, 80, [grimy, ...inputs], { avoid: GE_DISTRACTIONS });
       }
-      const herb = r.steps.includes('mix') ? (grimy ? HERBS.find((h) => h[1] === grimy)![0] : r.inputs[0]!) : null;
+      if (r.combine) {
+        const [used, onto] = r.combine;
+        if (count(used, false) > 0 && count(onto, false) > 0) {
+          const scarcer = count(used, false) <= count(onto, false) ? used : onto;
+          return step(`use the ${used.toLowerCase()} on the ${onto.toLowerCase()} and make all the ${r.output.toLowerCase()}`, [used, onto], ['Use', 'Make'], { lacksItem: scarcer }, 80, [used, onto], { avoid: GE_DISTRACTIONS });
+        }
+      }
+      const herb = r.steps.includes('mix') && !r.combine ? (grimy ? HERBS.find((h) => h[1] === grimy)![0] : r.inputs[0]!) : null;
       if (herb && count(herb, false) > 0 && count(VIAL, false) > 0) {
         // Done when the scarcer input is gone (14 herbs and 13 vials leave a herb): waiting for the
         // other one, the classifier wandered to the poll booth, whose menu then blocked the bank.

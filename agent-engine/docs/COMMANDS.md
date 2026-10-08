@@ -47,3 +47,17 @@ The targets live in `agent-engine/Makefile`; edit the `## description` text ther
 updates. Details per command: [GOLD_PLANS.md](GOLD_PLANS.md), [CAMPAIGN.md](CAMPAIGN.md),
 [RUNNING_AGENTS.md](RUNNING_AGENTS.md), [DATA_GATHERING.md](DATA_GATHERING.md),
 [LAYA_FINETUNING.md](LAYA_FINETUNING.md).
+
+## How `make-level` moves up as levels rise
+
+After every phase the strategy re-reads the levels and takes the first catalog method whose bracket
+holds the current level (`make-level list SKILL=Mining` shows them):
+
+| Skill | Brackets |
+|---|---|
+| Mining | copper/tin 1-15, iron 15-30, coal 30-55, mithril 55-70, adamantite 70-99 (Dwarven Mine, coal onwards) |
+| Smithing | one `smith-progression` method: bronze, iron, steel, then mithril (Smithing 50 and Mining 55) and adamant (70 and 70) bars and gear |
+| Herblore | `herblore-train`: the recipe with the most XP an hour that the coins can buy and that loses at most 250 gp a potion: cleaning, then finished potions (attack at 3 up to magic at 76) |
+
+Mithril and adamant smithing, the Dwarven Mine presets and the finished-potion recipes are new and
+untested on a live client.

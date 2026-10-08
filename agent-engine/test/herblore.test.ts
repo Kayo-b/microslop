@@ -132,3 +132,19 @@ test('herblore: gives up without a paying recipe or the coins for a trip', async
   await next(q, bankOpen(2, [coins(50_000)], []));
   assert.match(text(await next(q, state(2, [coins(50_000)]))), /no herblore recipe pays at Herblore 2/);
 });
+
+test('herblore training: recipes are picked by XP per hour, finished potions included, and the choice follows the level', async () => {
+  const { trainingRecipe, HERB_RECIPES } = await import('../src/goalplan/HerblorePlanner.ts');
+  const prices: Record<string, number> = {
+    'Grimy guam leaf': 20, 'Guam leaf': 25, 'Guam potion (unf)': 30, 'Eye of newt': 5, 'Attack potion(3)': 40, 'Vial of water': 3,
+    'Marrentill potion (unf)': 40, 'Unicorn horn dust': 100, 'Antipoison(3)': 120, 'Grimy marrentill': 25, Marrentill: 30,
+  };
+  const price = (n: string) => prices[n] ?? null;
+  assert.ok(HERB_RECIPES.some((r) => r.id === 'potion:Attack potion(3)' && r.combine?.[0] === 'Eye of newt'));
+  const at3 = trainingRecipe(3, price, 100_000)!;
+  assert.equal(at3.id, 'potion:Attack potion(3)', '25 XP a potion beats 2.5 XP a cleaned herb');
+  const at5 = trainingRecipe(5, price, 100_000)!;
+  assert.ok(at5.xp >= 25 && at5.level <= 5);
+  assert.equal(trainingRecipe(3, price, 100), null, 'too poor for a first batch');
+  assert.equal(trainingRecipe(1, price, 100_000), null, 'no recipe below level 3');
+});
