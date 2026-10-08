@@ -37,7 +37,7 @@ help: ## show every command (GROUP=gold|agent|data|laya|level|dev for one group)
 
 ##@ gold - Gold runs: campaigns as systemd units (gold-run); WHO=1|2|both
 ##? vars: WHO=both  HOURS=<h, default until 23:59>  CONFIG=<campaign json, relative to agent-engine/>  PLAN=<plans/x.json>  ARGS=<extra campaign flags>
-.PHONY: gold-start gold-plan gold-crafting gold-herblore gold-smelt gold-dry-run gold-status gold-logs gold-stop gold-rebuild-char2
+.PHONY: gold-dash gold-dash-live gold-start gold-plan gold-crafting gold-herblore gold-smelt gold-dry-run gold-status gold-logs gold-stop gold-rebuild-char2
 gold-start: ## start the default gold campaign (char1 smelt, char2 herblore); WHO=1|2|both
 	$(if $(CONFIG),CHAR1_CONFIG=$(CONFIG) CHAR2_CONFIG=$(CONFIG)) $(GOLDRUN) start $(WHO) $(if $(HOURS),--hours $(HOURS)) $(if $(or $(PLAN),$(ARGS)),-- $(if $(PLAN),--plan $(PLAN)) $(ARGS))
 gold-plan: ## run a skill plan on a character; PLAN=plans/gold-1-hunter.json WHO=2
@@ -51,6 +51,10 @@ gold-smelt: ## char1 smelt-steel campaign
 	CHAR1_CONFIG=data/campaign/smelt-2026-10-06.json $(GOLDRUN) start 1 $(if $(HOURS),--hours $(HOURS))
 gold-dry-run: ## show the campaign rotation without running it
 	$(GOLDRUN) start $(WHO) -- --dry-run $(if $(PLAN),--plan $(PLAN))
+gold-dash: ## ONE screen for both characters: activity, results, live state, Jev share, watcher verdict, rescues (HOURS=window)
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts $(if $(HOURS),--hours $(HOURS))
+gold-dash-live: ## the dashboard refreshing every 30 s (Ctrl+C to leave)
+	cd $(ENGINE) && watch -n 30 -t node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts
 gold-status: ## unit state, current activity, rescues, gp/h, alerts
 	$(GOLDRUN) status $(WHO)
 gold-logs: ## follow the journal of one character (WHO=1|2)
