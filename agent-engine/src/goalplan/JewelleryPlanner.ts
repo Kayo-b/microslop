@@ -148,7 +148,9 @@ export class JewelleryPlanner implements Planner {
     // Re-picked only between batches, so a price wobble never strands half-bought inputs, while
     // a new level takes effect at the next purchase.
     const stockLeft = (x: Priced) => x.inputs.some((n) => count(n) > 0 || banked(n) > 0);
-    if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && (s.grandExchange?.open || !bank))) {
+    // A null pick is retried every call: the first pick runs before the bank is known (coins in the
+    // bank unseen = a poor character), and it once ended the run as 'no recipe pays' with 800k banked.
+    if (this.recipe === undefined || this.recipe === null || (!stockLeft(this.recipe) && (s.grandExchange?.open || !bank))) {
       this.recipe = nextJewellery(level, this.o.price, wealth);
     }
     const r = this.recipe;

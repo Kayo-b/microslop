@@ -75,3 +75,13 @@ test('jewellery: coins above the safe amount are banked once the trip is withdra
   assert.deepEqual(act(await next(p, s)), { op: 'bank_deposit', itemId: 995, amount: 'all' });
   assert.equal(act(await next(p, bankOpen(5, [...bars, item(20, 1592, 'Ring mould')], [{ id: 995, name: 'Coins', quantity: 90000 }])))?.op, 'bank_close');
 });
+
+test('jewellery: a recipe picked before the bank was seen (poor on paper) is picked again once the bank shows the coins', async () => {
+  const p = new JewelleryPlanner({ price });
+  // Nothing known about the bank and 100 coins carried: no recipe fits, so it goes to survey the bank.
+  const first = await next(p, state(5, [coins(100)]));
+  assert.equal(first.kind, 'subgoal');
+  // The bank opens with 800k coins: a recipe is found instead of "no jewellery recipe pays".
+  const seen = await next(p, bankOpen(5, [coins(100)], [{ id: 995, name: 'Coins', quantity: 800_000 }]));
+  assert.notEqual(seen.kind, 'impossible', JSON.stringify(seen));
+});

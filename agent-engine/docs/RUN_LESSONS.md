@@ -11,6 +11,16 @@ prefer a rule in code (planner, engine, catalog) over a hint in a prompt.
 | Hunter plan (char 2) | Route to Feldip Hills stalled in the walker | not fixed yet (walker/pathfinder) |
 | Runecraft (char 2) | LLM tried to buy essence at Aubury's shop (not sold): opened and closed the shop 12 times; then walked to the Body ruins instead of the planned Air ruins (generic "Mysterious ruins" = nearest); ~30 min of boats from Land's End | scripted `RunecraftPlanner` (GE essence + talisman, ruins id/tile from the KB, direct `Enter`/`Craft-rune`/`Portal` actions); coordinates in a sub-goal's text beat the nearest same-named object; prompt says shops do not sell essence |
 | Furnace (char 2) | `blocked: no options` three times, no LLM rescue | `blocked` rescue trigger after two blocked sub-goals in a row |
+| Runecraft (char 2, scripted) | Level 1 picked the level-2 mind altar; the plain `Enter` click did nothing, the user had to use the talisman on the ruins by hand | Air altar added for level 1; the planner uses the talisman on the ruins (`use_item_on`) |
+| Jewellery (char 1) | `use_item_on` bar -> furnace opened the jewellery interface (group 446), which the snapshot did not report, so the bar was used again every 2 s; separately a recipe picked before the bank was seen stayed null ('no recipe pays' with 800k banked) | snapshot/`production_select` support the jewellery interface; recipe re-picked while null; Agent ends the same direct action sent 8 times with nothing changing |
 
 Pattern: when an LLM-driven method repeats the same mistake, script it. `npm run agent -- llm-report`
 and `data/rescues.jsonl` list what keeps needing rescue.
+
+## The run watcher
+
+`src/campaign/watcher.ts` (started by `gold-run start`, so by every `make-gold` / `make-level` job; `NO_WATCH=1`
+skips it) asks Sonnet (`WATCH_MODEL`, default `claude-sonnet-5-5`) every `WATCH_INTERVAL` seconds (180) whether the run is
+healthy, from the last 30 agent steps, the campaign log, the live snapshot and recent rescues. Output: the journal of
+`watch-char1|2`, `data/watch/reviews.jsonl` (with the evidence) and a desktop notification at severity 2+. It never
+clicks. `make-agent watch-last CHAR=2` shows the latest reviews; read `reviews.jsonl` when planning the next fixes.
