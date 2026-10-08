@@ -110,9 +110,18 @@ agent-campaign-plan: ## foreground campaign for a plan (starts the client); PLAN
 
 ##@ data - Data gathering: unattended sessions and the Laya dataset
 ##? vars: HOURS=3  ONLY=<activity,...>  CHAR=1|2  ARGS=<extra campaign flags>
-.PHONY: data-session data-campaign data-dry-run data-monitor data-logs data-dataset data-export data-reverse data-synth data-stats
+.PHONY: data-gather-free data-gather-members data-dataset-all data-session data-campaign data-dry-run data-monitor data-logs data-dataset data-export data-reverse data-synth data-stats
 data-session: ## one full unattended session: refresh login, campaign, stop client, rebuild dataset
 	MICROBOT_CAMPAIGN_HOURS=$(or $(HOURS),3) $(ENGINE)/scripts/linux/microbot-campaign $(if $(ONLY),--only $(ONLY)) $(ARGS)
+data-gather-free: ## diverse data-gathering rotation for a FREE account (all free skills, combat, gold flows, quests); CHAR=1 HOURS=
+	CHAR$(CHAR)_CONFIG=data/campaign/gather-free.json $(GOLDRUN) start $(CHAR) $(if $(HOURS),--hours $(HOURS))
+data-gather-members: ## diverse data-gathering rotation for a MEMBERS account (adds herblore, agility, hunter, farming, slayer...); CHAR=2 HOURS=
+	CHAR$(CHAR)_CONFIG=data/campaign/gather-members.json $(GOLDRUN) start $(CHAR) $(if $(HOURS),--hours $(HOURS))
+data-dataset-all: ## build the dataset from BOTH characters' step logs (into data/dataset of char 1's checkout)
+	rm -rf $(ENGINE)/data/merged-logs && mkdir -p $(ENGINE)/data/merged-logs
+	for d in $(HOME_DIR)/projects/Microbot_/agent-engine/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c1-$$(basename $$d); done
+	for d in $(HOME_DIR)/projects/Microbot_-char2/agent-engine/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c2-$$(basename $$d); done
+	cd $(ENGINE) && npm run dataset:build -- --logs data/merged-logs $(ARGS)
 data-campaign: ## foreground campaign rotation (client must be running or --restart-client)
 	$(RUN) npm run campaign -- --hours $(or $(HOURS),3) --world $(CHAR_WORLD) --restart-client $(if $(ONLY),--only $(ONLY)) $(ARGS)
 data-dry-run: ## show the rotation, run nothing
