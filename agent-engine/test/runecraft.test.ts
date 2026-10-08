@@ -69,3 +69,17 @@ test('runecraft: standing in an altar the level cannot use, the player leaves in
   const step = await planner().next(ctx(snap));
   assert.ok(step.kind === 'act' && step.action.op === 'interact' && step.action.action === 'Use' && step.action.target.kind === 'object' && step.action.target.id === 34749, 'the mind portal, since mind runes need level 2');
 });
+
+test('runecraft: coins are withdrawn in a capped amount and banked again before walking to the altar', async () => {
+  const bank = { open: true, items: [{ slot: 0, id: 995, name: 'Coins', quantity: 6_658_312, noted: false, stackable: true }] } as never;
+  const take = await planner().next(ctx(at(3164, 3487, { inventory: inv(['Mind talisman']), bank })));
+  assert.ok(take.kind === 'act' && take.action.op === 'bank_withdraw' && take.action.amount === 60_000, JSON.stringify(take));
+
+  const stocked = at(3164, 3487, { inventory: inv(['Coins', 58_000], ['Rune essence', 27], ['Mind talisman']), bank: { open: true, items: [] } as never });
+  const give = await planner().next(ctx(stocked));
+  assert.ok(give.kind === 'act' && give.action.op === 'bank_deposit' && give.action.amount === 56_000, JSON.stringify(give));
+
+  const walking = at(3164, 3487, { inventory: inv(['Coins', 58_000], ['Rune essence', 27], ['Mind talisman']) });
+  const first = await planner().next(ctx(walking));
+  assert.ok(first.kind === 'subgoal' && /bank the coins/.test(first.subgoal.text), 'banks before leaving the Grand Exchange');
+});

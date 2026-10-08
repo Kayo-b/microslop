@@ -49,11 +49,15 @@ export interface ActivityNeeds {
   inputs: InputNeed[];
   /** Deposit carried materials (potions, herbs, ore, logs...) at the bank before the activity starts. */
   bankMaterials?: boolean;
+  /** The activity sizes and banks its own coins (trading loops); no generic coin guard. */
+  coinsManaged?: boolean;
 }
 
 const TOOL_BUY: Record<string, string> = { axe: 'Bronze axe', pickaxe: 'Bronze pickaxe', 'small fishing net': 'Small fishing net', 'fly fishing rod': 'Fly fishing rod', hammer: 'Hammer', tinderbox: 'Tinderbox' };
 
 /** Executions that run before the character has (or sells) gear: no loadout check. */
+/** Trading loops: they withdraw a capped budget at the Grand Exchange and bank it again themselves. */
+const COIN_MANAGERS = new Set(['herblore', 'herblore-train', 'craft-jewellery', 'string-amulets', 'tan-hides', 'smelt-steel', 'runecraft']);
 const NO_LOADOUT = new Set<Execution['kind']>(['tutorial', 'sell', 'acquire']);
 
 /** Food to have before a fight: none against monsters that cannot really hurt (chickens, cows). */
@@ -128,7 +132,8 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
   let n: ActivityNeeds | null = null;
   switch (exec.kind) {
     case 'preset':
-      n = presetNeeds(exec.preset);
+      // Trading loops and other presets with no tools of their own still get the loadout and coin guard.
+      n = presetNeeds(exec.preset) ?? empty(exec.preset);
       break;
     case 'combat': {
       n = empty(`kill-${exec.monster.toLowerCase().replace(/\s+/g, '-')}`);
@@ -148,6 +153,7 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
   // Every activity starts fully geared: a weapon and armour in every slot, worn (PrereqPlanner's
   // equip step). Combat already needs it hard; elsewhere it is bought only when affordable.
   if (n && (exec.kind === 'quest' || exec.kind === 'llm')) n.bankMaterials = true;
+  if (n && exec.kind === 'preset' && COIN_MANAGERS.has(exec.preset)) n.coinsManaged = true;
   if (n && !n.gear && !NO_LOADOUT.has(exec.kind)) n.gear = { style: 'melee', slots: requiredSlots('melee'), soft: true };
   if (n && catalogReq) n.req = mergeReq(n.req, catalogReq);
   return n;

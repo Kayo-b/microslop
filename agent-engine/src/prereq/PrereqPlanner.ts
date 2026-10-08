@@ -10,7 +10,7 @@
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import { type AccountApi, BankMemory, buildProfile, readAccount } from '../strategy/account.ts';
-import { nextLoadoutStep } from './loadout.ts';
+import { nextCoinStep, nextLoadoutStep } from './loadout.ts';
 import { type Phase, plannerFor, type StrategyDeps, surveyBankStep } from '../strategy/StrategyPlanner.ts';
 import type { Snapshot } from '../types.ts';
 import type { ActivityNeeds } from './needs.ts';
@@ -58,6 +58,7 @@ export class PrereqPlanner implements Planner {
   private readonly now: () => number;
   private mode: 'check' | 'setup' | 'equip' | 'activity' = 'check';
   private equipSteps = 0;
+  private coinGuards = 0;
   private queue: SetupStep[] = [];
   private current: { step: SetupStep; planner: Planner; startedAt: number; reportsAt: number } | null = null;
   private checks = 0;
@@ -93,6 +94,16 @@ export class PrereqPlanner implements Planner {
         const r = await this.runSetup(ctx);
         if (r) return r;
         continue;
+      }
+      // Between sub-goals: never carry a fortune around (6M went for a walk once). Capped, so an
+      // activity that keeps withdrawing cannot loop with it.
+      if (!this.needs.coinsManaged && this.coinGuards < 12) {
+        const bankIt = nextCoinStep(ctx.snapshot, this.d.kb ?? null);
+        if (bankIt) {
+          this.coinGuards++;
+          this.log(`coin guard: ${bankIt.kind === 'subgoal' ? bankIt.subgoal.text : bankIt.kind === 'act' ? bankIt.reason : bankIt.kind}`);
+          return bankIt;
+        }
       }
       const step = await this.inner.next({ ...ctx, reports: ctx.reports.slice(this.activityReportsAt) });
       if (step.kind === 'impossible' && FIXABLE.test(step.reason) && this.checks < (this.d.maxChecks ?? MAX_CHECKS)) {

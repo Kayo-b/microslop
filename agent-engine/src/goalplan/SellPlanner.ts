@@ -91,6 +91,16 @@ export const carriedCoins = (s: Snapshot) => s.inventory.items.filter((i) => i.n
 /** Coins above this are banked before walking anywhere (a PK or a misclick would cost the stack). */
 export const SAFE_CARRY = 10_000;
 
+/**
+ * Coins to take out of the bank for a buying trip: up to `cap`, never the whole stack (a character
+ * walked around with 6M and would have lost it all by dying). 0 when enough is carried already.
+ */
+export function coinTopUp(bankCoins: number, carried: number, cap: number): number {
+  const room = cap - carried;
+  if (room < cap / 2) return 0;
+  return Math.min(bankCoins, room);
+}
+
 /** True within a short walk of the Grand Exchange bank: coins are only taken out of the bank here. */
 export function nearGrandExchange(s: Snapshot, radius = 30): boolean {
   const p = s.player?.position;

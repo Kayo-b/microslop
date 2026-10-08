@@ -13,7 +13,7 @@ import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
 import { GE_DISTRACTIONS } from './HerblorePlanner.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, coinTopUp } from './SellPlanner.ts';
 
 const WOOL = 'Ball of wool';
 /** Free-to-play gem tiers whose unstrung amulets can be strung with wool. */
@@ -114,7 +114,7 @@ export class StringingPlanner implements Planner {
         const strung = s.bank.items.find((b) => strungNames.includes(b.name));
         if (strung) return { kind: 'act', action: { op: 'bank_withdraw', itemId: strung.id, amount: 'all', noted: true }, reason: `withdraw the ${strung.name}s as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-        if (coinStack && coinStack.quantity > coins) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy amulets' };
+        if (coinStack && coinTopUp(coinStack.quantity, coins, 300_000) > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: coinTopUp(coinStack.quantity, coins, 300_000) }, reason: 'withdraw coins to buy amulets' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }

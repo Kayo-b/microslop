@@ -40,3 +40,23 @@ export function nextLoadoutStep(s: Snapshot, bankNames: string[], kb: KnowledgeB
   if (s.bank.open) return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };
   return null;
 }
+
+/** Coins carried above this are banked before the activity goes on (a death loses them all). */
+export const COIN_LIMIT = 60_000;
+/** What stays in the bag for small purchases. */
+export const COIN_KEEP = 25_000;
+
+/** Bank the surplus coins: open a bank, then deposit all but COIN_KEEP. Null when the bag is light. */
+export function nextCoinStep(s: Snapshot, kb: KnowledgeBase | null): PlanStep | null {
+  if (!s.loggedIn || s.player?.inCombat || s.grandExchange?.open || s.shop.open) return null;
+  const stack = s.inventory.items.find((i) => i.name === 'Coins' && !i.noted);
+  const carried = stack?.quantity ?? 0;
+  if (!stack || carried <= COIN_LIMIT) return null;
+  if (s.bank.open) {
+    return { kind: 'act', action: { op: 'bank_deposit', itemId: stack.id, amount: carried - COIN_KEEP }, reason: `bank ${carried - COIN_KEEP} surplus coins` };
+  }
+  const pos = s.player?.position;
+  const bank = pos && kb ? kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
+  if (!bank) return null;
+  return { kind: 'subgoal', subgoal: { ...goal(`bank the surplus coins at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, ['Coins']), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS } };
+}
