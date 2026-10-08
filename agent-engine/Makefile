@@ -73,9 +73,9 @@ agent-strategy: ## account profile + next phase per strategy (dry run)
 	$(AGENT) strategy
 agent-flow: ## gold option tree for the logged-in account
 	$(AGENT) flow gold
-agent-price: ## sell value check: Grand Exchange net vs shop vs alch; ITEMS="Harralander potion (unf)"
+agent-price: ## sell value check (GE net vs shop vs alch); ITEMS="Cowhide,Steel bar" comma separated
 	$(call need,ITEMS,Cowhide)
-	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/price-check.ts $(foreach i,$(ITEMS),"$(i)")
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/price-check.ts "$(subst $(comma),"  ",$(ITEMS))"
 agent-presets: ## list scripted tasks
 	$(AGENT) presets
 agent-prereq: ## what a task needs first; TASK=kill-barbarians
