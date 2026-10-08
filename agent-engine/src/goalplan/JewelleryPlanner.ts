@@ -160,7 +160,7 @@ export class JewelleryPlanner implements Planner {
     const stocked = !!r && Math.min(...inputs.map(have)) >= Math.min(MIN_BUY, r.perTrip);
 
     // The make menu: pick the product when the bars and gems are still there.
-    if (s.production.open && s.production.interface === 'make') {
+    if (s.production.open && (s.production.interface === 'make' || s.production.interface === 'jewellery')) {
       if (r && inputs.every((n) => count(n, false) > 0)) return { kind: 'act', action: { op: 'production_select', option: r.option }, reason: `make ${r.option} (${r.xp} xp each)` };
       return step('open the Edgeville bank', ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 200, [], { destination: EDGEVILLE_BANK });
     }

@@ -86,3 +86,16 @@ test('agent: the third loop verdict ends the run; the first ones end the sub-goa
   assert.match(out.reason, /stuck in a loop/);
   assert.equal(reasons.filter((r) => r.startsWith('loop:')).length, 3);
 });
+
+test('agent: the same direct action sent over and over with nothing changing ends as blocked, then impossible', async () => {
+  const { Agent } = await import('../src/agent/Agent.ts');
+  const s = at(3109, 3499);
+  const backend = { snapshot: async () => s, act: async () => ({ success: true, op: 'use_item_on', tick: 1 }) };
+  const planner = { name: 'p', next: async () => ({ kind: 'act' as const, action: { op: 'ge_close' as const }, reason: 'use a gold bar on the Furnace' }) };
+  const reasons: string[] = [];
+  const agent = new Agent({ backend: backend as never, engine: {} as never, planner, sleep: async () => {}, onEvent: (e) => e.type === 'report' && reasons.push(e.report.reason) });
+  const out = await agent.run('craft');
+  assert.equal(out.status, 'impossible');
+  assert.ok(reasons.some((r) => /no effect: "use a gold bar on the Furnace" sent 8 times/.test(r)), reasons.join(' | '));
+  assert.equal(reasons.filter((r) => r === 'action sent').length, 7);
+});

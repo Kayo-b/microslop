@@ -510,6 +510,12 @@ public class SnapshotHandler extends AgentHandler {
 			p.put("options", AgentWidgets.smithingOptions(client));
 			return p;
 		}
+		if (AgentWidgets.isJewelleryOpen()) {
+			p.put("open", true);
+			p.put("interface", "jewellery");
+			p.put("options", AgentWidgets.jewelleryOptions(client));
+			return p;
+		}
 		if (AgentWidgets.isTanningOpen()) {
 			p.put("open", true);
 			p.put("interface", "tanning");
