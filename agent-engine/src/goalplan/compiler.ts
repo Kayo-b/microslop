@@ -186,10 +186,13 @@ function methodFor(skill: string, sim: Sim, skip: Set<string>, depth = 0): { met
   const lower: { method: TrainingMethod; needs: Need[]; below?: boolean }[] = [];
   for (const m of TRAINING) {
     if (m.skill !== key || at < m.from || (m.members && !sim.members) || skip.has(methodId(skill, m))) continue;
+    // A quest that is already finished gives its XP no more.
+    if (m.exec.kind === 'quest' && sim.quests.has(m.exec.quest)) continue;
     const needs = needsOf(m.req, sim, skip, depth + 1);
     if (needs === null) continue;
     if (at < m.to) viable.push({ method: m, needs });
-    else if (m.exec.kind !== 'llm') lower.push({ method: m, needs, below: true });
+    // A finished quest is one-shot XP, not a method to fall back on.
+    else if (m.exec.kind !== 'llm' && m.exec.kind !== 'quest') lower.push({ method: m, needs, below: true });
   }
   // Scripted before LLM methods: an LLM bracket method (flesh crawlers behind the Stronghold of
   // Security's question doors) looped at the Gate of War. With no scripted method in the bracket,

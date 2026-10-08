@@ -1,0 +1,8 @@
+{
+  "name": "char1-crafting-levels",
+  "account": "char1",
+  "targets": { "Crafting": 20 },
+  "quests": [],
+  "items": [],
+  "policy": { "boosterQuests": true, "levelsPerPhase": 15, "llm": { "tier1PerHour": 20, "tier2PerHour": 4 } }
+}
