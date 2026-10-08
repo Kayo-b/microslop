@@ -62,7 +62,7 @@ gold-rebuild-char2: ## merge feat/agent-engine into feat/char2 and rebuild its s
 
 ##@ agent - Look at and run the agent by hand (CHAR=1|2 picks the character)
 ##? vars: CHAR=1  PLAN=<plan json>  OPTION=<gold option>  TASK=<preset>  STRATEGY=level|money|gold|quest  HOURS=  ARGS=<extra flags>
-.PHONY: agent-price agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
+.PHONY: agent-price agent-watch agent-watch-last agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
 agent-state: ## live client state (position, login)
 	cd $(CHAR_ROOT) && $(CHAR_ENV) ./microbot-cli state
 agent-skills: ## skill levels
@@ -76,6 +76,10 @@ agent-flow: ## gold option tree for the logged-in account
 agent-price: ## sell value check (GE net vs shop vs alch); ITEMS="Cowhide,Steel bar" comma separated
 	$(call need,ITEMS,Cowhide)
 	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/price-check.ts "$(subst $(comma),"  ",$(ITEMS))"
+agent-watch: ## start the Sonnet run watcher for CHAR=1|2 (also started by every gold/level job)
+	$(GOLDRUN) watch $(CHAR)
+agent-watch-last: ## the latest watcher reviews for CHAR=1|2
+	@tail -n 6 $(CE)/data/watch/reviews.jsonl | python3 -c "import sys,json;[print(r['ts'][11:19],r['status'],'sev',r['severity'],'|',r['diagnosis'][:400],'=>',r['suggestion'][:300]) for r in map(json.loads,sys.stdin)]"
 agent-presets: ## list scripted tasks
 	$(AGENT) presets
 agent-prereq: ## what a task needs first; TASK=kill-barbarians
