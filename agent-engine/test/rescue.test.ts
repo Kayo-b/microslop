@@ -108,3 +108,15 @@ test('rescue: the same sub-goal blocked twice in a row at engine level is rescue
   assert.deepEqual(await p.next(ctx([noOptions, noOptions])), chop, 'the same streak is not rescued twice');
   assert.equal(rescuer.calls, 1);
 });
+
+test('rescue: a loop that alternates done and blocked reports (open the bank / fail to use it) is rescued too', async () => {
+  const inner = new Fixed(chop);
+  const rescuer = new Scripted();
+  const p = new RescuingPlanner(inner, rescuer, new MemoryRescueLog());
+  const done: SubGoalReport = { subgoal: 'open the bank', result: 'done', reason: 'completion check passed', steps: 2, trail: [] };
+  const blocked: SubGoalReport = { subgoal: 'close the bank', result: 'blocked', reason: 'no effect: "close the bank" sent 9 times and nothing changed', steps: 1, trail: [] };
+  const reports = [done, blocked, done, blocked, done];
+  assert.deepEqual(await p.next(ctx(reports)), chop, 'two blocked in six is not yet a loop');
+  assert.deepEqual(await p.next(ctx([...reports, blocked])), walkAround, 'three blocked in the last six is');
+  assert.equal(rescuer.calls, 1);
+});

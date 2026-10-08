@@ -88,6 +88,9 @@ const WATCHDOG_STUCK = /^stuck: (loop|no progress)/;
 
 /** Consecutive engine-level failures ("no options", "stuck: N failed actions") before a rescue; the gold rotation gives up at 3. */
 const BLOCKED_STREAK = 2;
+/** ...or this many blocked among the last BLOCKED_WINDOW reports. */
+const BLOCKED_WINDOW = 6;
+const BLOCKED_IN_WINDOW = 3;
 
 /** Wraps a scripted planner; calls the rescuer when it gives up or the watchdog ends a sub-goal. */
 export class RescuingPlanner implements Planner {
@@ -135,16 +138,18 @@ export class RescuingPlanner implements Planner {
 
     // The same sub-goal failing again and again at engine level (nothing to interact with, failed
     // actions) is neither a watchdog verdict nor a planner give-up, but the strategy layer would
-    // soon abandon the whole route over it.
+    // soon abandon the whole route over it. Two blocked in a row count, and so do most of the recent
+    // reports when "done" ones sit in between (open the bank, fail to use it, open it again).
+    const isEngineBlock = (r: SubGoalReport) => r.result === 'blocked' && !WATCHDOG_STUCK.test(r.reason) && !r.reason.startsWith('loop:');
     const tail = ctx.reports.slice(-BLOCKED_STREAK);
-    if (
-      ctx.reports.length > this.handledReports &&
-      tail.length === BLOCKED_STREAK &&
-      tail.every((r) => r.result === 'blocked' && !WATCHDOG_STUCK.test(r.reason) && !r.reason.startsWith('loop:'))
-    ) {
+    const recent = ctx.reports.slice(-BLOCKED_WINDOW);
+    const streak = tail.length === BLOCKED_STREAK && tail.every(isEngineBlock);
+    const scattered = recent.length === BLOCKED_WINDOW && recent.filter(isEngineBlock).length >= BLOCKED_IN_WINDOW;
+    if (ctx.reports.length > this.handledReports && (streak || scattered)) {
       this.handledReports = ctx.reports.length;
-      const evidence = tail.flatMap((r) => r.trail.slice(-2));
-      const step = await this.tryRescue(ctx, { trigger: 'blocked', reason: `${BLOCKED_STREAK} sub-goals in a row blocked; last: ${tail.at(-1)!.subgoal} -> ${tail.at(-1)!.reason}`, planner: this.inner.name, evidence });
+      const bad = (streak ? tail : recent.filter(isEngineBlock)).slice(-BLOCKED_STREAK);
+      const evidence = bad.flatMap((r) => r.trail.slice(-2));
+      const step = await this.tryRescue(ctx, { trigger: 'blocked', reason: `${streak ? BLOCKED_STREAK : BLOCKED_IN_WINDOW} blocked sub-goals ${streak ? 'in a row' : `of the last ${BLOCKED_WINDOW}`}; last: ${bad.at(-1)!.subgoal} -> ${bad.at(-1)!.reason}`, planner: this.inner.name, evidence });
       if (step) return step;
     }
 
