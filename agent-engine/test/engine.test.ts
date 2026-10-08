@@ -565,3 +565,37 @@ test('candidates: coordinates written in the sub-goal text beat the nearest obje
   assert.equal(d.length, 1);
   assert.deepEqual([d[0]!.to.x, d[0]!.to.y], [2985, 3292]);
 });
+
+test('engine: when the decision engine is down, the fallback LLM picks and the sub-goal does not block', async () => {
+  const initial = snapshot({ inventory: { freeSlots: 28, items: [item(0, 303, 'Small fishing net')] } });
+  const game = new FakeGame({ initial, actionTicks: 1 });
+  const server = await startFakeServer(game, 'tok');
+  const down = { name: 'down', decide: async () => { throw new Error('503'); } };
+  let asked = '';
+  const fallback: Escalator = {
+    choose: async (req) => {
+      asked = req.reason;
+      const spot = req.candidates.find((c) => c.action === 'Small Net')!;
+      return { op: 'interact', optionId: spot.id, note: 'picked by the fallback' };
+    },
+  };
+  const engine = new GameIntentEngine({
+    backend: new MicrobotBackend({ port: server.port, token: 'tok' }),
+    decisionEngine: down as never,
+    fallbackEscalator: fallback,
+    decisionRetries: 0,
+    verify: noSleep,
+  });
+  const goal: SubGoal = { text: 'catch shrimp', targets: ['Fishing spot'], actions: ['Small Net'], isDone: () => false };
+  try {
+    const r = await engine.step(goal);
+    assert.notEqual(r.kind, 'blocked', JSON.stringify(r));
+    assert.match(asked, /decision engine unavailable/);
+    assert.ok(game.acts.some((a) => a.op === 'interact' && a.action === 'Small Net'));
+    // Without a fallback the same failure still blocks.
+    const plain = new GameIntentEngine({ backend: new MicrobotBackend({ port: server.port, token: 'tok' }), decisionEngine: down as never, decisionRetries: 0, verify: noSleep });
+    assert.equal((await plain.step(goal)).kind, 'blocked');
+  } finally {
+    await server.close();
+  }
+});
