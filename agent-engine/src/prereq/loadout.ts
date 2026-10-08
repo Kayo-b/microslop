@@ -7,10 +7,11 @@ import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { upgradesFrom } from '../planner/gear.ts';
 import { goal, NOT_BANKS } from '../planner/TaskTreePlanner.ts';
 import type { PlanStep } from '../planner/types.ts';
+import { isMaterial } from '../engine/drops.ts';
 import type { Snapshot } from '../types.ts';
 
 /** The next step towards wearing the best usable gear, or null when nothing is left to equip. */
-export function nextLoadoutStep(s: Snapshot, bankNames: string[], kb: KnowledgeBase | null): PlanStep | null {
+export function nextLoadoutStep(s: Snapshot, bankNames: string[], kb: KnowledgeBase | null, o: { bankMaterials?: boolean } = {}): PlanStep | null {
   if (!s.loggedIn || s.player?.inCombat) return null;
   const inv = s.inventory.items.map((i) => i.name);
   const keep = [...inv];
@@ -28,6 +29,13 @@ export function nextLoadoutStep(s: Snapshot, bankNames: string[], kb: KnowledgeB
     const bank = pos && kb ? kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
     if (!bank) return null;
     return { kind: 'subgoal', subgoal: { ...goal(`get better gear (${fetch.map((u) => u.slot).join(', ')}) at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS } };
+  }
+  const clutter = o.bankMaterials ? [...new Set(inv.filter(isMaterial))] : [];
+  if (clutter.length) {
+    if (s.bank.open) return { kind: 'subgoal', subgoal: goal(`deposit the ${clutter.join(', ')}`, clutter, ['Deposit'], { lacksItems: clutter }, 30, inv.filter((n) => !clutter.includes(n))) };
+    const pos = s.player?.position;
+    const bank = pos && kb ? kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
+    if (bank) return { kind: 'subgoal', subgoal: { ...goal(`bank the ${clutter.join(', ')} at the ${bank.name}`, ['Bank booth', 'Banker'], ['Bank'], { bankOpen: true }, 300, keep), destination: { name: bank.name, point: bank.point }, avoid: NOT_BANKS } };
   }
   if (s.bank.open) return { kind: 'subgoal', subgoal: goal('close the bank', ['Bank'], ['Close'], { bankOpen: false }, 5, keep) };
   return null;

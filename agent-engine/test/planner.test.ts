@@ -44,8 +44,9 @@ test('task tree: gather -> bank -> deposit -> close -> gather', () => {
   const close = nextGatherStep(task, emptied);
   assert.ok(close.kind === 'subgoal' && close.subgoal.doneWhen?.bankOpen === false);
 
-  const drop = nextGatherStep({ ...task, bank: false }, fullOfShrimp());
-  assert.ok(drop.kind === 'subgoal' && drop.subgoal.actions?.includes('Drop'));
+  // Valuable products are banked even when the preset says drop; only worthless ones are dropped.
+  const noDrop = nextGatherStep({ ...task, bank: false }, fullOfShrimp());
+  assert.ok(noDrop.kind === 'subgoal' && noDrop.subgoal.actions?.includes('Bank') && !noDrop.subgoal.actions?.includes('Drop'));
 
   const leveled = snapshot();
   leveled.skills.find((s) => s.name === 'Fishing')!.level = 20;

@@ -10,6 +10,7 @@
  * identical targets are collapsed to the nearest few, and entities matching the sub-goal's hints
  * are ranked first.
  */
+import { isDroppable } from './drops.ts';
 import type { KnowledgeBase, PlayerContext } from '../kb/KnowledgeBase.ts';
 import { tileDistance } from '../kb/KnowledgeBase.ts';
 import type { Candidate, Destination, Snapshot, SubGoal, WorldPoint } from '../types.ts';
@@ -186,7 +187,7 @@ export function buildCandidates(s: Snapshot, kb: KnowledgeBase | null, goal: Sub
 
   out.push(
     ...inventoryCandidates(s, goal.keep).filter(
-      (c) => inventoryActionAllowed(c.action, goal) && (c.action !== 'Drop' || (!!goal.targets?.length && matchesAny(c.name, goal.targets))),
+      (c) => inventoryActionAllowed(c.action, goal) && (c.action !== 'Drop' || (!!goal.targets?.length && matchesAny(c.name, goal.targets) && isDroppable(c.name))),
     ),
   );
   out.push(...namedItemPairs(s, goal));
@@ -242,7 +243,7 @@ function inventoryCandidates(s: Snapshot, keep?: string[]): Candidate[] {
   for (const item of items) {
     for (const action of item.actions) {
       if (IGNORED_INVENTORY_ACTIONS.has(lc(action))) continue;
-      if (action === 'Drop' && isKept(item.name, keep)) continue;
+      if (action === 'Drop' && (isKept(item.name, keep) || !isDroppable(item.name))) continue;
       const key = `${item.name}|${action}`;
       if (seen.has(key)) continue;
       seen.add(key);

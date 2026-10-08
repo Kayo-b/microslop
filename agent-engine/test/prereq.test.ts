@@ -147,3 +147,16 @@ test('loadout: every non-combat activity wants gear, softly; owned gear is wield
   assert.ok(wield?.kind === 'subgoal' && /wield the Iron scimitar/.test(wield.subgoal.text));
   assert.equal(nextLoadoutStep(snapshot(), [], null), null, 'nothing to wear: done');
 });
+
+test('no-drop: materials are banked, never offered for dropping; quests start with materials banked', async () => {
+  const { isDroppable, isMaterial } = await import('../src/engine/drops.ts');
+  assert.ok(!isDroppable('Harralander potion (unf)') && !isDroppable('Oak logs') && !isDroppable('Raw shrimps'));
+  assert.ok(isDroppable('Burnt shrimp') && isDroppable('Ashes'));
+  assert.ok(isMaterial('Harralander potion (unf)') && !isMaterial('Wool') && !isMaterial('Shears'));
+
+  const { nextLoadoutStep } = await import('../src/prereq/loadout.ts');
+  const carrying = snapshot({ inventory: { freeSlots: 20, items: [item(0, 97, 'Harralander potion (unf)'), item(1, 1735, 'Shears'), item(2, 1737, 'Wool')] }, bank: { open: true, items: [] } });
+  const step = nextLoadoutStep(carrying, [], null, { bankMaterials: true });
+  assert.ok(step?.kind === 'subgoal' && /deposit the Harralander potion \(unf\)/.test(step.subgoal.text) && !step.subgoal.targets?.includes('Wool'));
+  assert.equal(nextLoadoutStep(carrying, [], null)?.kind === 'subgoal' && /deposit/.test((nextLoadoutStep(carrying, [], null) as { subgoal: { text: string } }).subgoal.text), false, 'materials are only banked when asked');
+});
