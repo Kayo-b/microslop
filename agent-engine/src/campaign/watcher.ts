@@ -6,11 +6,10 @@
  *   node src/campaign/watcher.ts [--interval 180] [--model claude-haiku-4-5-20251001] [--char 2] [--once]
  *
  * Run it from a character's agent-engine directory (it uses MICROBOT_PORT / MICROBOT_TOKEN_FILE like
- * the other tools). It only observes: findings go to data/watch/reviews.jsonl, the journal and, for
- * serious ones, a desktop notification. It never clicks.
+ * the other tools). It only observes: findings go to data/watch/reviews.jsonl, and the journal (the
+ * dashboard shows the latest one; no desktop popups). It never clicks.
  */
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -25,7 +24,6 @@ const { values } = parseArgs({
     model: { type: 'string', default: process.env.WATCH_MODEL ?? 'claude-haiku-4-5-20251001' },
     char: { type: 'string', default: process.env.MICROBOT_CHARACTER_NO ?? '?' },
     once: { type: 'boolean', default: false },
-    'no-notify': { type: 'boolean', default: false },
     'no-act': { type: 'boolean', default: process.env.WATCH_ACT === '0' },
   },
 });
@@ -157,10 +155,6 @@ async function intervene(action: WatchAction, backend: MicrobotBackend): Promise
   }
 }
 
-function notify(title: string, body: string): void {
-  execFile('notify-send', ['-a', 'Microbot', '-u', 'critical', title, body.slice(0, 300)], () => undefined);
-}
-
 async function main(): Promise<void> {
   const interval = Number(values.interval) * 1000;
   const llm = createLlmClient({ provider: 'claude-code', model: String(values.model) });
@@ -204,7 +198,6 @@ async function main(): Promise<void> {
       // The rescue inside the run reads this (src/llm/watchFeed.ts).
       writeFileSync(path.join(outDir, 'latest.json'), JSON.stringify(record));
       console.log(`[watch] ${record.ts.slice(11, 19)} ${review.status} (sev ${review.severity}) ${review.diagnosis}${review.suggestion ? ` => ${review.suggestion}` : ''}`);
-      if (review.severity >= 2 && !values['no-notify']) notify(`Microbot char ${values.char}: ${review.status}${acted ? ` (${acted.slice(0, 40)})` : ''}`, review.diagnosis);
     } catch (e) {
       console.error(`[watch] review failed: ${e instanceof Error ? e.message : e}`);
     }

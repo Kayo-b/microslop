@@ -20,8 +20,8 @@ CE := $(CHAR_ROOT)/agent-engine
 RUN := cd $(CE) && $(CHAR_ENV)
 AGENT := $(RUN) npm run -s agent --
 AGENTJOB := $(ENGINE)/scripts/linux/agent-job
-# level job: unattended unless FG=1 (LLM flags then come from gold-run's LLM_ARGS); $(call lvl,<name>,<agent run args>)
-lvl = $(if $(FG),$(AGENT) run $(2) $(LLM) $(ARGS),$(AGENTJOB) --char $(CHAR) --name $(1)-char$(CHAR) $(if $(HOURS),--hours $(HOURS)) -- $(2) $(ARGS))
+# level job: unattended unless FG=1; FORCE=1 replaces a run already going on CHAR (LLM flags then come from gold-run's LLM_ARGS); $(call lvl,<name>,<agent run args>)
+lvl = $(if $(FG),$(AGENT) run $(2) $(LLM) $(ARGS),$(AGENTJOB) --char $(CHAR) --name $(1)-char$(CHAR) $(if $(FORCE),--force) $(if $(HOURS),--hours $(HOURS)) -- $(2) $(ARGS))
 LLM ?= --llm claude-code --rescue-model haiku --rescue
 WHO ?= both
 GOLDRUN := $(ENGINE)/scripts/linux/gold-run
@@ -53,8 +53,8 @@ gold-dry-run: ## show the campaign rotation without running it
 	$(GOLDRUN) start $(WHO) -- --dry-run $(if $(PLAN),--plan $(PLAN))
 gold-dash: ## ONE screen for both characters: activity, results, live state, Jev share, watcher verdict, rescues (HOURS=window)
 	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts $(if $(HOURS),--hours $(HOURS))
-gold-dash-live: ## the dashboard refreshing every 30 s (Ctrl+C to leave)
-	cd $(ENGINE) && watch -n 30 -t node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts
+gold-dash-live: ## the dashboard following both runs live, with an event feed (SECS=5 refresh; Ctrl+C to leave)
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts --live $(if $(SECS),--interval $(SECS)) $(if $(HOURS),--hours $(HOURS))
 gold-status: ## unit state, current activity, rescues, gp/h, alerts
 	$(GOLDRUN) status $(WHO)
 gold-logs: ## follow the journal of one character (WHO=1|2)
@@ -66,7 +66,7 @@ gold-rebuild-char2: ## merge feat/agent-engine into feat/char2 and rebuild its s
 
 ##@ agent - Look at and run the agent by hand (CHAR=1|2 picks the character)
 ##? vars: CHAR=1  PLAN=<plan json>  OPTION=<gold option>  TASK=<preset>  STRATEGY=level|money|gold|quest  HOURS=  ARGS=<extra flags>
-.PHONY: agent-dash agent-price agent-watch agent-watch-last agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
+.PHONY: agent-dash agent-dash-live agent-price agent-watch agent-watch-last agent-state agent-skills agent-inventory agent-strategy agent-flow agent-presets agent-prereq agent-plan-show agent-monitor agent-llm-report agent-run-flow agent-run-strategy agent-run-plan agent-run-task agent-campaign-plan
 agent-state: ## live client state (position, login)
 	cd $(CHAR_ROOT) && $(CHAR_ENV) ./microbot-cli state
 agent-skills: ## skill levels
@@ -77,8 +77,10 @@ agent-strategy: ## account profile + next phase per strategy (dry run)
 	$(AGENT) strategy
 agent-flow: ## gold option tree for the logged-in account
 	$(AGENT) flow gold
-agent-dash: ## same one-screen dashboard of all runs on both characters (gold, level, plan, gathering, anything)
-	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts $(if $(HOURS),--hours $(HOURS))
+agent-dash: ## one-screen dashboard of all runs on both characters (gold, level, plan, gathering, anything); LIVE=1 follows them live
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts $(if $(LIVE),--live $(if $(SECS),--interval $(SECS))) $(if $(HOURS),--hours $(HOURS))
+agent-dash-live: ## the dashboard following all runs live with an event feed (SECS=5 refresh; Ctrl+C to leave)
+	cd $(ENGINE) && node --disable-warning=ExperimentalWarning src/campaign/dashboard.ts --live $(if $(SECS),--interval $(SECS)) $(if $(HOURS),--hours $(HOURS))
 agent-price: ## sell value check (GE net vs shop vs alch); ITEMS="Cowhide,Steel bar" comma separated
 	$(call need,ITEMS,Cowhide)
 	cd $(ENGINE) && node --disable-warning=ExperimentalWarning scripts/price-check.ts "$(subst $(comma),"  ",$(ITEMS))"
