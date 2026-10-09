@@ -2930,8 +2930,11 @@ final class Rs2WalkerTransports {
     }
 
     private static void confirmCharterTravelIfPrompted() {
-        if (sleepUntil(Rs2Dialogue::hasSelectAnOption, 2000)) {
-            Rs2Dialogue.clickOption("Yes", true);
+        // The prompt reads "Sail to X for N coins?" with options "Yes.", "Choose again.", "Yes, and don't ask
+        // again.", "Cancel." — an exact "Yes" never matched "Yes.", so the prompt stayed open and the walker
+        // timed out after every charter. Options are tried in order, so the first containing "Yes" is "Yes.".
+        if (sleepUntil(Rs2Dialogue::hasSelectAnOption, 4000)) {
+            Rs2Dialogue.clickOption("Yes", false);
         }
     }
 
