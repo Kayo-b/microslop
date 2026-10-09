@@ -45,3 +45,10 @@ sub-goals: a stuck/wrong verdict at severity 2+, newer than the run's start and 
 `watcher` rescue straight away, with the review's diagnosis and suggested fix in the prompt. So the first stuck
 verdict goes to the rescue; the watcher's own actions come later: soft ones (close windows, cancel the walk) when the
 next review still says stuck, ending the activity at the third.
+
+## Boat trips from the LLM (Port Sarim -> Hosidius sand crabs)
+Char 2 sailed to Land's End, then the model chose `wait` instead of crossing the gangplank (`obj:50065 #Cross`) and
+accepted the next sail dialogue: "You pay 2,700 coins and sail to Musa Point", back to where it started, and repeated the
+trip. The walker also reported ~1550 tiles to go from the dock. There is no scripted boat handling yet, so Magic now uses the
+scripted Wind Strike chicken preset up to level 25 (it was 13) and only then the sand-crab trip. A lone job also sits out one
+cooldown round after an error instead of three (the idle minutes after a client timeout).
