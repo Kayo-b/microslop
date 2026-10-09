@@ -207,7 +207,7 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
       d.log(status === 'complete' ? `${act.name} reached: stopping` : `${act.name} cannot progress: stopping (see llm-report and the roadmap)`);
       break;
     }
-    if (status === 'impossible' || status === 'error' || status === 'crashed') cooldowns.set(act.name, cfg.cooldownRounds);
+    if (status === 'impossible' || status === 'error' || status === 'crashed') cooldowns.set(act.name, cfg.activities.length > 1 ? cfg.cooldownRounds : 1); // a lone job has nothing to rotate to: sit out one round, not several
     last = act.name;
 
     if (cfg.rebuildEvery > 0 && results.length % cfg.rebuildEvery === 0) {
