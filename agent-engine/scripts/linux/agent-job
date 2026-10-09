@@ -2,17 +2,19 @@
 # Run one `agent run ...` as an unattended job: starts the client, logs in, restarts on crashes,
 # runs as a systemd user unit (same machinery as gold-run).
 #
-#   agent-job --char 1|2 [--hours H] [--name N] -- run --strategy level --skill Fishing --level 40
+#   agent-job --char 1|2 [--hours H] [--name N] [--force] -- run --strategy level --skill Fishing --level 40
 #
 # AGENT_JOB_DRY=1 writes the config only. LLM flags come from gold-run (LLM_ARGS).
+# --force (or FORCE=1) replaces a run that is already going on that character.
 # Watch/stop with `gold-run status|logs|stop 1|2`.
 set -euo pipefail
-char=1; hours=""; name=""
+char=1; hours=""; name=""; fargs=()
 while (($#)); do
   case "$1" in
     --char) char="$2"; shift 2;;
     --hours) hours="$2"; shift 2;;
     --name) name="$2"; shift 2;;
+    --force) fargs=(--force); shift;;
     --) shift; break;;
     *) echo "agent-job: unknown option $1" >&2; exit 2;;
   esac
@@ -35,5 +37,5 @@ PY
 echo "job $name -> $rel (char $char): agent run $*"
 [[ "${AGENT_JOB_DRY:-0}" == 1 ]] && { echo "(dry run: not started)"; exit 0; }
 gold_run="$engine_main/scripts/linux/gold-run"
-hargs=(); [[ -n "$hours" ]] && hargs=(--hours "$hours")
+hargs=("${fargs[@]}"); [[ -n "$hours" ]] && hargs+=(--hours "$hours")
 if [[ "$char" == 1 ]]; then CHAR1_CONFIG="$rel" "$gold_run" start 1 "${hargs[@]}"; else CHAR2_CONFIG="$rel" "$gold_run" start 2 "${hargs[@]}"; fi

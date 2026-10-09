@@ -4,7 +4,10 @@
  * last hour. Reads both checkouts (char 1 here, char 2 in ../Microbot_-char2), so nothing needs to be
  * opened one character at a time.
  *
- *   node src/campaign/dashboard.ts [--hours 1]
+ *   node src/campaign/dashboard.ts [--hours 1] [--live [--interval 5]]
+ *
+ * --live redraws in place every few seconds and shows a feed of the newest events (agent steps,
+ * watcher verdicts, rescues) from both characters, so the screen follows the runs as they go.
  */
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -33,7 +36,13 @@ const CHARS: Char[] = [
 ];
 
 const hoursArg = process.argv.indexOf('--hours');
-const SINCE_MS = Date.now() - (hoursArg > 0 ? Number(process.argv[hoursArg + 1]) : 1) * 3_600_000;
+const HOURS = hoursArg > 0 ? Number(process.argv[hoursArg + 1]) : 1;
+const LIVE = process.argv.includes('--live');
+const intervalArg = process.argv.indexOf('--interval');
+const INTERVAL_S = Math.max(1, intervalArg > 0 ? Number(process.argv[intervalArg + 1]) : 5);
+const FEED_ROWS = 14;
+
+interface FeedEvent { t: number; text: string }
 
 const tail = (file: string, n: number): string[] => {
   try {
@@ -73,8 +82,10 @@ async function active(unit: string): Promise<string> {
 
 interface Step { time?: string; source?: string; model?: string; subgoal?: string; state?: { location?: string; status?: string } }
 
-async function show(c: Char): Promise<string[]> {
+async function show(c: Char, feed: FeedEvent[]): Promise<string[]> {
   const out: string[] = [];
+  const tag = `c${c.n}`;
+  const since = Date.now() - HOURS * 3_600_000;
   const [unit, watcher] = await Promise.all([active(c.unit), active(c.watcher)]);
   out.push(`== ${c.name}: campaign ${unit}, watcher ${watcher} ==`);
 
@@ -92,6 +103,10 @@ async function show(c: Char): Promise<string[]> {
   const run = newest(path.join(c.root, 'logs', 'agent'));
   const steps = run ? tail(path.join(c.root, 'logs', 'agent', run, 'steps.jsonl'), 200).map((l) => json<Step>(l)).filter((s): s is Step => !!s) : [];
   const last = steps.at(-1);
+  for (const st of steps.slice(-FEED_ROWS)) {
+    const t = Date.parse(st.time ?? '');
+    if (Number.isFinite(t)) feed.push({ t, text: `${tag} step    ${st.source === 'model' ? (st.model?.startsWith('jev') ? 'jev' : (st.model ?? 'model')) : (st.source ?? '?')} @ ${st.state?.location ?? '?'}: ${clip(st.subgoal ?? '', 80)}` });
+  }
   if (last) {
     out.push(`  last step: ${ago(last.time)} at ${last.state?.location ?? '?'} [${last.state?.status ?? ''}] "${clip(last.subgoal ?? '', 70)}"`);
     const bySource = new Map<string, number>();
@@ -112,10 +127,17 @@ async function show(c: Char): Promise<string[]> {
     out.push('  live     : client not reachable');
   }
 
-  const review = json<{ ts: string; status: string; severity: number; diagnosis: string; acted?: string }>(tail(path.join(c.root, 'data', 'watch', 'reviews.jsonl'), 1)[0] ?? '');
+  type Review = { ts: string; status: string; severity: number; diagnosis: string; acted?: string };
+  const reviews = tail(path.join(c.root, 'data', 'watch', 'reviews.jsonl'), FEED_ROWS).map((l) => json<Review>(l)).filter((r): r is Review => !!r);
+  const review = reviews.at(-1);
+  for (const r of reviews) {
+    const t = Date.parse(r.ts);
+    if (Number.isFinite(t)) feed.push({ t, text: `${tag} watcher ${r.status} (sev ${r.severity})${r.acted ? ` acted: ${clip(r.acted, 40)}` : ''} - ${clip(r.diagnosis, 100)}` });
+  }
   if (review) out.push(`  watcher  : ${ago(review.ts)} ${review.status} (sev ${review.severity})${review.acted ? ` acted: ${clip(review.acted, 40)}` : ''} - ${clip(review.diagnosis, 140)}`);
 
-  const rescues = tail(path.join(c.root, 'data', 'rescues.jsonl'), 400).map((l) => json<{ kind: string; ts: string; trigger?: string }>(l)).filter((r): r is { kind: string; ts: string; trigger?: string } => !!r && r.kind === 'rescue' && Date.parse(r.ts) >= SINCE_MS);
+  const rescues = tail(path.join(c.root, 'data', 'rescues.jsonl'), 400).map((l) => json<{ kind: string; ts: string; trigger?: string }>(l)).filter((r): r is { kind: string; ts: string; trigger?: string } => !!r && r.kind === 'rescue' && Date.parse(r.ts) >= since);
+  for (const r of rescues.slice(-FEED_ROWS)) feed.push({ t: Date.parse(r.ts), text: `${tag} rescue  ${r.trigger ?? '?'}` });
   if (rescues.length) {
     const by = new Map<string, number>();
     for (const r of rescues) by.set(r.trigger ?? '?', (by.get(r.trigger ?? '?') ?? 0) + 1);
@@ -124,6 +146,35 @@ async function show(c: Char): Promise<string[]> {
   return out;
 }
 
-const blocks = await Promise.all(CHARS.map(show));
-console.log(`Microbot runs, ${new Date().toLocaleTimeString()} (rescues over the last ${hoursArg > 0 ? process.argv[hoursArg + 1] : 1} h)\n`);
-for (const b of blocks) console.log(`${b.join('\n')}\n`);
+async function frame(): Promise<string[]> {
+  const feed: FeedEvent[] = [];
+  const blocks = await Promise.all(CHARS.map((c) => show(c, feed)));
+  const lines = [`Microbot runs, ${new Date().toLocaleTimeString()} (rescues over the last ${HOURS} h)${LIVE ? `, live every ${INTERVAL_S} s, Ctrl+C to leave` : ''}`, ''];
+  for (const b of blocks) lines.push(...b, '');
+  feed.sort((a, b) => a.t - b.t);
+  lines.push('== latest events ==');
+  for (const e of feed.slice(-FEED_ROWS)) lines.push(`  ${new Date(e.t).toLocaleTimeString()} ${e.text}`);
+  return lines;
+}
+
+if (!LIVE) {
+  console.log((await frame()).join('\n'));
+} else {
+  const out = process.stdout;
+  const restore = () => out.write('\x1b[?25h\x1b[?1049l');
+  out.write('\x1b[?1049h\x1b[?25l');
+  process.on('SIGINT', () => { restore(); process.exit(0); });
+  process.on('SIGTERM', () => { restore(); process.exit(0); });
+  const cols = () => out.columns || 200;
+  for (;;) {
+    let lines: string[];
+    try {
+      lines = await frame();
+    } catch (e) {
+      lines = [`dashboard error: ${e instanceof Error ? e.message : e}`];
+    }
+    // One write per frame, overwriting in place: no flicker.
+    out.write(`\x1b[H${lines.map((l) => `${clip(l, cols())}\x1b[K`).join('\n')}\n\x1b[J`);
+    await new Promise((r) => setTimeout(r, INTERVAL_S * 1000));
+  }
+}
