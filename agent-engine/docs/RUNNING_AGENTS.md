@@ -48,6 +48,8 @@ npm run agent -- monitor [--hours 2]                              # running camp
 | flow | `run --flow gold --option herblore` | strict: one option + only its own sub-flows |
 | plan | `run --plan plans/example-combat-90s.json` | roadmap toward a build ([PLANS.md](PLANS.md)) |
 
+Hub plugin methods (agility, GOTR, alching, free smithing, Mahogany Homes): [HUB_PLUGINS.md](HUB_PLUGINS.md).
+
 Gold flow options (`src/strategy/catalog.ts`): `cowhides`, `iron-ore`, `willow-logs`,
 `trout-salmon`, `lobsters`, `hill-giants`, `moss-giants`, `yew-logs`, `tan-hides`,
 `sand-crabs-herbs`, `feathers`, `guard-coins`, `smelt-steel`, `herblore`, `string-amulets`,
