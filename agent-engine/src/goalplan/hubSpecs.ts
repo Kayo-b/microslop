@@ -126,18 +126,17 @@ export const GOTR: HubSpec = {
 // --- Smithing on a free account: smelt for profit, smith platebodies with it ---------------------
 
 const METALS = [
-  { metal: 'Bronze', bar: 'Bronze bar', enumBar: 'BRONZE', base: 1, xp: 12.5 },
   { metal: 'Iron', bar: 'Iron bar', enumBar: 'IRON', base: 15, xp: 25 },
   { metal: 'Steel', bar: 'Steel bar', enumBar: 'STEEL', base: 30, xp: 37.5 },
   { metal: 'Mithril', bar: 'Mithril bar', enumBar: 'MITHRIL', base: 50, xp: 50 },
   { metal: 'Adamant', bar: 'Adamantite bar', enumBar: 'ADAMANTITE', base: 70, xp: 62.5 },
   { metal: 'Rune', bar: 'Runite bar', enumBar: 'RUNITE', base: 85, xp: 75 },
 ];
-/** Liquid anvil products: level offset from the metal's base, bars, the plugin's enum. */
-const PRODUCTS = [
-  { item: 'platebody', enumItem: 'PLATE_BODY', offset: 18, bars: 5 },
-  { item: 'platelegs', enumItem: 'PLATE_LEGS', offset: 16, bars: 3 },
-];
+/**
+ * Anvil products that sell in bulk: platebodies trade 50k-370k a day (iron to adamant); platelegs and
+ * bronze anything only a few thousand, so 2,500 of them would sink the price the margin assumed.
+ */
+const PRODUCTS = [{ item: 'platebody', enumItem: 'PLATE_BODY', offset: 18, bars: 5 }];
 /** Smelting: ores per bar and smelting XP; free accounts carry no coal bag. */
 const SMELTS = [
   { bar: 'Steel bar', enumBar: 'STEEL', level: 30, xp: 17.5, ore: 'Iron ore', coal: 2 },
