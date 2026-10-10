@@ -118,23 +118,43 @@ export function decideIntervention(review: Pick<Review, 'status' | 'severity' | 
   return review.action;
 }
 
-/** Ends the running `agent run` of this checkout; the campaign records it and starts the next activity. */
-export function skipActivity(root = process.cwd()): string {
+/** Pids of this checkout's processes whose command line matches `pattern`. */
+function processesOf(pattern: RegExp, root: string): number[] {
+  const found: number[] = [];
   for (const pid of readdirSync('/proc').filter((n) => /^\d+$/.test(n))) {
     try {
       const cmd = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').join(' ');
-      if (!/src\/cli\.ts run /.test(cmd)) continue;
-      if (readlinkSync(`/proc/${pid}/cwd`) !== root) continue;
-      process.kill(Number(pid), 'SIGTERM');
-      return `ended the running agent (pid ${pid})`;
+      if (pattern.test(cmd) && readlinkSync(`/proc/${pid}/cwd`) === root) found.push(Number(pid));
     } catch {
       // Gone or not ours.
+    }
+  }
+  return found;
+}
+
+/** File where the watcher notes the agent it ended, so the campaign records "ended by the watcher", not a crash. */
+export const SKIP_FILE = path.join('data', 'watch', 'skipped.json');
+
+/** Ends the running `agent run` of this checkout; the campaign records it and starts the next activity. */
+export function skipActivity(reason: string, root = process.cwd()): string {
+  for (const pid of processesOf(/src\/cli\.ts run /, root)) {
+    try {
+      writeFileSync(path.join(root, SKIP_FILE), JSON.stringify({ pid, ts: new Date().toISOString(), reason: reason.slice(0, 300) }));
+      process.kill(pid, 'SIGTERM');
+      return `ended the running agent (pid ${pid})`;
+    } catch {
+      // Gone already.
     }
   }
   return 'no running agent process found';
 }
 
-async function intervene(action: WatchAction, backend: MicrobotBackend): Promise<string> {
+/** True while a campaign (runner.ts) of this checkout is running. */
+export function campaignRunning(root = process.cwd()): boolean {
+  return processesOf(/src\/campaign\/runner\.ts/, root).length > 0;
+}
+
+async function intervene(action: WatchAction, backend: MicrobotBackend, reason: string): Promise<string> {
   switch (action) {
     case 'none':
       return '';
@@ -151,7 +171,7 @@ async function intervene(action: WatchAction, backend: MicrobotBackend): Promise
       return `walk_cancel:${r.success ? 'ok' : (r as { reason?: string }).reason ?? 'failed'}`;
     }
     case 'skip_activity':
-      return skipActivity();
+      return skipActivity(reason);
   }
 }
 
@@ -167,7 +187,14 @@ async function main(): Promise<void> {
   let unchanged = 0;
   let consecutiveBad = 0;
   let lastSkip = 0;
+  let noCampaign = 0;
   for (;;) {
+    // The watcher belongs to a campaign: once none has run here for three reviews, it is done.
+    noCampaign = campaignRunning() ? 0 : noCampaign + 1;
+    if (noCampaign >= 3) {
+      console.log('[watch] no campaign running in this checkout for three reviews: exiting');
+      return;
+    }
     try {
       const ev = await gather();
       unchanged = ev.fingerprint === prev ? unchanged + 1 : 0;
@@ -186,7 +213,7 @@ async function main(): Promise<void> {
       const chosen = unchanged >= 3 ? (Date.now() - lastSkip >= 8 * 60_000 ? 'skip_activity' : 'none') : decideIntervention(review, consecutiveBad, Date.now() - lastSkip);
       let acted = '';
       if (chosen !== 'none' && !values['no-act']) {
-        acted = `${chosen}: ${await intervene(chosen, new MicrobotBackend())}`;
+        acted = `${chosen}: ${await intervene(chosen, new MicrobotBackend(), review.diagnosis)}`;
         if (chosen === 'skip_activity') {
           lastSkip = Date.now();
           consecutiveBad = 0;
