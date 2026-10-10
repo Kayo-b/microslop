@@ -21,6 +21,7 @@ prefer a rule in code (planner, engine, catalog) over a hint in a prompt.
 | Runecraft ended impossible (char 2, dashboard) | Walking the last 5 tiles to the ruins, the walk sub-goal was complete the instant it started and was re-issued 20 times: "planner keeps re-issuing a sub-goal that is already complete" ended the job, and nothing restarted it for hours | the planner waits while still moving near the ruins; `make-gold dash` shows an idle campaign at a glance |
 | Both jobs ended "impossible" (2026-10-09) | The watcher's own skip (SIGTERM) was logged as "crashed - exit code 143"; the rescue read "crashed twice" as a fatal client bug and ended the jobs; both watchers then reviewed the dead runs with Haiku every 3 min for 26 h | the watcher notes the pid it ended (`data/watch/skipped.json`), the campaign records "stopped - ended by the run watcher"; the watcher exits once no campaign runs in its checkout |
 | Smithing to 99 on a free account | mining own ore ran ~6k XP/h; platebodies from bought bars lose 6-9 gp/XP (~100M to 99) | hub plugins: smelt bought ore for profit, smith platebodies with it, adamant platebodies at 88 (~0.4 gp/XP) ([HUB_PLUGINS.md](HUB_PLUGINS.md)) |
+
 Pattern: when an LLM-driven method repeats the same mistake, script it. `npm run agent -- llm-report`
 and `data/rescues.jsonl` list what keeps needing rescue.
 
