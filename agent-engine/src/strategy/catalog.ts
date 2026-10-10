@@ -220,6 +220,8 @@ export const QUESTS: QuestInfo[] = [
   { name: 'The Restless Ghost', members: false, reward: '1,125 Prayer XP' },
   { name: 'Romeo & Juliet', members: false, reward: '5 quest points' },
   { name: 'Rune Mysteries', members: false, reward: 'Runecraft access (air runes)' },
+  { name: 'Enter the Abyss', members: true, req: { quests: ['Rune Mysteries'] }, reward: 'Abyss access; needed for Temple of the Eye', hours: 0.5 },
+  { name: 'Temple of the Eye', members: true, req: { quests: ['Enter the Abyss'], skills: { Runecraft: 10 } }, reward: 'Guardians of the Rift', hours: 1 },
   { name: 'Imp Catcher', members: false, boosts: { Magic: 875 },  reward: '875 Magic XP' },
   { name: "Witch's Potion", members: false, boosts: { Magic: 325 },  reward: '325 Magic XP' },
   { name: "Doric's Quest", members: false, req: { skills: { Mining: 15 } }, reward: '1,300 Mining XP; Doric\'s anvils' },

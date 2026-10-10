@@ -10,7 +10,7 @@ import { item, snapshot } from './support/fixtures.ts';
 
 const tmp = process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, 'tmp') : '/tmp';
 const skills = (levels: Record<string, number>) =>
-  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
+  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking', 'Runecraft'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
 
 function state(levels: Record<string, number>, extra: Partial<Snapshot> = {}): Snapshot {
   const s = snapshot(extra);
@@ -297,4 +297,14 @@ test('strategy level: fishing, woodcutting and cooking change method with the le
   assert.match(pick('Cooking', { Cooking: 42 }), /lobsters/);
   assert.match(pick('Cooking', { Cooking: 60 }), /swordfish/);
   assert.match(pick('Fishing', { Fishing: 40 }, false, ['Harpoon', 'Coins']), /harpoon/);
+});
+
+test('strategy level: a scripted method that only lacks quests does the quest chain before an LLM method', () => {
+  const pick = (finished: string[]) => {
+    const c = choosePhase({ kind: 'level', skill: 'Runecraft', level: 90 }, buildProfile(account(true, finished), state({ Runecraft: 27 }), bankWith([])), new Set());
+    return c && 'phase' in c ? `${c.phase.exec.kind}:${c.phase.exec.kind === 'quest' ? c.phase.exec.quest : c.phase.exec.kind === 'hub' ? c.phase.exec.spec : ''}` : String(c);
+  };
+  assert.equal(pick(['Rune Mysteries']), 'quest:Enter the Abyss');
+  assert.equal(pick(['Rune Mysteries', 'Enter the Abyss']), 'quest:Temple of the Eye');
+  assert.equal(pick(['Rune Mysteries', 'Enter the Abyss', 'Temple of the Eye']), 'hub:gotr');
 });
