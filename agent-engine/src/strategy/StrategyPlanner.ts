@@ -87,11 +87,24 @@ export interface StrategyDeps {
   prereq?: (phase: Phase, planner: Planner) => Planner;
   /** Grand Exchange prices, for scripted trading loops (tanning). */
   gePrice?: (item: string) => number | null;
+  /** Planner for a hub plugin method (needs the backend); null when not wired. */
+  hub?: (spec: string, untilLevel?: number) => Planner | null;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
 /** Skills the "level the account" strategy rotates through (lowest first). */
 const ROTATION = ['Melee', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'];
+
+/** First unfinished quest in the chain behind `quests` whose own quest requirements are done. */
+export function nextQuestFor(quests: string[], p: Profile, seen = new Set<string>()): string | null {
+  for (const q of quests) {
+    if (p.account.quests.get(q) === 'FINISHED' || seen.has(q)) continue;
+    seen.add(q);
+    const pre = QUESTS.find((x) => x.name === q)?.req?.quests ?? [];
+    return nextQuestFor(pre, p, seen) ?? q;
+  }
+  return null;
+}
 
 /** Picks the next phase for a goal; null when nothing fits (or the goal is reached). */
 export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): { phase: Phase; why: string } | { done: string } | null {
@@ -109,7 +122,16 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     const skills = skill ? [skill] : [...ROTATION].sort((a, b) => level(p, a) - level(p, b));
     for (const sk of skills) {
       const lvl = level(p, sk);
-      const method = TRAINING.find((m) => m.skill === sk && lvl >= m.from && lvl < m.to && fits(m) && !skip.has(`train:${m.skill}:${m.name}`));
+      const inBracket = (m: TrainingMethod) => m.skill === sk && lvl >= m.from && lvl < m.to && (members || !m.members) && !skip.has(`train:${m.skill}:${m.name}`);
+      const method = TRAINING.find((m) => inBracket(m) && fits(m));
+      // A scripted method that only lacks quests beats an LLM or slower one: do the quest chain first.
+      const better = TRAINING.find((m) => inBracket(m) && m.exec.kind !== 'llm' && !fits(m) && unmet(m.req, p).every((u) => u.startsWith('quest ')));
+      if (better && (!method || method.exec.kind === 'llm' || (better.xpHour ?? 0) > (method.xpHour ?? 0))) {
+        const quest = nextQuestFor(better.req?.quests ?? [], p);
+        if (quest && !skip.has(`quest:${quest}`)) {
+          return { phase: { id: `quest:${quest}`, text: `do ${quest} (unlocks ${better.name})`, exec: { kind: 'quest', quest } }, why: `${better.name} needs ${quest}` };
+        }
+      }
       if (!method) continue;
       const to = goal.level ? Math.min(goal.level, method.to) : method.to;
       const untilSkill = sk === 'Melee' ? 'Strength' : sk;
@@ -265,6 +287,8 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       };
       return new TaskTreePlanner({ kind: 'combat', ...task }, `kill-${e.monster.toLowerCase().replace(/\s+/g, '-')}`);
     }
+    case 'hub':
+      return deps.hub?.(e.spec, untilLevel) ?? null;
     case 'llm':
       return deps.llmPlanner?.() ?? null;
     case 'quest':

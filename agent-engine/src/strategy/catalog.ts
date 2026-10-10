@@ -17,6 +17,8 @@ export type Execution =
   | { kind: 'preset'; preset: string; bank?: boolean }
   | { kind: 'combat'; monster: string; area?: { name: string; point: WorldPoint }; loot?: string[]; bury?: boolean; style?: CombatStyle; /** Cooked food to bring (default 5). */ food?: number }
   | { kind: 'llm'; goal: string }
+  /** A Microbot Hub plugin driven by HubPluginPlanner (src/goalplan/hubSpecs.ts). */
+  | { kind: 'hub'; spec: string }
   | { kind: 'quest'; quest: string }
   /** Tutorial Island, driven by its progress varp. */
   | { kind: 'tutorial' }
@@ -77,6 +79,7 @@ export const TRAINING: TrainingMethod[] = [
 
   // Ranged and magic: no quests needed; kits are bought in Varrock (Lowe's, Zaff's, Aubury's).
   { skill: 'Ranged', from: 1, to: 30, members: false, name: 'cows at Lumbridge with a shortbow', xpHour: 8000, exec: { kind: 'preset', preset: 'range-cows' }, notes: 'buys a shortbow and bronze arrows at Lowe\'s; picks arrows back up' },
+  { skill: 'Magic', from: 21, to: 99, members: false, name: 'Low/High Level Alchemy on the best-value item (hub AIO Magic)', xpHour: 40000, exec: { kind: 'hub', spec: 'alch' }, notes: 'live prices pick the item (rune arrows alch at a profit on members worlds); gold bars on free worlds' },
   { skill: 'Magic', from: 1, to: 55, members: false, name: 'chickens with Wind Strike autocast', xpHour: 6000, exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
   // Members ranged/magic past the starter kits: the kit planner only knows a shortbow with bronze/iron
   // arrows and Wind Strike, so these stay with the LLM until gear progression is scripted.
@@ -111,11 +114,13 @@ export const TRAINING: TrainingMethod[] = [
   { skill: 'Cooking', from: 30, to: 40, members: false, name: 'cook tuna on fires', exec: { kind: 'preset', preset: 'cook-tuna' }, notes: 'raw tuna comes from the harpoon fishing goal when the bank has none' },
   { skill: 'Cooking', from: 40, to: 45, members: false, name: 'cook lobsters on fires', exec: { kind: 'preset', preset: 'cook-lobsters' }, notes: 'raw lobsters come from the lobster pot goal when the bank has none' },
   { skill: 'Cooking', from: 45, to: 99, members: false, name: 'cook swordfish on fires', exec: { kind: 'preset', preset: 'cook-swordfish' }, notes: 'raw swordfish come from the harpoon fishing goal when the bank has none' },
+  { skill: 'Smithing', from: 30, to: 99, members: false, name: 'smelt bought ore for profit, smith platebodies at Varrock West with it (hub Auto Smelting + Varrock Anvil)', xpHour: 60000, exec: { kind: 'hub', spec: 'smithing' }, notes: 'adamant platebodies (88+) cost ~0.4 gp/xp; mithril ~8 gp/xp is paid for by smelting' },
   { skill: 'Smithing', from: 1, to: 99, members: false, name: 'mine, smelt and smith bronze, iron, steel, then mithril and adamant gear (by Smithing and Mining level)', exec: { kind: 'preset', preset: 'smith-progression' } },
   { skill: 'Firemaking', from: 1, to: 99, members: false, name: 'burn banked logs in lines', exec: { kind: 'llm', goal: 'withdraw logs from the nearest bank and burn them in a line on open ground with a tinderbox, repeating until no logs are left' }, req: { items: ['Tinderbox', 'Logs'] } },
   { skill: 'Crafting', from: 1, to: 4, members: false, name: 'Sheep Shearer for Crafting XP', exec: { kind: 'quest', quest: 'Sheep Shearer' }, notes: '150 Crafting XP' },
   { skill: 'Crafting', from: 4, to: 6, members: false, name: 'Goblin Diplomacy for Crafting XP', exec: { kind: 'quest', quest: 'Goblin Diplomacy' }, notes: '200 Crafting XP' },
   // Skills with no scripted method yet: LLM-driven goals (Claude plans, Jev/Laya clicks); unverified live.
+  { skill: 'Agility', from: 10, to: 99, members: true, name: 'rooftop courses by level (hub Micro Agility)', xpHour: 35000, exec: { kind: 'hub', spec: 'agility' } },
   { skill: 'Agility', from: 1, to: 10, members: true, name: 'Gnome Stronghold Agility Course', xpHour: 8000, exec: { kind: 'llm', goal: 'run laps of the Gnome Stronghold Agility Course (log balance, obstacle net, tree branch, balancing rope, tree branch, obstacle net, obstacle pipe), repeating the lap' } },
   { skill: 'Agility', from: 10, to: 30, members: true, name: 'Draynor then Al Kharid rooftop courses', xpHour: 12000, exec: { kind: 'llm', goal: 'run laps of the Draynor Village rooftop course until Agility 20, then the Al Kharid rooftop course, picking up marks of grace, repeating the lap' } },
   { skill: 'Agility', from: 30, to: 60, members: true, name: 'Varrock then Canifis rooftop courses', xpHour: 25000, exec: { kind: 'llm', goal: 'run laps of the Varrock rooftop course until Agility 40, then the Canifis rooftop course, picking up marks of grace, repeating the lap' } },
@@ -135,6 +140,7 @@ export const TRAINING: TrainingMethod[] = [
   { skill: 'Hunter', from: 1, to: 15, members: true, name: 'bird snares for crimson swifts, golden warblers and copper longtails', xpHour: 10000, exec: { kind: 'llm', goal: 'train Hunter with bird snares in the Feldip Hills hunting area (crimson swifts, golden warblers, copper longtails), picking up the snare and the birds each cycle and burying or dropping the bones and feathers you do not need' }, notes: 'LLM-driven; no script yet' },
   { skill: 'Hunter', from: 15, to: 99, members: true, name: 'butterfly catching (ruby harvest, sapphire glacialis, snowy knight, black warlock)', xpHour: 20000, exec: { kind: 'llm', goal: 'train Hunter by catching butterflies with a butterfly net and jars: ruby harvest from 15, sapphire glacialis from 25, snowy knight from 35, black warlock from 45. Buy a butterfly net and jars if missing, release or bank the butterflies' }, notes: 'LLM-driven; no script yet' },
   { skill: 'Runecraft', from: 1, to: 27, members: false, name: 'craft rune essence at the mind, earth and body altars', xpHour: 6000, exec: { kind: 'preset', preset: 'runecraft' }, notes: 'scripted (RunecraftPlanner): essence and talismans from the Grand Exchange, ruins ids and tiles from the KB' },
+  { skill: 'Runecraft', from: 27, to: 99, members: true, name: 'Guardians of the Rift (hub GOTR)', xpHour: 45000, exec: { kind: 'hub', spec: 'gotr' }, req: { quests: ['Temple of the Eye'] }, notes: 'rift runes except nature/fire are sold for Construction' },
   { skill: 'Runecraft', from: 27, to: 99, members: true, name: 'Guardians of the Rift', xpHour: 40000, exec: { kind: 'llm', goal: 'play Guardians of the Rift at Temple of the Eye: mine guardian fragments, craft guardian essence into runes and power the portal until the game ends, repeating rounds' }, notes: 'LLM-driven; no script yet' },
   { skill: 'Runecraft', from: 27, to: 99, members: false, name: 'craft rune essence at the body altar', xpHour: 6000, exec: { kind: 'preset', preset: 'runecraft' }, notes: 'free accounts only reach the body altar' },
   { skill: 'Prayer', from: 1, to: 99, members: false, name: 'bury bones from combat', exec: { kind: 'preset', preset: 'kill-barbarians' }, notes: 'bones are buried by the combat presets; hill/moss giants drop big bones' },
@@ -214,6 +220,8 @@ export const QUESTS: QuestInfo[] = [
   { name: 'The Restless Ghost', members: false, reward: '1,125 Prayer XP' },
   { name: 'Romeo & Juliet', members: false, reward: '5 quest points' },
   { name: 'Rune Mysteries', members: false, reward: 'Runecraft access (air runes)' },
+  { name: 'Enter the Abyss', members: true, req: { quests: ['Rune Mysteries'] }, reward: 'Abyss access; needed for Temple of the Eye', hours: 0.5 },
+  { name: 'Temple of the Eye', members: true, req: { quests: ['Enter the Abyss'], skills: { Runecraft: 10 } }, reward: 'Guardians of the Rift', hours: 1 },
   { name: 'Imp Catcher', members: false, boosts: { Magic: 875 },  reward: '875 Magic XP' },
   { name: "Witch's Potion", members: false, boosts: { Magic: 325 },  reward: '325 Magic XP' },
   { name: "Doric's Quest", members: false, req: { skills: { Mining: 15 } }, reward: '1,300 Mining XP; Doric\'s anvils' },

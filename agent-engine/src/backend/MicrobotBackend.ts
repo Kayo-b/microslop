@@ -115,6 +115,26 @@ export class MicrobotBackend implements GameBackend {
     await this.request('POST', '/quest-helper/stop', {});
   }
 
+  /** Sets one config value of any plugin (hub plugins read theirs when they start). */
+  async pluginConfig(group: string, key: string, value: string): Promise<void> {
+    await this.request('POST', '/settings/plugin', { group, key, value });
+  }
+
+  async pluginStart(className: string): Promise<void> {
+    await this.request('POST', '/scripts/start', { className });
+  }
+
+  async pluginStop(className: string): Promise<void> {
+    await this.request('POST', '/scripts/stop', { className });
+  }
+
+  /** Whether the plugin is loaded (e.g. a sideloaded hub jar) and whether it is running now. */
+  async pluginState(className: string): Promise<{ loaded: boolean; active: boolean }> {
+    const list = (await this.request('GET', '/scripts')) as { scripts?: { className: string; active: boolean }[] };
+    const p = (list.scripts ?? []).find((x) => x.className === className);
+    return { loaded: Boolean(p), active: Boolean(p?.active) };
+  }
+
   private async request(method: 'GET' | 'POST', route: string, body?: unknown, retried = false): Promise<unknown> {
     const token = await this.loadToken();
     let res: Response;

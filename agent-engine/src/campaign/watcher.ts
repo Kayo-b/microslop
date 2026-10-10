@@ -42,7 +42,7 @@ const ReviewSchema = z.object({
 
 export type Review = z.infer<typeof ReviewSchema>;
 
-const SYSTEM = `You supervise an automated Old School RuneScape agent (planners + a fast click classifier) running one character. You see the last minutes of its log. Judge whether the run is healthy. Typical failures: loops (same action repeated), walking the wrong way or to members areas on a free account, opening and closing interfaces, dropping valuable items, planning to buy items from shops that do not sell them, using the wrong object of the same name, doing a slow LLM-driven loop that a script would do better, being logged out. Be specific: quote sub-goal texts and coordinates. If the run is fine, say ok with severity 0, action none, and keep the other fields short. Choose the gentlest action that unsticks the run; use skip_activity only when the same problem has lasted more than one review or the agent is clearly doing something harmful.`;
+const SYSTEM = `You supervise an automated Old School RuneScape agent (planners + a fast click classifier) running one character. You see the last minutes of its log. Judge whether the run is healthy. Typical failures: loops (same action repeated), walking the wrong way or to members areas on a free account, opening and closing interfaces, dropping valuable items, planning to buy items from shops that do not sell them, using the wrong object of the same name, doing a slow LLM-driven loop that a script would do better, being logged out. Some activities run a Microbot Hub plugin (agility, Guardians of the Rift, alching, smithing) while the agent only waits: few new steps but rising XP is healthy. Be specific: quote sub-goal texts and coordinates. If the run is fine, say ok with severity 0, action none, and keep the other fields short. Choose the gentlest action that unsticks the run; use skip_activity only when the same problem has lasted more than one review or the agent is clearly doing something harmful.`;
 
 function newest(dir: string): string | null {
   if (!existsSync(dir)) return null;
@@ -71,6 +71,8 @@ export interface Evidence {
   run: string | null;
   activity: string;
   text: string;
+  /** Total XP of all skills (0 when the client is unreachable). */
+  xp: number;
   fingerprint: string;
 }
 
@@ -80,9 +82,11 @@ export async function gather(root = process.cwd(), backend = new MicrobotBackend
   const run = newest(path.join(root, 'logs', 'agent'));
   const steps = run ? tail(path.join(root, 'logs', 'agent', run, 'steps.jsonl'), 30).map((l) => JSON.parse(l) as Step) : [];
   let live = 'client not reachable';
+  let xp = 0;
   try {
     const s = await backend.snapshot();
     const p = s.player?.position;
+    xp = s.skills.reduce((n, k) => n + k.xp, 0);
     live = `loggedIn=${s.loggedIn} at ${p ? `${p.x},${p.y},${p.plane}` : '?'} hp=${s.player?.hp?.current}/${s.player?.hp?.max} anim=${s.player?.animating} moving=${s.player?.moving} bank=${s.bank.open} ge=${s.grandExchange?.open} shop=${s.shop.open} inventory: ${foldInventory(s)}`;
   } catch (e) {
     live = `snapshot failed: ${e instanceof Error ? e.message : e}`;
@@ -103,7 +107,8 @@ export async function gather(root = process.cwd(), backend = new MicrobotBackend
     `LAST ${steps.length} AGENT STEPS (${run}):\n${steps.map(stepLine).join('\n')}`,
     `RECENT LLM RESCUES:\n${rescues.join('\n')}`,
   ].join('\n\n');
-  return { run, activity, text, fingerprint: `${run}|${last?.time ?? ''}|${campaign.at(-1) ?? ''}` };
+  // Total XP is in the fingerprint: a hub plugin trains while the agent only waits (no steps).
+  return { run, activity, text, xp, fingerprint: `${run}|${last?.time ?? ''}|${campaign.at(-1) ?? ''}|${xp}` };
 }
 
 /** Gate for acting on a review: only stuck/wrong at severity 2+, soft actions first, skipping an activity only on a repeat and not more often than every 8 minutes. */
@@ -188,6 +193,7 @@ async function main(): Promise<void> {
   let consecutiveBad = 0;
   let lastSkip = 0;
   let noCampaign = 0;
+  let prevXp = 0;
   for (;;) {
     // The watcher belongs to a campaign: once none has run here for three reviews, it is done.
     noCampaign = campaignRunning() ? 0 : noCampaign + 1;
@@ -197,6 +203,8 @@ async function main(): Promise<void> {
     }
     try {
       const ev = await gather();
+      if (prevXp && ev.xp) ev.text += `\n\nTOTAL XP: ${ev.xp} (${ev.xp - prevXp >= 0 ? '+' : ''}${ev.xp - prevXp} since the last review)`;
+      prevXp = ev.xp || prevXp;
       unchanged = ev.fingerprint === prev ? unchanged + 1 : 0;
       prev = ev.fingerprint;
       let review: Review;

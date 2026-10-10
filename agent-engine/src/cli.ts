@@ -49,6 +49,8 @@ import { SmithingPlanner } from './planner/SmithingPlanner.ts';
 import { HerblorePlanner } from './goalplan/HerblorePlanner.ts';
 import { JewelleryPlanner } from './goalplan/JewelleryPlanner.ts';
 import { StringingPlanner } from './goalplan/StringingPlanner.ts';
+import { HubPluginPlanner, stopRunningHubPlugin } from './goalplan/HubPluginPlanner.ts';
+import { HUB_SPECS } from './goalplan/hubSpecs.ts';
 import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
@@ -353,6 +355,15 @@ async function run(): Promise<void> {
   const startedAt = Date.now();
   const watchFeed = () => readWatchHint(path.join(ROOT, 'data', 'watch', 'latest.json'), startedAt);
   const bankCoins = () => new BankMemory().items.get('Coins') ?? 0;
+  /** Hub plugin methods (src/goalplan/hubSpecs.ts) for the strategy and plan runs. */
+  const hubPlanners = async (bank: BankMemory) => {
+    const price = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+    const members = await isMember().catch(() => false);
+    return (spec: string, untilLevel?: number): Planner | null => {
+      const make = HUB_SPECS[spec];
+      return make ? new HubPluginPlanner(make(), { backend, untilLevel, price, members, bank: () => (bank.seenAt ? bank.items : null) }) : null;
+    };
+  };
   // Prerequisites flow (src/prereq/): an activity's tools, gear, food, coins and levels are met
   // before it starts; setups longer than --setup-budget minutes (default 30) skip the activity.
   const withPrereq = (exec: Execution, inner: Planner, o: { bank?: BankMemory; skip?: Set<string>; onFailed?: (id: string) => void } = {}): Planner => {
@@ -471,6 +482,7 @@ async function run(): Promise<void> {
         llmPlanner: () => (tiers ? new LlmPlanner({ llm: guarded(1, 'plan') }) : null),
         questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') }), undefined, isMember, bankCoins) : null),
         tutorialPlanner: () => new TutorialPlanner(backend),
+        hub: await hubPlanners(planBank),
         onPhase: (phase, why) => {
           console.log(`[plan] ${phase.text} [${phase.exec.kind}]: ${why}`);
           if (why.startsWith('gave up')) strategyFailed?.(phase.id);
@@ -494,6 +506,7 @@ async function run(): Promise<void> {
       account: backend,
       kb,
       gePrice,
+      hub: await hubPlanners(new BankMemory()),
       prereq: (phase, inner) => withPrereq(phase.exec, inner, { skip: failing, onFailed: (id) => recordFailure(skipFile, id) }),
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
       questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! }), undefined, isMember, bankCoins) : null),
@@ -591,15 +604,17 @@ async function run(): Promise<void> {
     console.log('\n[agent] stopping after the current step (Ctrl+C again to force)...');
     agent.stop();
     backend.act({ op: 'walk_cancel' }).catch(() => {});
+    void stopRunningHubPlugin();
   });
   // kill / service stop: a walk started by the agent keeps going in the client otherwise.
   process.on('SIGTERM', () => {
     agent.stop();
-    void backend.act({ op: 'walk_cancel' }).catch(() => {}).finally(() => process.exit(143));
+    void Promise.all([backend.act({ op: 'walk_cancel' }).catch(() => {}), stopRunningHubPlugin()]).finally(() => process.exit(143));
   });
 
   console.log(`[agent] goal: ${goal} | planner: ${planner.name} | log: ${logger.file}`);
   const outcome = await agent.run(goal);
+  await stopRunningHubPlugin();
   console.log(`[agent] ${outcome.status}: ${outcome.reason} (${outcome.subgoals} sub-goals, ${outcome.steps} steps)`);
   // The run itself gave up mid-phase (sub-goals kept failing): count it against that phase.
   const phase = strategy?.phase ?? null;

@@ -58,7 +58,7 @@ const TOOL_BUY: Record<string, string> = { axe: 'Bronze axe', pickaxe: 'Bronze p
 /** Executions that run before the character has (or sells) gear: no loadout check. */
 /** Trading loops: they withdraw a capped budget at the Grand Exchange and bank it again themselves. */
 const COIN_MANAGERS = new Set(['herblore', 'herblore-train', 'craft-jewellery', 'string-amulets', 'tan-hides', 'smelt-steel', 'runecraft']);
-const NO_LOADOUT = new Set<Execution['kind']>(['tutorial', 'sell', 'acquire']);
+const NO_LOADOUT = new Set<Execution['kind']>(['tutorial', 'sell', 'acquire', 'hub']);
 
 /** Food to have before a fight: none against monsters that cannot really hurt (chickens, cows). */
 const HARMLESS = /^(chicken|cow|cow calf|goblin|man|woman|rat|giant rat)$/i;
@@ -153,7 +153,7 @@ export function activityNeeds(exec: Execution, catalogReq?: Requirement): Activi
   // Every activity starts fully geared: a weapon and armour in every slot, worn (PrereqPlanner's
   // equip step). Combat already needs it hard; elsewhere it is bought only when affordable.
   if (n && (exec.kind === 'quest' || exec.kind === 'llm')) n.bankMaterials = true;
-  if (n && exec.kind === 'preset' && COIN_MANAGERS.has(exec.preset)) n.coinsManaged = true;
+  if (n && ((exec.kind === 'preset' && COIN_MANAGERS.has(exec.preset)) || exec.kind === 'hub')) n.coinsManaged = true;
   if (n && !n.gear && !NO_LOADOUT.has(exec.kind)) n.gear = { style: 'melee', slots: requiredSlots('melee'), soft: true };
   if (n && catalogReq) n.req = mergeReq(n.req, catalogReq);
   return n;
