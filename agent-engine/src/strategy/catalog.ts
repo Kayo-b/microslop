@@ -77,7 +77,7 @@ export const TRAINING: TrainingMethod[] = [
 
   // Ranged and magic: no quests needed; kits are bought in Varrock (Lowe's, Zaff's, Aubury's).
   { skill: 'Ranged', from: 1, to: 30, members: false, name: 'cows at Lumbridge with a shortbow', xpHour: 8000, exec: { kind: 'preset', preset: 'range-cows' }, notes: 'buys a shortbow and bronze arrows at Lowe\'s; picks arrows back up' },
-  { skill: 'Magic', from: 1, to: 25, members: false, name: 'chickens with Wind Strike autocast', xpHour: 6000, exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
+  { skill: 'Magic', from: 1, to: 55, members: false, name: 'chickens with Wind Strike autocast', xpHour: 6000, exec: { kind: 'preset', preset: 'mage-chickens' }, notes: 'buys a staff (Zaff) and air/mind runes (Aubury); Imp Catcher and Witch\'s Potion add ~1,200 Magic XP' },
   // Members ranged/magic past the starter kits: the kit planner only knows a shortbow with bronze/iron
   // arrows and Wind Strike, so these stay with the LLM until gear progression is scripted.
   { skill: 'Ranged', from: 30, to: 70, members: true, name: 'sand crabs with the best bow and arrows', xpHour: 30000, exec: { kind: 'llm', goal: 'buy the best bow and arrows your Ranged level allows (maple shortbow at 30, yew at 40, magic at 50; adamant arrows) at the Grand Exchange, then kill Sand crabs on the Hosidius coast with Ranged, picking up arrows and banking at Hosidius' }, notes: 'bow/arrow upgrades are not scripted yet' },
