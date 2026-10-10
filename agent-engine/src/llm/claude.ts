@@ -48,6 +48,7 @@ Each sub-goal you write is executed by a fast classifier that sees the player's 
 - Shops do not sell rune essence or pure essence (Aubury sells runes, not essence): buy essence at the Grand Exchange or mine it. Each mysterious ruins is one specific altar; name the altar and its coordinates (air 2984,3291; mind 2981,3513; water 3184,3164; earth 3305,3473; fire 3312,3254; body 3052,3444) and carry the matching talisman.
 - Use the reports of previous sub-goals: if one was blocked, change approach (different place, get the missing tool, open a door or gate first) rather than repeating it.
 - Answer "complete" when the overall goal is achieved and "impossible" when it cannot be achieved from here without human help (missing membership, quest requirement, money you cannot obtain).
+- Never start a fight with food missing: any monster that can hurt (anything but chickens, cows, rats) needs at least 5 cooked food in the inventory, listed in "keep_items". With none carried, first get some (bank, shop, or buy at the Grand Exchange) or pick a method without combat.
 - Keep the account safe: avoid the Wilderness and monsters far above the player's combat level unless the goal requires them.`;
 
 const DoneWhenSchema = z.object({
