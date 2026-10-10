@@ -265,7 +265,45 @@ export function smithingSpec(): HubSpec {
   };
 }
 
+// --- Construction: Mahogany Homes contracts --------------------------------------------------
+
+const MH_TIERS = [
+  { level: 70, tier: 'EXPERT', plank: 'Mahogany plank' },
+  { level: 50, tier: 'ADEPT', plank: 'Teak plank' },
+  { level: 20, tier: 'NOVICE', plank: 'Oak plank' },
+  { level: 1, tier: 'BEGINNER', plank: 'Plank' },
+];
+
+/** The plugin stops itself with 28 planks or 4 steel bars left in the bank, so restocks start above that. */
+export const MAHOGANY: HubSpec = {
+  id: 'mahogany',
+  className: `${PKG}.mahoganyhomez.MahoganyHomesPlugin`,
+  group: 'MahoganyHomesBot',
+  skill: 'Construction',
+  // Walking between contracts (Falador, Varrock, Ardougne, Hosidius) can take a while.
+  stallMinutes: 8,
+  plan: ({ level, coins, price, members }) => {
+    if (!members) return 'Mahogany Homes is members-only';
+    const t = MH_TIERS.find((x) => level >= x.level)!;
+    const each = (price(t.plank) ?? 500) * 1.3;
+    const planks = Math.max(60, Math.min(600, Math.floor((coins - 100_000) / each)));
+    return {
+      label: `Mahogany Homes ${t.tier.toLowerCase()} contracts (${t.plank})`,
+      config: { currentTier: t.tier, usePlankSack: 'false', useNpcContact: 'false' },
+      supplies: [
+        { name: 'Saw', want: 1 },
+        { name: 'Hammer', want: 1 },
+        { name: t.plank, want: planks, min: 60 },
+        { name: 'Steel bar', want: 60, min: 10 },
+      ],
+      sell: [],
+      carry: [{ name: 'Saw' }, { name: 'Hammer' }],
+    };
+  },
+};
+
 export const HUB_SPECS: Record<string, () => HubSpec> = {
+  mahogany: () => MAHOGANY,
   alch: () => ALCH,
   agility: () => AGILITY,
   gotr: () => GOTR,
