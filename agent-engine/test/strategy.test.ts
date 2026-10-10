@@ -276,7 +276,9 @@ test('strategy level: mining switches ore as the level rises; smithing gear foll
   assert.match(method({ Mining: 60 }), /mithril/);
   assert.match(method({ Mining: 75 }), /adamantite/);
   const smith = choosePhase({ kind: 'level', skill: 'Smithing', level: 70 }, buildProfile(account(), state({ Smithing: 52, Mining: 60 }), bankWith([])), new Set());
-  assert.ok(smith && 'phase' in smith && smith.phase.exec.kind === 'preset' && smith.phase.exec.preset === 'smith-progression');
+  assert.ok(smith && 'phase' in smith && smith.phase.exec.kind === 'hub' && smith.phase.exec.spec === 'smithing', 'from 30: bought bars and ore (hub plugins)');
+  const early = choosePhase({ kind: 'level', skill: 'Smithing', level: 30 }, buildProfile(account(), state({ Smithing: 10, Mining: 20 }), bankWith([])), new Set());
+  assert.ok(early && 'phase' in early && early.phase.exec.kind === 'preset' && early.phase.exec.preset === 'smith-progression');
 });
 
 test('strategy level: fishing, woodcutting and cooking change method with the level, members taking better ones', () => {

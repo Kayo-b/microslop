@@ -87,6 +87,8 @@ export interface StrategyDeps {
   prereq?: (phase: Phase, planner: Planner) => Planner;
   /** Grand Exchange prices, for scripted trading loops (tanning). */
   gePrice?: (item: string) => number | null;
+  /** Planner for a hub plugin method (needs the backend); null when not wired. */
+  hub?: (spec: string, untilLevel?: number) => Planner | null;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
@@ -265,6 +267,8 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       };
       return new TaskTreePlanner({ kind: 'combat', ...task }, `kill-${e.monster.toLowerCase().replace(/\s+/g, '-')}`);
     }
+    case 'hub':
+      return deps.hub?.(e.spec, untilLevel) ?? null;
     case 'llm':
       return deps.llmPlanner?.() ?? null;
     case 'quest':
