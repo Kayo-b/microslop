@@ -4,6 +4,7 @@
 SHELL := /bin/bash
 ENGINE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 HOME_DIR := $(HOME)
+KAGGLE_USER ?= $(error set KAGGLE_USER to your Kaggle username)
 
 # CHAR=1|2 picks the character for agent-*/data-* targets (checkout, agent-server port, token).
 CHAR ?= 1
@@ -165,9 +166,9 @@ laya-eval: ## eval the served Laya model on eval.jsonl
 laya-teacher-eval: ## Jev ceiling on eval.jsonl (costs API calls)
 	$(RUN) npm run dataset:eval -- --engine jev --limit $(or $(LIMIT),400)
 laya-kaggle-version: ## push train/eval as a new Kaggle dataset version
-	$(RUN) bash -c 'D=$$(mktemp -d); cp data/dataset/{train,eval}.jsonl $$D/; kaggle datasets metadata <kaggle-user>/osrs-agent-decisions-v1 -p $$D && kaggle datasets version -p $$D -m "$$(date +%F): $$(jq -c .train data/dataset/mix-stats.json)"'
+	$(RUN) bash -c 'D=$$(mktemp -d); cp data/dataset/{train,eval}.jsonl $$D/; kaggle datasets metadata $(KAGGLE_USER)/osrs-agent-decisions-v1 -p $$D && kaggle datasets version -p $$D -m "$$(date +%F): $$(jq -c .train data/dataset/mix-stats.json)"'
 laya-kernel-status: ## status of the fine-tune kernel
-	kaggle kernels status <kaggle-user>/laya-osrs-agent-finetune
+	kaggle kernels status $(KAGGLE_USER)/laya-osrs-agent-finetune
 
 ##@ level - Level skills, free or paid: the account's membership decides which methods are used
 ##? default: an unattended job (starts the client, logs in, systemd unit; watch with make-gold status/logs/stop WHO=<char>)

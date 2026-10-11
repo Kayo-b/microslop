@@ -81,7 +81,7 @@ when the state format changes (`src/engine/state.ts`).
 
 ## 4. Train on Kaggle (2x T4)
 
-Kaggle CLI is installed via pipx (`kaggle`, user `<kaggle-user>`, token `~/.kaggle/access_token`).
+Kaggle CLI is installed via pipx (`kaggle`, user in `$KAGGLE_USER`, token `~/.kaggle/access_token`).
 
 Upload a new dataset version:
 
