@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HubPluginPlanner, type HubSpec } from '../src/goalplan/HubPluginPlanner.ts';
+import { HubPluginPlanner, stopStrayHubPlugins, type HubSpec } from '../src/goalplan/HubPluginPlanner.ts';
 import { AGILITY, bestAlch, bestSmelt, bestSmith, smithingSpec } from '../src/goalplan/hubSpecs.ts';
 import type { PlanStep } from '../src/planner/types.ts';
 import type { InventoryItem, Snapshot } from '../src/types.ts';
@@ -103,4 +103,33 @@ test('hub specs: smithing smelts for profit when coins are short and smiths the 
   assert.ok(typeof rich === 'object' && rich.className?.endsWith('VarrockAnvilPlugin') && rich.config.smithObject === 'PLATE_BODY');
   const cheap = run(90, 500_000);
   assert.ok(typeof cheap === 'object' && cheap.config.barType === 'ADAMANTITE', 'adamant platebodies are nearly free: smith even with little coin');
+});
+
+test('stopStrayHubPlugins stops hub plugins that are running or enabled, and nothing else', async () => {
+  const stopped: string[] = [];
+  const P = 'net.runelite.client.plugins.microbot';
+  const backend = {
+    pluginList: async () => [
+      { className: `${P}.agility.MicroAgilityPlugin`, active: true, enabled: true },
+      { className: `${P}.gotr.GotrPlugin`, active: false, enabled: true },
+      { className: `${P}.mahoganyhomez.MahoganyHomesPlugin`, active: false, enabled: false },
+      { className: `${P}.AgentServerPlugin`, active: true, enabled: true },
+    ],
+    pluginStop: async (c: string) => void stopped.push(c),
+  };
+  const r = await stopStrayHubPlugins(backend);
+  assert.deepEqual(r, [`${P}.agility.MicroAgilityPlugin`, `${P}.gotr.GotrPlugin`]);
+  assert.deepEqual(stopped, r);
+});
+
+test('a hub plugin stop is retried once before it is given up', async () => {
+  let n = 0;
+  const backend = {
+    pluginList: async () => [{ className: 'net.runelite.client.plugins.microbot.agility.MicroAgilityPlugin', active: true, enabled: true }],
+    pluginStop: async () => {
+      if (++n === 1) throw new Error('client busy');
+    },
+  };
+  assert.equal((await stopStrayHubPlugins(backend)).length, 1);
+  assert.equal(n, 2);
 });

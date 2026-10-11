@@ -220,8 +220,12 @@ public class Rs2GrandExchange {
                 sleepUntil(GrandExchangeWidget::isOfferTextVisible);
 
 
-                Rs2Widget.sleepUntilHasWidgetText("Start typing the name of an item to search for it",
-                        InterfaceID.CHATBOX, CHATBOX_SEARCH_RESULTS_CHILD, false, 5000);
+                // Typing before the prompt shows sends the keystrokes to the chat instead.
+                if (!Rs2Widget.sleepUntilHasWidgetText("Start typing the name of an item to search for it",
+                        InterfaceID.CHATBOX, CHATBOX_SEARCH_RESULTS_CHILD, false, 5000)) {
+                    log.warn("GE search: the search prompt never opened for \"{}\"", request.getItemName());
+                    break;
+                }
 
                 String searchName = request.getItemName();
                 boolean itemMatchedWithPreviousSearch = isPreviousSearchMatch(request.getItemName());
@@ -289,6 +293,10 @@ public class Rs2GrandExchange {
     private static boolean searchItemName(GrandExchangeRequest request, String searchName) {
         if (searchName.length() >= 26) {
             searchName = searchName.substring(0, 25); // Grand Exchange item names are limited to 25 characters.
+        }
+        if (!isOfferSetupOpen()) {
+            log.warn("GE search: the offer screen closed before typing \"{}\"", searchName);
+            return true;
         }
         Rs2Keyboard.typeString(request.getItemName());
 

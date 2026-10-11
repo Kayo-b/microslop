@@ -15,6 +15,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot, WorldPoint } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
+import { HUB_PLUGIN_CLASSES } from './hubSpecs.ts';
 import { GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
 
 export interface Supply {
@@ -83,7 +84,36 @@ let running: { backend: HubOptions['backend']; className: string } | null = null
 export async function stopRunningHubPlugin(): Promise<void> {
   const r = running;
   running = null;
-  if (r) await r.backend.pluginStop(r.className).catch(() => {});
+  if (r) await stopPlugin(r.backend, r.className);
+}
+
+/** Stops a plugin, retrying once; a failed stop is logged, never silent (a plugin left enabled restarts with the client). */
+async function stopPlugin(backend: Pick<MicrobotBackend, 'pluginStop'>, className: string): Promise<boolean> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await backend.pluginStop(className);
+      return true;
+    } catch (e) {
+      if (attempt === 2) console.warn(`[hub] could not stop ${className}: ${(e as Error).message}`);
+    }
+  }
+  return false;
+}
+
+/**
+ * Stops every hub plugin that is running or enabled, whoever started it. A plugin left over from an
+ * earlier run (killed agent, restarted client: its enabled flag survives) otherwise keeps walking
+ * and clicking alongside the agent. Call before a run starts its own.
+ */
+export async function stopStrayHubPlugins(backend: Pick<MicrobotBackend, 'pluginList' | 'pluginStop'>): Promise<string[]> {
+  const stopped: string[] = [];
+  const all = await backend.pluginList().catch(() => []);
+  for (const p of all) {
+    if (!HUB_PLUGIN_CLASSES.includes(p.className) || !(p.active || p.enabled)) continue;
+    if (await stopPlugin(backend, p.className)) stopped.push(p.className);
+  }
+  if (stopped.length) console.log(`[hub] stopped leftover hub plugin(s): ${stopped.map((c) => c.split('.').pop()).join(', ')}`);
+  return stopped;
 }
 
 function step(text: string, targets: string[], actions: string[], doneWhen: DoneCondition, maxSteps: number, extra: object = {}): PlanStep {
@@ -214,7 +244,7 @@ export class HubPluginPlanner implements Planner {
     const className = plan.className ?? this.spec.className;
     const state = await this.o.backend.pluginState(className);
     if (!state.loaded) return { kind: 'impossible', reason: `hub plugin ${className} is not loaded: put its jar in microbot-plugins and restart the client` };
-    if (state.active) await this.o.backend.pluginStop(className).catch(() => {});
+    if (state.active) await stopPlugin(this.o.backend, className);
     for (const [key, value] of Object.entries(plan.config)) await this.o.backend.pluginConfig(plan.group ?? this.spec.group, key, value);
     await this.o.backend.pluginStart(className);
     running = { backend: this.o.backend, className };
@@ -228,7 +258,7 @@ export class HubPluginPlanner implements Planner {
 
   private async stop(): Promise<void> {
     if (!this.active) return;
-    await this.o.backend.pluginStop(this.active).catch(() => {});
+    await stopPlugin(this.o.backend, this.active);
     if (running?.className === this.active) running = null;
     this.active = null;
   }
