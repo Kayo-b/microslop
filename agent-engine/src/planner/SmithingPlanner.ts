@@ -413,6 +413,12 @@ export class SmithingPlanner implements Planner {
       });
     }
 
+    // Nothing to mine with and none banked (the bank was just seen): going back only reopens and
+    // closes the bank forever.
+    if (needMining && !hasPickaxe && this.bank !== null && ![...this.bank.keys()].some((n) => lc(n).includes('pickaxe'))) {
+      return { kind: 'impossible', reason: `no ${mineNext.ore.toLowerCase()} in the bank and no pickaxe to mine it (carried, worn or banked)` };
+    }
+
     // 6. Go and use the nearest bank (any bank works; the knowledge base knows where they are).
     const pos = s.player?.position;
     const nearest = pos && ctx.kb ? ctx.kb.nearestBanks(pos, 3, false).find((b) => b.kind === 'bank') : undefined;
