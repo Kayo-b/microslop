@@ -26,11 +26,12 @@ package net.runelite.client.plugins.microbot.ui;
 
 import lombok.Getter;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.microbot.AlwaysOnPlugins;
 import net.runelite.client.plugins.config.SearchablePlugin;
 import net.runelite.client.ui.ColorScheme;
-import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.SwingUtil;
+import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -46,6 +47,7 @@ class MicrobotPluginListItem extends JPanel implements SearchablePlugin
 {
 	private static final ImageIcon ON_STAR;
 	private static final ImageIcon OFF_STAR;
+	private static final int MIN_ITEM_HEIGHT = 20;
 
 	private final MicrobotPluginListPanel pluginListPanel;
 
@@ -90,15 +92,10 @@ class MicrobotPluginListItem extends JPanel implements SearchablePlugin
 		}
 
 		setLayout(new BorderLayout(3, 0));
-		setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH, 20));
 
-		JLabel nameLabel = new JLabel(pluginConfig.getName());
-		nameLabel.setForeground(Color.WHITE);
-
-		if (!pluginConfig.getDescription().isEmpty())
-		{
-			nameLabel.setToolTipText("<html>" + pluginConfig.getName() + ":<br>" + pluginConfig.getDescription() + "</html>");
-		}
+		JLabel nameLabel = createNameLabel(pluginConfig);
+		int itemHeight = Math.max(MIN_ITEM_HEIGHT, nameLabel.getPreferredSize().height);
+		setPreferredSize(new Dimension(MicrobotPluginListPanel.LIST_ITEM_WIDTH, itemHeight));
 
 		pinButton = new JToggleButton(OFF_STAR);
 		pinButton.setSelectedIcon(ON_STAR);
@@ -146,7 +143,7 @@ class MicrobotPluginListItem extends JPanel implements SearchablePlugin
 			uninstallItem.addActionListener(ev -> pluginListPanel.getExternalPluginManager().remove(internalName));
 		}
 
-		addLabelPopupMenu(nameLabel, configMenuItem, pluginConfig.createSupportMenuItem(), uninstallItem);
+		addLabelPopupMenu(nameLabel, configMenuItem, pluginConfig.createSupportMenuItem(pluginConfig.getPlugin()), uninstallItem);
 		add(nameLabel, BorderLayout.CENTER);
 
 		onOffToggle = new MicrobotPluginToggleButton();
@@ -155,10 +152,7 @@ class MicrobotPluginListItem extends JPanel implements SearchablePlugin
 		if (pluginConfig.getPlugin() != null)
 		{
 			PluginDescriptor pluginDescriptor = pluginConfig.getPlugin().getClass().getAnnotation(PluginDescriptor.class);
-			if (pluginDescriptor.alwaysOn()) {
-				onOffToggle.setEnabled(false);
-				onOffToggle.setSelected(true);
-			}
+
 			onOffToggle.addActionListener(i ->
 			{
 				if (onOffToggle.isSelected())
@@ -170,11 +164,50 @@ class MicrobotPluginListItem extends JPanel implements SearchablePlugin
 					pluginListPanel.stopPlugin(pluginConfig.getPlugin());
 				}
 			});
+
+			if (AlwaysOnPlugins.isLocked(pluginDescriptor)) {
+				onOffToggle.setEnabled(false);
+				onOffToggle.setSelected(true);
+				onOffToggle.setToolTipText(AlwaysOnPlugins.TOOLTIP);
+				pluginListPanel.startPlugin(pluginConfig.getPlugin());
+			}
+			if (pluginDescriptor.disableOnStartUp()) {
+				onOffToggle.setSelected(false);
+				pluginListPanel.stopPlugin(pluginConfig.getPlugin());
+			}
+			if (pluginDescriptor.disable()) {
+				onOffToggle.setEnabled(false);
+				onOffToggle.setSelected(false);
+				pluginListPanel.stopPlugin(pluginConfig.getPlugin());
+			}
 		}
 		else
 		{
 			onOffToggle.setVisible(false);
 		}
+	}
+
+	@NotNull
+	private static JLabel createNameLabel(MicrobotPluginConfigurationDescriptor pluginConfig) {
+		int buttons = 21 /*pin*/ + 25 /*config, if present*/ + 34 /*toggle approx*/ + 12 /*margins*/;
+		int textWidth = MicrobotPluginListPanel.LIST_ITEM_WIDTH - buttons;
+		JLabel nameLabel = new JLabel("<html><div style='width:" + textWidth + "px'>" + htmlBody(pluginConfig.getName()) + "</div></html>");
+		nameLabel.setForeground(Color.WHITE);
+		nameLabel.setHorizontalAlignment(JLabel.LEFT);
+		nameLabel.setVerticalAlignment(JLabel.CENTER);
+
+		if (!pluginConfig.getDescription().isEmpty())
+		{
+			nameLabel.setToolTipText("<html>" + htmlBody(pluginConfig.getName()) + ":<br>" + htmlBody(pluginConfig.getDescription()) + "</html>");
+		}
+		return nameLabel;
+	}
+
+	private static String htmlBody(String html)
+	{
+		return html
+			.replaceFirst("(?i)^\\s*<html>", "")
+			.replaceFirst("(?i)</html>\\s*$", "");
 	}
 
 	@Override

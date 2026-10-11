@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Starts Bolt (open-source Jagex Launcher) with JDK 17 so RuneLite/Microbot runs on the JDK
+# Microbot is built for. Install Bolt first with build-bolt.sh.
+set -euo pipefail
+JAVA_HOME="${JAVA_HOME_17:-$(mise where java@temurin-17)}"
+export JAVA_HOME PATH="$JAVA_HOME/bin:$PATH"
+# Run the embedded Chromium through XWayland: native-Wayland CEF drops <select> dropdown popups
+# (the Character picker), which leaves no character selected when pressing Play.
+exec "${BOLT_PREFIX:-$HOME/.local/opt/bolt-0.24}/bin/bolt" --ozone-platform=x11 "$@"

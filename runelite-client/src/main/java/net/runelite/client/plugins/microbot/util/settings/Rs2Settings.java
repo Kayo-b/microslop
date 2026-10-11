@@ -1,7 +1,7 @@
 package net.runelite.client.plugins.microbot.util.settings;
 
-import java.util.Map;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
@@ -15,30 +15,38 @@ import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
+import java.awt.*;
 import java.awt.event.KeyEvent;
+import java.util.Map;
 
-import static net.runelite.client.plugins.microbot.globval.VarbitIndices.TOGGLE_ROOFS;
-import static net.runelite.client.plugins.microbot.util.Global.*;
+import static net.runelite.client.plugins.microbot.util.Global.sleepGaussian;
+import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
+@Slf4j
 @NoArgsConstructor
 public class Rs2Settings
 {
 
 	static final int SETTINGS_INTERFACE = InterfaceID.Settings.UNIVERSE;
-	static final int SETTINGS_CLICKABLE = InterfaceID.Settings.SETTINGS_CLICKZONE;
-	static final int SETTINGS_CATEGORIES = InterfaceID.Settings.CATEGORIES_CLICKZONE;
+	static final int SETTINGS_CLICKABLE = 8781844;
+	static final int SETTINGS_CLICKABLE_ALT = 8781843;
+	static final int SETTINGS_CATEGORIES = 8781848;
 	static final int ALL_SETTINGS_BUTTON = 7602208;
 
 	public static boolean openSettings()
 	{
-		boolean isSettingsInterfaceVisible = Rs2Widget.isWidgetVisible(SETTINGS_INTERFACE);
-		if (!isSettingsInterfaceVisible)
+		if (Rs2Widget.isWidgetVisible(SETTINGS_INTERFACE))
 		{
-			Rs2Tab.switchTo(InterfaceTab.SETTINGS);
-			Rs2Widget.clickWidget(ALL_SETTINGS_BUTTON);
-			sleepUntil(() -> Rs2Widget.isWidgetVisible(SETTINGS_INTERFACE));
+			return true;
 		}
-		return true;
+		Rs2Tab.switchTo(InterfaceTab.SETTINGS);
+		if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(ALL_SETTINGS_BUTTON), 3000))
+		{
+			return false;
+		}
+		sleepGaussian(400, 100);
+		Rs2Widget.clickWidget("All Settings", true);
+		return sleepUntil(() -> Rs2Widget.isWidgetVisible(SETTINGS_INTERFACE), 5000);
 	}
 
 	public static boolean isDropShiftSettingEnabled()
@@ -49,6 +57,11 @@ public class Rs2Settings
 	public static boolean isEscCloseInterfaceSettingEnabled()
 	{
 		return Microbot.getVarbitValue(VarbitID.KEYBINDING_ESC_TO_CLOSE) == 1;
+	}
+
+	public static boolean isWorldSwitcherConfirmationEnabled()
+	{
+		return Microbot.getVarbitValue(VarbitID.WORLDSWITCHER_DISABLE_CONFIRMATION) == 0;
 	}
 
 	public static boolean enableDropShiftSetting(boolean closeInterface)
@@ -73,8 +86,16 @@ public class Rs2Settings
 			return false;
 		}
 
-		// MenuEntryImpl(getOption=Toggle, getTarget=, getIdentifier=1, getType=CC_OP, getParam0=8, getParam1=8781843, getItemId=-1, isForceLeftClick=false, getWorldViewId=-1, isDeprioritized=false)
-		NewMenuEntry menuEntry = new NewMenuEntry("Toggle", "", 1, MenuAction.CC_OP, 8, widget.getId(), false);
+		// MenuEntryImpl(getOption=Toggle, getTarget=, getIdentifier=1, getType=CC_OP, getParam0=8, getParam1=8781844, getItemId=-1, isForceLeftClick=false, getWorldViewId=-1, isDeprioritized=false)
+		NewMenuEntry menuEntry = new NewMenuEntry()
+				.option("Toggle")
+				.target("")
+				.identifier(1)
+				.type(MenuAction.CC_OP)
+				.param0(8)
+				.param1(widget.getId())
+				.forceLeftClick(false)
+				;
 		Microbot.doInvoke(menuEntry, Rs2UiHelper.getDefaultRectangle());
 		boolean success = sleepUntil(Rs2Settings::isDropShiftSettingEnabled);
 
@@ -93,7 +114,7 @@ public class Rs2Settings
 
 	public static boolean isHideRoofsEnabled()
 	{
-		return Microbot.getVarbitValue(TOGGLE_ROOFS) == 1;
+		return Microbot.getVarbitValue(VarbitID.OPTION_HIDE_ROOFTOPS) == 1;
 	}
 
 	public static boolean hideRoofs(boolean closeInterface)
@@ -102,26 +123,16 @@ public class Rs2Settings
 		{
 			return true;
 		}
-		if (!openSettings())
+
+		Widget toggleWidget = openSettingsSearch("roof", "Toggle");
+		if (toggleWidget == null)
 		{
+			closeSettingsMenu();
 			return false;
 		}
 
-		if (!switchToSettingsTab("Display"))
-		{
-			return false;
-		}
-		sleepGaussian(800, 100);
-		Widget widget = Rs2Widget.getWidget(SETTINGS_CLICKABLE);
-		if (widget == null)
-		{
-			return false;
-		}
-
-		// MenuEntryImpl(getOption=Toggle, getTarget=, getIdentifier=1, getType=CC_OP, getParam0=4, getParam1=8781843, getItemId=-1, isForceLeftClick=false, getWorldViewId=-1, isDeprioritized=false)
-		NewMenuEntry menuEntry = new NewMenuEntry("Toggle", "", 1, MenuAction.CC_OP, 4, widget.getId(), false);
-		Microbot.doInvoke(menuEntry, Rs2UiHelper.getDefaultRectangle());
-		boolean success = sleepUntil(Rs2Settings::isHideRoofsEnabled);
+		Rs2Widget.clickWidget(toggleWidget);
+		boolean success = sleepUntil(Rs2Settings::isHideRoofsEnabled, 3000);
 
 		if (closeInterface)
 		{
@@ -138,7 +149,7 @@ public class Rs2Settings
 
 	public static boolean isLevelUpNotificationsEnabled()
 	{
-		return Microbot.getVarbitValue(VarbitID.OPTION_LEVEL_UP_MESSAGE) == 0;
+		return Microbot.getVarbitValue(VarbitID.OPTION_LEVEL_UP_MESSAGE_DISABLED) == 0;
 	}
 
 	public static boolean disableLevelUpNotifications(boolean closeInterface)
@@ -147,25 +158,53 @@ public class Rs2Settings
 		{
 			return true;
 		}
-		if (!openSettings())
+		return setLevelUpNotificationOption("Disabled", () -> !isLevelUpNotificationsEnabled(), closeInterface);
+	}
+
+	public static boolean disableLevelUpNotifications()
+	{
+		return disableLevelUpNotifications(true);
+	}
+
+	public static boolean enableLevelUpNotifications(boolean closeInterface)
+	{
+		if (isLevelUpNotificationsEnabled())
 		{
-			return false;
+			return true;
 		}
-		if (!switchToSettingsTab("Interfaces"))
+		return setLevelUpNotificationOption("Show level only", Rs2Settings::isLevelUpNotificationsEnabled, closeInterface);
+	}
+
+	public static boolean enableLevelUpNotifications()
+	{
+		return enableLevelUpNotifications(true);
+	}
+
+	private static boolean setLevelUpNotificationOption(String optionText, java.util.function.BooleanSupplier successCondition, boolean closeInterface)
+	{
+		Widget dropdownWidget = openSettingsSearch("level-up", "Select", "Toggle");
+		if (dropdownWidget == null)
 		{
-			return false;
-		}
-		sleepGaussian(800, 100);
-		Widget widget = Rs2Widget.getWidget(SETTINGS_CLICKABLE);
-		if (widget == null)
-		{
+			closeSettingsMenu();
 			return false;
 		}
 
-		// MenuEntryImpl(getOption=Toggle, getTarget=, getIdentifier=1, getType=CC_OP, getParam0=14, getParam1=8781843, getItemId=-1, isForceLeftClick=false, getWorldViewId=-1, isDeprioritized=false)
-		NewMenuEntry menuEntry = new NewMenuEntry("Toggle", "", 1, MenuAction.CC_OP, 14, widget.getId(), false);
-		Microbot.doInvoke(menuEntry, Rs2UiHelper.getDefaultRectangle());
-		boolean success = sleepUntil(() -> !isLevelUpNotificationsEnabled());
+		Rs2Widget.clickWidget(dropdownWidget);
+		sleepGaussian(600, 100);
+
+		if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.Settings.DROPDOWN_PANEL), 3000))
+		{
+			closeSettingsMenu();
+			return false;
+		}
+
+		if (!Rs2Widget.clickWidget(optionText, true))
+		{
+			closeSettingsMenu();
+			return false;
+		}
+
+		boolean success = sleepUntil(successCondition::getAsBoolean, 3000);
 
 		if (closeInterface)
 		{
@@ -175,9 +214,62 @@ public class Rs2Settings
 		return success;
 	}
 
-	public static boolean disableLevelUpNotifications()
+	/**
+	 * Opens the settings search bar, types the term, and waits for a matching clickable to appear.
+	 * Returns the matched clickable widget so callers can reuse it without rescanning.
+	 */
+	private static Widget openSettingsSearch(String searchTerm, String... matchingActions)
 	{
-		return disableLevelUpNotifications(true);
+		if (!openSettings())
+		{
+			return null;
+		}
+
+		Widget searchButton = Rs2Widget.getWidget(InterfaceID.Settings.SEARCHBAR_IMAGE);
+		if (searchButton == null)
+		{
+			return null;
+		}
+
+		Rs2Widget.clickWidget(searchButton);
+		if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.Settings.SEARCH_TEXT), 3000))
+		{
+			return null;
+		}
+		sleepGaussian(300, 50);
+
+		Rs2Keyboard.typeString(searchTerm);
+		sleepGaussian(800, 100);
+
+		Widget[] holder = new Widget[1];
+		boolean found = sleepUntil(() -> {
+			holder[0] = findSettingsSearchClickable(matchingActions);
+			return holder[0] != null;
+		}, 3000);
+		return found ? holder[0] : null;
+	}
+
+	private static Widget findSettingsSearchClickable(String... matchingActions)
+	{
+		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			Widget clickable = Microbot.getClient().getWidget(SETTINGS_CLICKABLE);
+			if (clickable == null || clickable.getDynamicChildren() == null) return null;
+
+			for (Widget child : clickable.getDynamicChildren())
+			{
+				if (child == null || child.isHidden()) continue;
+				String[] actions = child.getActions();
+				if (actions == null) continue;
+				for (String a : actions)
+				{
+					for (String wanted : matchingActions)
+					{
+						if (wanted.equals(a)) return child;
+					}
+				}
+			}
+			return null;
+		}).orElse(null);
 	}
 
 	public static void turnOffMusic()
@@ -190,13 +282,13 @@ public class Rs2Settings
 		var areaSoundBtn = Rs2Widget.getWidget(ComponentID.SETTINGS_SIDE_AREA_SOUND_SLIDER).getStaticChildren()[0];
 		if (musicBtn == null || soundEffectBtn == null || areaSoundBtn == null)
 		{
-			Microbot.log("Music settings buttons not found");
+			log.info("Music settings buttons not found");
 			return;
 		}
 
 		if (musicBtn.getActions() == null || soundEffectBtn.getActions() == null || areaSoundBtn.getActions() == null)
 		{
-			Microbot.log("Music settings buttons actions not found");
+			log.info("Music settings buttons actions not found");
 			return;
 		}
 
@@ -225,6 +317,32 @@ public class Rs2Settings
 		}
 	}
 
+	public static boolean disableWorldSwitcherConfirmation(boolean closeInterface) {
+		if (!isWorldSwitcherConfirmationEnabled()) return true;
+
+		Widget toggleWidget = openSettingsSearch("world switcher", "Toggle");
+		if (toggleWidget == null)
+		{
+			closeSettingsMenu();
+			return false;
+		}
+
+		Rs2Widget.clickWidget(toggleWidget);
+		boolean success = sleepUntil(() -> !isWorldSwitcherConfirmationEnabled(), 3000);
+
+		if (closeInterface)
+		{
+			closeSettingsMenu();
+			Rs2Tab.switchTo(InterfaceTab.INVENTORY);
+		}
+		return success;
+	}
+
+	public static boolean disableWorldSwitcherConfirmation()
+	{
+		return disableWorldSwitcherConfirmation(true);
+	}
+
 	/**
 	 * When casting alchemy spells on items in your inventory
 	 * if the item is worth more than this value, a warning will be shown
@@ -234,6 +352,47 @@ public class Rs2Settings
 	public static int getMinimumItemValueAlchemyWarning()
 	{
 		return Microbot.getVarbitValue(6091);
+	}
+
+	/**
+	 * Checks if spell filtering is enabled in the magic spellbook.
+	 *
+	 * @return {@code true} if spell filtering is enabled, {@code false} otherwise
+	 */
+	public static boolean isSpellFilteringEnabled()
+	{
+		return Microbot.getVarbitValue(VarbitID.MAGIC_SPELLBOOK_HIDEFILTERBUTTON) == 0;
+	}
+
+	/**
+	 * Enables spell filtering if it's currently disabled.
+	 */
+	public static void enableSpellFiltering()
+	{
+		if(isSpellFilteringEnabled()) return;
+		Widget spellbookInterfaceWidget = Rs2Tab.getSpellBookTab();
+		if (spellbookInterfaceWidget == null)
+		{
+			log.info("Spellbook interface widget not found, cannot toggle spell filter.");
+			return;
+		}
+		else
+		{
+			log.info("Spellbook widget found, enabling spell filters.");
+		}
+
+		Rectangle spellbookBounds = spellbookInterfaceWidget.getBounds();
+		NewMenuEntry spellFilterEntry = new NewMenuEntry()
+				.option("Enable spell filtering")
+				.target("")
+				.identifier(2)
+				.type(MenuAction.CC_OP)
+				.param0(-1)
+				.param1(spellbookInterfaceWidget.getId())
+				.forceLeftClick(false)
+				;
+		Microbot.doInvoke(spellFilterEntry, spellbookBounds != null && Rs2UiHelper.isRectangleWithinCanvas(spellbookBounds) ? spellbookBounds : Rs2UiHelper.getDefaultRectangle());
+		sleepUntil(Rs2Settings::isSpellFilteringEnabled, 2000);
 	}
 
 	private static boolean closeSettingsMenu()
@@ -265,7 +424,6 @@ public class Rs2Settings
 			"Controls", 3,
 			"Display", 4,
 			"Gameplay", 5,
-			"Interfaces", 6,
 			"Warnings", 7
 		);
 
@@ -275,9 +433,79 @@ public class Rs2Settings
 			return false;
 		}
 
-		NewMenuEntry menuEntry = new NewMenuEntry("Select <col=ff981f> " + tabName, "", 1, MenuAction.CC_OP, index, widget.getId(), false);
+		NewMenuEntry menuEntry = new NewMenuEntry()
+				.option("Select <col=ff981f> " + tabName)
+				.target("")
+				.identifier(1)
+				.type(MenuAction.CC_OP)
+				.param0(index)
+				.param1(widget.getId())
+				.forceLeftClick(false)
+				;
 
 		Microbot.doInvoke(menuEntry, Rs2UiHelper.getDefaultRectangle());
 		return true;
+	}
+
+	/**
+	 * Checks if bank slot locking is enabled.
+	 * Slot locking allows you to lock specific inventory slots in the bank,
+	 * preventing items from being deposited when using the Deposit All button.
+	 *
+	 * @return {@code true} if bank slot locking is enabled, {@code false} otherwise
+	 */
+	public static boolean isBankSlotLockingEnabled()
+	{
+		return Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_SHOWOP) == 1 && Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_IGNOREINVLOCKS) == 0;
+	}
+
+	/**
+	 * Enables bank slot locking if it's currently disabled.
+	 * If bank is open, it will navigate to the bank settings,
+	 * and enable the slot locking feature.
+	 * @return {@code true} if bank slot locking is successfully enabled or already enabled, {@code false} otherwise
+	 */
+	public static boolean enableBankSlotLocking() {
+		if (isBankSlotLockingEnabled()) return true;
+
+		Rs2Widget.clickWidget(InterfaceID.Bankmain.MENU_BUTTON);
+		if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.Bankmain.MENU_CONTAINER), 2000)) {
+			log.debug("Bank menu did not open within timeout.");
+			return false;
+		}
+
+		Rs2Widget.clickWidget(InterfaceID.Bankmain.LOCKS);
+		if (!sleepUntil(() -> Rs2Widget.isWidgetVisible(InterfaceID.BankSideLocks.DONE), 2000)) {
+			log.debug("Bank Locks panel did not appear.");
+			return false;
+		}
+
+		if (Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_IGNOREINVLOCKS) != 0) {
+			Rs2Widget.clickWidget(InterfaceID.BankSideLocks.IGNORELOCKS);
+			if (!sleepUntil(() -> Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_IGNOREINVLOCKS) == 0, 2000)) {
+				log.debug("Failed to disable 'ignore inventory locks' setting.");
+				return false;
+			}
+		}
+
+		if (Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_SHOWOP) != 1) {
+			Rs2Widget.clickWidget(InterfaceID.BankSideLocks.EXTRAOPTIONS);
+			if (!sleepUntil(() -> Microbot.getVarbitValue(VarbitID.BANK_SIDE_SLOT_SHOWOP) == 1, 2000)) {
+				log.debug("Failed to enable 'show inventory locks menu option' setting.");
+				return false;
+			}
+		}
+
+		Rs2Widget.clickWidget(InterfaceID.BankSideLocks.DONE);
+		if (!sleepUntil(() -> !Rs2Widget.isWidgetVisible(InterfaceID.BankSideLocks.DONE), 2000)) {
+			log.debug("Locks panel did not close after clicking DONE.");
+			return false;
+		}
+
+		if (Rs2Widget.isWidgetVisible(InterfaceID.Bankmain.MENU_CONTAINER)) {
+			Rs2Widget.clickWidget(InterfaceID.Bankmain.MENU_BUTTON);
+		}
+
+		return isBankSlotLockingEnabled();
 	}
 }

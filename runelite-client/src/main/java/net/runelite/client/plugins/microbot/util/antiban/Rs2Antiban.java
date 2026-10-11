@@ -6,7 +6,6 @@ import lombok.Setter;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerScript;
 import net.runelite.client.plugins.microbot.util.antiban.enums.Activity;
 import net.runelite.client.plugins.microbot.util.antiban.enums.ActivityIntensity;
 import net.runelite.client.plugins.microbot.util.antiban.enums.Category;
@@ -288,9 +287,6 @@ public class Rs2Antiban {
     }
 
     private static void performActionCooldown() {
-        if (Rs2AntibanSettings.universalAntiban)
-			Microbot.pauseAllScripts.compareAndSet(false, true);
-
         if (Rs2AntibanSettings.nonLinearIntervals)
             playStyle.evolvePlayStyle();
 
@@ -298,6 +294,12 @@ public class Rs2Antiban {
             TIMEOUT = playStyle.getRandomTickInterval();
         else
             TIMEOUT = playStyle.getPrimaryTickInterval();
+
+        // The pause (universal antiban only) and the always-set active flag both happen only after
+        // TIMEOUT is computed: if computing the interval ever throws, scripts must not be left
+        // paused with no countdown to clear them.
+        if (Rs2AntibanSettings.universalAntiban)
+			Microbot.pauseAllScripts.compareAndSet(false, true);
 
         Rs2AntibanSettings.actionCooldownActive = true;
 
@@ -323,8 +325,8 @@ public class Rs2Antiban {
      * <h3>Behavior:</h3>
      * <ul>
      *   <li>If a random value is less than <code>Rs2AntibanSettings.microBreakChance</code>, the micro-break is activated.</li>
-     *   <li>The break duration is randomly set between <code>Rs2AntibanSettings.microBreakDurationLow</code> and
-     *   <code>Rs2AntibanSettings.microBreakDurationHigh</code>, in seconds.</li>
+     *   <li>Sets <code>Rs2AntibanSettings.microBreakActive</code> to signal that a micro-break should begin.</li>
+     *   <li>The actual break duration will be calculated by the BreakHandlerScript using the configured range.</li>
      *   <li>If <code>Rs2AntibanSettings.moveMouseOffScreen</code> is enabled, the mouse is moved off-screen during the break.</li>
      * </ul>
      *
@@ -336,7 +338,7 @@ public class Rs2Antiban {
      * <h3>Postconditions:</h3>
      * <ul>
      *   <li><code>Rs2AntibanSettings.microBreakActive</code> is set to <code>true</code> if the break is triggered.</li>
-     *   <li><code>BreakHandlerScript.breakDuration</code> is set to a randomly determined value in seconds.</li>
+     *   <li>The BreakHandlerScript will detect this flag and manage the break duration and state transitions.</li>
      * </ul>
      *
      * @return true if a micro-break is triggered, false otherwise.
@@ -347,9 +349,9 @@ public class Rs2Antiban {
             logDebug("MICRO BREAKS ARE DISABLED, cannot take micro break");
             return false;
         }
-        if (Math.random() < Rs2AntibanSettings.microBreakChance) {
+        if (Rs2Random.diceFractional(Rs2AntibanSettings.microBreakChance)) {
             Rs2AntibanSettings.microBreakActive = true;
-            BreakHandlerScript.breakDuration = Rs2Random.between(Rs2AntibanSettings.microBreakDurationLow*60, Rs2AntibanSettings.microBreakDurationHigh*60);
+            logDebug("Micro break triggered by antiban system");
             if (Rs2AntibanSettings.moveMouseOffScreen)
                 moveMouseOffScreen();
             return true;
@@ -449,6 +451,7 @@ public class Rs2Antiban {
      */
 
     public static void renderAntibanOverlayComponents(PanelComponent panelComponent) {
+        if (playStyle == null) return;
         final ProgressBarComponent progressBarComponent = new ProgressBarComponent();
         progressBarComponent.setBackgroundColor(Color.DARK_GRAY);
         progressBarComponent.setForegroundColor(ColorUtil.fromHex("#cc8400"));

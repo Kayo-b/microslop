@@ -38,9 +38,9 @@ public class DebugOverlayPanel extends OverlayPanel {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        Pathfinder pathfinder = plugin.getPathfinder();
+        Pathfinder pathfinder = ShortestPathPlugin.getPathfinder();
         Pathfinder.PathfinderStats stats;
-        if (pathfinder == null || (stats = pathfinder.getStats()) == null) {
+        if (pathfinder == null || !pathfinder.isDone() || (stats = pathfinder.getStats()) == null) {
             return null;
         }
 

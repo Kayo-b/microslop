@@ -3,11 +3,10 @@ package net.runelite.client.plugins.microbot.util.npc;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.shortestpath.ShortestPathPlugin;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
+import org.slf4j.event.Level;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
@@ -22,11 +21,10 @@ import java.util.stream.Collectors;
  * This class is responsible for managing NPCs in the game.
  * It provides utility methods for loading NPC data from JSON files and retrieving NPC stats.
  */
-@Slf4j
+
 public class Rs2NpcManager {
     private static final Set<Integer> blacklistXpMultiplier = Set.of(8026, 8058, 8059, 8060, 8061, 7850, 7852, 7853, 7884, 7885, 7849, 7851, 7854, 7855, 7882, 7883, 7886, 7887, 7888, 7889, 494, 6640, 6656, 2042, 2043, 2044);
     public static Map<Integer, String> attackStyleMap;
-    public static Map<Integer, String> attackAnimationMap;
     private static Map<Integer, Rs2NpcStats> statsMap;
 
     // NEW: A map keyed by NPC name, with a list of location objects
@@ -40,15 +38,10 @@ public class Rs2NpcManager {
         if (statsMap != null) {
             return;
         }
-        Type statsTypeToken = new TypeToken<Map<Integer, Rs2NpcStats>>() {}.getType();
-
         statsMap = loadNpcStatsFromJsonFile("/npc/monsters_complete.json");
 
         Type attackStyleTypeToken = new TypeToken<Map<Integer, String>>() {}.getType();
         attackStyleMap = loadJsonFile("/npc/npcs_attack_style.json", attackStyleTypeToken);
-
-        Type attackAnimationTypeToken = new TypeToken<Map<Integer, String>>() {}.getType();
-        attackAnimationMap = loadJsonFile("/npc/npcs_attack_animation.json", attackAnimationTypeToken);
 
         loadNpcLocationsByName();
     }
@@ -64,7 +57,7 @@ public class Rs2NpcManager {
         Gson gson = new Gson();
         try (InputStream inputStream = Rs2NpcStats.class.getResourceAsStream(filename)) {
             if (inputStream == null) {
-                System.out.println("Failed to load " + filename);
+                Microbot.log(Level.ERROR,"Failed to load " + filename);
                 return Collections.emptyMap();
             }
             return gson.fromJson(new InputStreamReader(inputStream, StandardCharsets.UTF_8), typeToken);
@@ -79,7 +72,7 @@ public class Rs2NpcManager {
         {
             if (inputStream == null)
             {
-                log.warn("Failed to load {}", filename);
+                Microbot.log(Level.ERROR,"Failed to load {}", filename);
                 return null;
             }
             return gson.fromJson(new InputStreamReader(inputStream, StandardCharsets.UTF_8), typeToken);
@@ -97,16 +90,15 @@ public class Rs2NpcManager {
 
         try (InputStream inputStream = Rs2NpcStats.class.getResourceAsStream(filename)) {
             if (inputStream == null) {
-                System.out.println("Failed to load " + filename);
+                Microbot.log(Level.ERROR,"Failed to load " + filename);
                 return Collections.emptyMap();
             }
 
             // Deserialize the JSON directly into a Map<Integer, Rs2NpcStats>
             Type typeToken = new TypeToken<Map<Integer, Rs2NpcStats>>() {
             }.getType();
-            Map<Integer, Rs2NpcStats> statsMap = gson.fromJson(new InputStreamReader(inputStream, StandardCharsets.UTF_8), typeToken);
 
-            return statsMap;
+            return gson.fromJson(new InputStreamReader(inputStream, StandardCharsets.UTF_8), typeToken);
 
         } catch (IOException e) {
             throw new RuntimeException("Error reading JSON file: " + filename, e);
@@ -140,7 +132,7 @@ public class Rs2NpcManager {
 
         if (rawMap == null)
         {
-            log.warn("No location data found in {}", filename);
+            Microbot.log(Level.INFO,"No location data found in {}", filename);
             locationMap = Collections.emptyMap();
             return;
         }
@@ -160,7 +152,7 @@ public class Rs2NpcManager {
             locationMap.put(npcName, converted);
         }
 
-        log.info("Loaded {} NPC names with location data from {}", locationMap.size(), filename);
+        Microbot.log("Loaded {} NPC names with location data from {}", locationMap.size(), filename);
     }
 
     /**
@@ -175,13 +167,13 @@ public class Rs2NpcManager {
 
         if (dto.getCoords() != null)
         {
-            for (List<Integer> coord : dto.getCoords())
+            for (List<Integer> cord : dto.getCoords())
             {
-                if (coord.size() == 3)
+                if (cord.size() == 3)
                 {
-                    int x = coord.get(0);
-                    int y = coord.get(1);
-                    int plane = coord.get(2);
+                    int x = cord.get(0);
+                    int y = cord.get(1);
+                    int plane = cord.get(2);
                     loc.getCoords().add(new WorldPoint(x, y, plane));
                 }
             }
@@ -217,8 +209,8 @@ public class Rs2NpcManager {
      */
     public static int getAttackSpeed(int npcId) {
         Rs2NpcStats s = statsMap.get(npcId);
-        log.info(s.toString());
-        return s != null && s.getAttackSpeed() != -1 ? s.getAttackSpeed() : -1;
+        if (s == null) return -1;
+        return s.getAttackSpeed() != -1 ? s.getAttackSpeed() : -1;
     }
 
     /**
@@ -291,38 +283,56 @@ public class Rs2NpcManager {
      * @param minClustering The minimum number of NPCs required to consider a location.
      * @param avoidWilderness Whether to avoid locations in the Wilderness.
      */
-    public static MonsterLocation getClosestLocation(String npcName, int minClustering, boolean avoidWilderness)
-    {
-        ShortestPathPlugin.getPathfinderConfig().setUseBankItems(true);
-        Microbot.log("Finding closest location for: " + npcName);
-        var locs = getNpcLocations(npcName).stream().map(MonsterLocation::getLocationName).collect(Collectors.toList());
-        if (locs.isEmpty())
-        {
-            Microbot.log("No locations found for " + npcName);
+    public static MonsterLocation getClosestLocation(String npcName, int minClustering, boolean avoidWilderness) {
+        Microbot.log(Level.INFO,"Finding closest location for: " + npcName);
+
+        List<MonsterLocation> allLocations = getNpcLocations(npcName);
+        if (allLocations.isEmpty()) {
+            Microbot.log(Level.INFO,"No locations found for " + npcName);
             return null;
         }
-        log.info("All locations for " + npcName + ": " + getNpcLocations(npcName).stream().map(MonsterLocation::getLocationName).collect(Collectors.toList()));
-        MonsterLocation closest = getNpcLocations(npcName).stream()
-                .filter(loc -> loc.getCoords().size() > minClustering && (!avoidWilderness || !loc.getLocationName().contains("Wilderness")))
-                .parallel()
-                .min(Comparator.comparingDouble(loc -> Rs2Walker.getTotalTiles(loc.getClosestToCenter())))
-                .orElse(null);
 
-        ShortestPathPlugin.getPathfinderConfig().setUseBankItems(false);
+        List<String> allNames = allLocations.stream()
+                .map(MonsterLocation::getLocationName)
+                .collect(Collectors.toList());
+        Microbot.log(Level.INFO,"Found " + allLocations.size() + " locations for " + npcName + ": " + String.join(", ", allNames));
 
-        boolean isEmpty = closest == null || closest.getCoords().isEmpty();
-        if (isEmpty)
-        {
-            Microbot.log("No valid locations found for " + npcName);
+        List<MonsterLocation> validLocations = allLocations.stream()
+                .filter(loc -> loc.getCoords().size() > minClustering)
+                .filter(loc -> !avoidWilderness || !loc.getLocationName().contains("Wilderness"))
+                .collect(Collectors.toList());
+        if (validLocations.isEmpty()) {
+            Microbot.log(Level.INFO,"No valid locations after filtering for " + npcName);
             return null;
         }
-        else
-        {
-            Microbot.log("Closest location for " + npcName + ": " + closest.getLocationName());
+
+        List<MonsterLocation> centeredLocations = validLocations.stream()
+                .filter(location -> location.getBestClusterCenter() != null)
+                .collect(Collectors.toList());
+        List<WorldPoint> centers = centeredLocations.stream()
+                .map(MonsterLocation::getBestClusterCenter)
+                .collect(Collectors.toList());
+        if (centers.isEmpty()) {
+            Microbot.log(Level.INFO,"Could not compute any centers for " + npcName);
+            return null;
         }
 
+        // 6) Find nearest and return
+        int idx = Rs2Walker.findNearestAccessibleTarget(centers, true);
+        if (idx < 0 || idx >= centeredLocations.size()) {
+            Microbot.log(Level.INFO,"No accessible location found for " + npcName);
+            return null;
+        }
+        MonsterLocation closest = centeredLocations.get(idx);
+        if (closest.getCoords().isEmpty()) {
+            Microbot.log(Level.INFO,"Closest location had no coords for " + npcName);
+            return null;
+        }
+
+        Microbot.log(Level.INFO,"Closest location for " + npcName + ": " + closest.getLocationName());
         return closest;
     }
+
 
     public static MonsterLocation getClosestLocation(String npcName, int minClustering)
     {

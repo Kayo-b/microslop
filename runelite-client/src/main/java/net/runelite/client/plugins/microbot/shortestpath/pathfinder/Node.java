@@ -4,18 +4,25 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.shortestpath.WorldPointUtil;
 
 import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class Node {
     public final int packedPosition;
     public final Node previous;
     public final int cost;
+    // Per-node random value used as a secondary priority-queue comparator. Breaks ties
+    // between equal-cost nodes in random order so the pathfinder explores equivalent
+    // routes in a different sequence each run, producing distinct (but still optimal)
+    // tile sequences between the same start/target pair.
+    public final int tiebreaker;
 
     public Node(WorldPoint position, Node previous, int wait) {
         this.packedPosition = WorldPointUtil.packWorldPoint(position);
         this.previous = previous;
         this.cost = cost(previous, wait);
+        this.tiebreaker = ThreadLocalRandom.current().nextInt();
     }
 
     public Node(WorldPoint position, Node previous) {
@@ -26,6 +33,7 @@ public class Node {
         this.packedPosition = packedPosition;
         this.previous = previous;
         this.cost = cost;
+        this.tiebreaker = ThreadLocalRandom.current().nextInt();
     }
 
     public Node(int packedPosition, Node previous) {
@@ -33,28 +41,30 @@ public class Node {
     }
 
     public List<WorldPoint> getPath() {
-        List<WorldPoint> path = new LinkedList<>();
-        Node node = this;
-
-        while (node != null) {
-            WorldPoint position = WorldPointUtil.unpackWorldPoint(node.packedPosition);
-            path.add(0, position);
-            node = node.previous;
+        List<Node> nodes = getNodePath();
+        List<WorldPoint> path = new ArrayList<>(nodes.size());
+        for (Node n : nodes) {
+            path.add(WorldPointUtil.unpackWorldPoint(n.packedPosition));
         }
+        return path;
+    }
 
-        return new ArrayList<>(path);
+    List<Node> getNodePath() {
+        List<Node> path = new ArrayList<>();
+        for (Node n = this; n != null; n = n.previous) {
+            path.add(n);
+        }
+        Collections.reverse(path);
+        return path;
     }
 
     public List<Integer> getPathPacked() {
-        List<Integer> path = new LinkedList<>();
-        Node node = this;
-
-        while (node != null) {
-            path.add(0, node.packedPosition);
-            node = node.previous;
+        List<Integer> path = new ArrayList<>();
+        for (Node n = this; n != null; n = n.previous) {
+            path.add(n.packedPosition);
         }
-
-        return new ArrayList<>(path);
+        Collections.reverse(path);
+        return path;
     }
 
     private int cost(Node previous, int wait) {

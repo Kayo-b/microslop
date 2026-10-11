@@ -7,6 +7,7 @@ import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.devtools.MovementFlag;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.shortestpath.WorldPointUtil;
 import net.runelite.client.plugins.microbot.shortestpath.pathfinder.CollisionMap;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.plugins.microbot.util.coords.Rs2LocalPoint;
@@ -23,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 public abstract class Rs2Tile implements Tile {
@@ -30,9 +33,40 @@ public abstract class Rs2Tile implements Tile {
     @Getter
     private static final Map<WorldPoint, Integer> dangerousGraphicsObjectTiles = Collections.unmodifiableMap(dangerousGraphicsObjectTilesInternal);
 
+    private static final Map<WorldPoint, Integer> dangerousWorldTilesInternal = new ConcurrentHashMap<>();
+    private static final Map<LocalPoint, Integer> dangerousLocalTilesInternal = new ConcurrentHashMap<>();
+    @Getter
+    private static final Map<LocalPoint, Integer> dangerousLocalTiles =
+            Collections.unmodifiableMap(dangerousLocalTilesInternal);
+
+
+
     private static ScheduledExecutorService tileExecutor;
 
     private static final int FLAG_DATA_SIZE = 104;
+
+    private static final ThreadLocal<int[][]> DIRECTIONS_TL = ThreadLocal.withInitial(() -> new int[128][128]);
+    private static final ThreadLocal<int[][]> DISTANCES_TL = ThreadLocal.withInitial(() -> new int[128][128]);
+    private static final ThreadLocal<int[]> BUFFER_X_TL = ThreadLocal.withInitial(() -> new int[4096]);
+    private static final ThreadLocal<int[]> BUFFER_Y_TL = ThreadLocal.withInitial(() -> new int[4096]);
+
+    /**
+     * Runs collision / scene reads on the client thread when the caller is off-thread (e.g. script executor).
+     */
+    private static <T> T runClientRead(Supplier<T> supplier, T ifNoClient) {
+        final Client client = Microbot.getClient();
+        if (client == null) {
+            return ifNoClient;
+        }
+        if (client.isClientThread()) {
+            return supplier.get();
+        }
+        return Microbot.getClientThread().invoke(supplier);
+    }
+
+    private static boolean runClientReadBoolean(BooleanSupplier action) {
+        return Boolean.TRUE.equals(runClientRead(() -> action.getAsBoolean(), false));
+    }
 
     /**
      * Initializes the tile executor
@@ -40,13 +74,26 @@ public abstract class Rs2Tile implements Tile {
      */
     public static void init() {
         if (tileExecutor != null) return;
+
         tileExecutor = Executors.newSingleThreadScheduledExecutor();
         tileExecutor.scheduleWithFixedDelay(() -> {
-            // TODO: call this on game tick?
-            if (dangerousGraphicsObjectTilesInternal.isEmpty()) return;
+            // Update old world tiles (legacy)
+            if (!dangerousGraphicsObjectTilesInternal.isEmpty()) {
+                dangerousGraphicsObjectTilesInternal.replaceAll((wp, time) -> time - 600);
+                dangerousGraphicsObjectTilesInternal.entrySet().removeIf(entry -> entry.getValue() <= 0);
+            }
 
-            dangerousGraphicsObjectTilesInternal.replaceAll((worldPoint, time) -> time - 600);
-            dangerousGraphicsObjectTilesInternal.entrySet().removeIf(entry -> entry.getValue() <= 0);
+            // Update new world tiles
+            if (!dangerousWorldTilesInternal.isEmpty()) {
+                dangerousWorldTilesInternal.replaceAll((wp, time) -> time - 600);
+                dangerousWorldTilesInternal.entrySet().removeIf(entry -> entry.getValue() <= 0);
+            }
+
+            // Update local tiles (overlay)
+            if (!dangerousLocalTilesInternal.isEmpty()) {
+                dangerousLocalTilesInternal.replaceAll((lp, time) -> time - 600);
+                dangerousLocalTilesInternal.entrySet().removeIf(entry -> entry.getValue() <= 0);
+            }
         }, 0, 600, TimeUnit.MILLISECONDS);
     }
 
@@ -72,6 +119,65 @@ public abstract class Rs2Tile implements Tile {
                 return true;
             });
         }
+    }
+
+    /**
+     * Adds a dangerous tile from a gameobject, to the list of dangerous tiles
+     * @param gameObject the gameobject object
+     * @param time the time a tile is dangerous in milliseconds
+     */
+    public static void addDangerousGameObjectTile(GameObject gameObject, int time) {
+        if (gameObject == null) return;
+
+        WorldPoint worldPoint = gameObject.getWorldLocation();
+        if (worldPoint == null) return;
+
+        dangerousGraphicsObjectTilesInternal.merge(worldPoint, time, Math::max);
+
+        if (Rs2Player.getWorldLocation().equals(worldPoint)) {
+            Microbot.getClientThread().runOnSeperateThread(() -> {
+                final WorldPoint safeTile = Rs2Tile.getSafeTile();
+                System.out.println(safeTile);
+                Rs2Walker.walkFastCanvas(safeTile);
+                return true;
+            });
+        }
+    }
+
+    public static void addDangerousGraphicsObjectTileForInstances(GraphicsObject graphicsObject, int time)
+    {
+        if (graphicsObject == null) return;
+
+        // Get local point directly from graphics object
+        LocalPoint lp = graphicsObject.getLocation();
+        if (lp == null) return;
+
+        // Convert to a world point in the current instance
+        WorldPoint wp = WorldPoint.fromLocalInstance(Microbot.getClient(), lp);
+        if (wp == null) return;
+
+        // --- GENERIC FILTER: reject "ghost" tiles too far from player ---
+        WorldPoint playerWp = Rs2Player.getWorldLocation();
+        if (playerWp == null || wp.distanceTo(playerWp) > 10) {
+            Microbot.log("Filtered ghost graphics too far away: " + wp);
+            return;
+        }
+
+        // Store in both maps (world for dodging, local for overlay)
+        dangerousWorldTilesInternal.merge(wp, time, Math::max);
+        dangerousLocalTilesInternal.merge(lp, time, Math::max);
+
+        Microbot.log("Graphics added: Local=" + lp + " | World=" + wp
+                + " | Total local=" + dangerousLocalTilesInternal.size()
+                + " | Total world=" + dangerousWorldTilesInternal.size());
+    }
+
+    public static Map<WorldPoint, Integer> getDangerousGraphicsObjectTiles() {
+        return Collections.unmodifiableMap(dangerousWorldTilesInternal);
+    }
+
+    public static Map<LocalPoint, Integer> getDangerousLocalTiles() {
+        return Collections.unmodifiableMap(dangerousLocalTilesInternal);
     }
 
     /**
@@ -101,22 +207,32 @@ public abstract class Rs2Tile implements Tile {
     }
 
     public static boolean isWalkable(Tile tile) {
+        return runClientReadBoolean(() -> isWalkableTileInternal(tile));
+    }
+
+    private static boolean isWalkableTileInternal(Tile tile) {
         if (tile == null) return false;
 
-        final int[][] flags = getFlags();
+        final int[][] flags = getFlagsInternal();
         if (flags == null) return false;
 
         return isWalkable(flags, tile.getSceneLocation().getX(), tile.getSceneLocation().getY());
     }
 
     public static boolean isWalkable(WorldPoint worldPoint) {
+        return runClientReadBoolean(() -> isWalkableWorldPointInternal(worldPoint));
+    }
+
+    private static boolean isWalkableWorldPointInternal(WorldPoint worldPoint) {
+        if (worldPoint == null) return false;
+
         final WorldView wv = Microbot.getClient().getTopLevelWorldView();
         if (wv == null) return false;
 
-        return isWalkable(LocalPoint.fromWorld(wv, worldPoint));
+        return isWalkableLocalInternal(LocalPoint.fromWorld(wv, worldPoint));
     }
 
-    private static int[][] getFlags() {
+    private static int[][] getFlagsInternal() {
         final WorldView wv = Microbot.getClient().getTopLevelWorldView();
         if (wv == null) return null;
 
@@ -141,9 +257,13 @@ public abstract class Rs2Tile implements Tile {
     }
 
     public static boolean isWalkable(LocalPoint localPoint) {
+        return runClientReadBoolean(() -> isWalkableLocalInternal(localPoint));
+    }
+
+    private static boolean isWalkableLocalInternal(LocalPoint localPoint) {
         if (localPoint == null) return false;
 
-        final int[][] flags = getFlags();
+        final int[][] flags = getFlagsInternal();
         if (flags == null) return false;
 
         final int data = flags[localPoint.getSceneX()][localPoint.getSceneY()];
@@ -155,21 +275,30 @@ public abstract class Rs2Tile implements Tile {
     }
 
     public static List<WorldPoint> getWalkableTilesAroundTile(WorldPoint point, int radius) {
+        return runClientRead(() -> getWalkableTilesAroundTileInternal(point, radius), Collections.emptyList());
+    }
+
+    private static List<WorldPoint> getWalkableTilesAroundTileInternal(WorldPoint point, int radius) {
+        int useRadius = radius;
         final LocalPoint localPoint = LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), point);
         if (localPoint == null) return Collections.emptyList();
 
-        final int[][] flags = getFlags();
+        final int[][] flags = getFlagsInternal();
         if (flags == null) return Collections.emptyList(); // this differs from original impl. would return all tiles
 
         final int sceneX = localPoint.getSceneX();
         final int sceneY = localPoint.getSceneY();
         // limit radius to the size of flags
-        if (sceneX - radius < 0 || sceneX + radius >= FLAG_DATA_SIZE) radius = Math.min(sceneX, FLAG_DATA_SIZE - sceneX - 1);
-        if (sceneY - radius < 0 || sceneY + radius >= FLAG_DATA_SIZE) radius = Math.min(sceneY, FLAG_DATA_SIZE - sceneY - 1);
+        if (sceneX - useRadius < 0 || sceneX + useRadius >= FLAG_DATA_SIZE) {
+            useRadius = Math.min(sceneX, FLAG_DATA_SIZE - sceneX - 1);
+        }
+        if (sceneY - useRadius < 0 || sceneY + useRadius >= FLAG_DATA_SIZE) {
+            useRadius = Math.min(sceneY, FLAG_DATA_SIZE - sceneY - 1);
+        }
 
         final List<WorldPoint> worldPoints = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dy = -radius; dy <= radius; dy++) {
+        for (int dx = -useRadius; dx <= useRadius; dx++) {
+            for (int dy = -useRadius; dy <= useRadius; dy++) {
                 if (dx == 0 && dy == 0) continue; // Skip the player's current position
                 if (!isWalkable(flags, sceneX + dx, sceneY + dy)) continue;
                 worldPoints.add(new WorldPoint(point.getX() + dx, point.getY() + dy, point.getPlane()));
@@ -218,53 +347,117 @@ public abstract class Rs2Tile implements Tile {
      * @return A HashMap containing WorldPoints and their corresponding distances from the start tile.
      */
     public static HashMap<WorldPoint, Integer> getReachableTilesFromTile(WorldPoint tile, int distance, boolean ignoreCollision) {
+        return runClientRead(() -> getReachableTilesFromTileInternal(tile, distance, ignoreCollision), new HashMap<>());
+    }
+
+    private static HashMap<WorldPoint, Integer> getReachableTilesFromTileInternal(WorldPoint tile, int distance, boolean ignoreCollision) {
         final HashMap<WorldPoint, Integer> tileDistances = new HashMap<>();
+        if (tile == null) return tileDistances;
+
+        final int[][] flags = getFlagsInternal();
+        if (flags == null) return tileDistances;
+
+        final WorldView wv = Microbot.getClient().getTopLevelWorldView();
+        final boolean isInstance = wv.getScene().isInstance();
+
+        final ArrayDeque<WorldPoint> queue = new ArrayDeque<>();
         tileDistances.put(tile, 0);
+        queue.add(tile);
 
-        for (int i = 0; i < distance + 1; i++) {
-            int dist = i;
-            for (var kvp : tileDistances.entrySet().stream().filter(x -> x.getValue() == dist).collect(Collectors.toList())) {
-                var point = kvp.getKey();
-                LocalPoint localPoint;
-                if (Microbot.getClient().getTopLevelWorldView().isInstance()) {
-                    WorldPoint worldPoint = WorldPoint.toLocalInstance(Microbot.getClient().getTopLevelWorldView(), point).stream().findFirst().orElse(null);
-                    if (worldPoint == null) break;
-                    localPoint = LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), worldPoint);
-                } else
-                    localPoint = LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), point);
+        while (!queue.isEmpty()) {
+            final WorldPoint point = queue.poll();
+            final int dist = tileDistances.get(point);
 
-                CollisionData[] collisionMap = Microbot.getClient().getTopLevelWorldView().getCollisionMaps();
-                if (collisionMap != null && localPoint != null) {
-                    CollisionData collisionData = collisionMap[Microbot.getClient().getTopLevelWorldView().getPlane()];
-                    int[][] flags = collisionData.getFlags();
-                    int data = flags[localPoint.getSceneX()][localPoint.getSceneY()];
+            final LocalPoint lp;
+            if (isInstance) {
+                WorldPoint instancePoint = WorldPoint.toLocalInstance(wv, point).stream().findFirst().orElse(null);
+                if (instancePoint == null) continue;
+                lp = LocalPoint.fromWorld(wv, instancePoint);
+            } else {
+                lp = LocalPoint.fromWorld(wv, point);
+            }
+            if (lp == null) continue;
 
-                    Set<MovementFlag> movementFlags = MovementFlag.getSetFlags(data);
+            final int sx = lp.getSceneX();
+            final int sy = lp.getSceneY();
+            if (!isWithinBounds(sx, sy)) continue;
 
-                    if (!ignoreCollision && !tile.equals(point)) {
-                        if (movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_FULL)
-                                || movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_FLOOR)) {
-                            tileDistances.remove(point);
-                            continue;
-                        }
-                    }
+            final int data = flags[sx][sy];
 
-                    if (kvp.getValue() >= distance)
-                        continue;
-
-                    if (!movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_EAST))
-                        tileDistances.putIfAbsent(point.dx(1), dist + 1);
-                    if (!movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_WEST))
-                        tileDistances.putIfAbsent(point.dx(-1), dist + 1);
-                    if (!movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_NORTH))
-                        tileDistances.putIfAbsent(point.dy(1), dist + 1);
-                    if (!movementFlags.contains(MovementFlag.BLOCK_MOVEMENT_SOUTH))
-                        tileDistances.putIfAbsent(point.dy(-1), dist + 1);
+            if (!ignoreCollision && !tile.equals(point)) {
+                if ((data & CollisionDataFlag.BLOCK_MOVEMENT_FULL) != 0) {
+                    tileDistances.remove(point);
+                    continue;
                 }
+            }
+
+            if (dist >= distance) continue;
+
+            final boolean canE = ignoreCollision || (data & CollisionDataFlag.BLOCK_MOVEMENT_EAST) == 0;
+            final boolean canW = ignoreCollision || (data & CollisionDataFlag.BLOCK_MOVEMENT_WEST) == 0;
+            final boolean canN = ignoreCollision || (data & CollisionDataFlag.BLOCK_MOVEMENT_NORTH) == 0;
+            final boolean canS = ignoreCollision || (data & CollisionDataFlag.BLOCK_MOVEMENT_SOUTH) == 0;
+
+            if (canE) {
+                WorldPoint neighbor = point.dx(1);
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canW) {
+                WorldPoint neighbor = point.dx(-1);
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canN) {
+                WorldPoint neighbor = point.dy(1);
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canS) {
+                WorldPoint neighbor = point.dy(-1);
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+
+            if (canN && canE && isWithinBounds(sx + 1, sy) && isWithinBounds(sx, sy + 1) && isWithinBounds(sx + 1, sy + 1)
+                    && (ignoreCollision || (flags[sx + 1][sy] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_NORTH)) == 0)
+                    && (ignoreCollision || (flags[sx][sy + 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_EAST)) == 0)
+                    && (ignoreCollision || (flags[sx + 1][sy + 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0)) {
+                WorldPoint neighbor = new WorldPoint(point.getX() + 1, point.getY() + 1, point.getPlane());
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canN && canW && isWithinBounds(sx - 1, sy) && isWithinBounds(sx, sy + 1) && isWithinBounds(sx - 1, sy + 1)
+                    && (ignoreCollision || (flags[sx - 1][sy] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_NORTH)) == 0)
+                    && (ignoreCollision || (flags[sx][sy + 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_WEST)) == 0)
+                    && (ignoreCollision || (flags[sx - 1][sy + 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0)) {
+                WorldPoint neighbor = new WorldPoint(point.getX() - 1, point.getY() + 1, point.getPlane());
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canS && canE && isWithinBounds(sx + 1, sy) && isWithinBounds(sx, sy - 1) && isWithinBounds(sx + 1, sy - 1)
+                    && (ignoreCollision || (flags[sx + 1][sy] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_SOUTH)) == 0)
+                    && (ignoreCollision || (flags[sx][sy - 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_EAST)) == 0)
+                    && (ignoreCollision || (flags[sx + 1][sy - 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0)) {
+                WorldPoint neighbor = new WorldPoint(point.getX() + 1, point.getY() - 1, point.getPlane());
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
+            }
+            if (canS && canW && isWithinBounds(sx - 1, sy) && isWithinBounds(sx, sy - 1) && isWithinBounds(sx - 1, sy - 1)
+                    && (ignoreCollision || (flags[sx - 1][sy] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_SOUTH)) == 0)
+                    && (ignoreCollision || (flags[sx][sy - 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_WEST)) == 0)
+                    && (ignoreCollision || (flags[sx - 1][sy - 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0)) {
+                WorldPoint neighbor = new WorldPoint(point.getX() - 1, point.getY() - 1, point.getPlane());
+                if (tileDistances.putIfAbsent(neighbor, dist + 1) == null)
+                    queue.add(neighbor);
             }
         }
 
         return tileDistances;
+    }
+
+    public static HashMap<WorldPoint, Integer> getReachableTilesFromTile(WorldPoint tile) {
+        return getReachableTilesFromTile(tile, Integer.MAX_VALUE, false);
     }
 
     /**
@@ -307,18 +500,140 @@ public abstract class Rs2Tile implements Tile {
      *         otherwise false.
      */
     public static boolean isTileReachable(WorldPoint targetPoint) {
+        return runClientReadBoolean(() -> isTileReachableInternal(targetPoint));
+    }
+
+    /**
+     * Whether a single step from {@code from} to {@code to} is currently permitted by the CLIENT's
+     * collision data — the live flags the server drives, so a door that has just opened clears its
+     * blocking flag here on the same tick.
+     * <p>
+     * This is the direct answer to "can I walk through that door now", and it is deliberately not
+     * {@link #isTileReachable}: that runs a BFS, so a shut door with a long way round it still reports
+     * the far tile as reachable, and it costs a whole scene search. This reads one flag.
+     * <p>
+     * Answers {@code false} for anything it cannot decide — off-scene, an instance (raw coordinates
+     * make the scene conversion unreliable), or a plane other than the one loaded. Callers use it to
+     * release early, so an unknown must never read as "open".
+     *
+     * @return true only when the step is known to be unobstructed
+     */
+    public static boolean isEdgePassable(WorldPoint from, WorldPoint to) {
+        return runClientReadBoolean(() -> isEdgePassableInternal(from, to));
+    }
+
+    /**
+     * Why the last {@link #isEdgePassable} call answered as it did. A bare {@code false} is ambiguous
+     * between "the door is shut" and "this could not be decided", and callers that release a wait on
+     * {@code true} behave very differently depending on which it was.
+     */
+    private static volatile String lastEdgeDecision = "-";
+
+    /** @see #lastEdgeDecision */
+    public static String lastEdgeDecision() {
+        return lastEdgeDecision;
+    }
+
+    private static boolean isEdgePassableInternal(WorldPoint from, WorldPoint to) {
+        if (from == null || to == null || from.getPlane() != to.getPlane()) {
+            lastEdgeDecision = "bad-args";
+            return false;
+        }
+
+        final int dx = to.getX() - from.getX();
+        final int dy = to.getY() - from.getY();
+        if (dx == 0 && dy == 0) {
+            lastEdgeDecision = "same-tile";
+            return true;
+        }
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+            lastEdgeDecision = "not-adjacent";
+            return false;
+        }
+
+        final WorldView wv = Microbot.getClient().getTopLevelWorldView();
+        if (wv == null) {
+            lastEdgeDecision = "no-worldview";
+            return false;
+        }
+        if (wv.getPlane() != from.getPlane()) {
+            lastEdgeDecision = "plane-not-loaded";
+            return false;
+        }
+        // Instance scenes repeat template chunks, so world -> scene by base offset is wrong there.
+        if (wv.getScene() != null && wv.getScene().isInstance()) {
+            lastEdgeDecision = "instance";
+            return false;
+        }
+
+        final int[][] flags = getFlagsInternal();
+        if (flags == null) {
+            lastEdgeDecision = "no-flags";
+            return false;
+        }
+
+        final int fx = from.getX() - Microbot.getClient().getBaseX();
+        final int fy = from.getY() - Microbot.getClient().getBaseY();
+        final int tx = fx + dx;
+        final int ty = fy + dy;
+        if (!isWithinBounds(fx, fy) || !isWithinBounds(tx, ty)) {
+            lastEdgeDecision = "off-scene";
+            return false;
+        }
+
+        boolean allowed = isStepAllowed(flags, fx, fy, dx, dy);
+        lastEdgeDecision = allowed ? "open" : "blocked";
+        return allowed;
+    }
+
+    /**
+     * The collision rule alone, with no client reads: is a single {@code (dx, dy)} step out of
+     * {@code (fx, fy)} unobstructed by these flags? Split out so the cardinal/diagonal rules are
+     * covered by a decision table rather than only by a live client.
+     */
+    static boolean isStepAllowed(int[][] flags, int fx, int fy, int dx, int dy) {
+        if (dx == 0 && dy == 0) return true;
+        final int tx = fx + dx;
+        final int ty = fy + dy;
+
+        if ((flags[tx][ty] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) != 0) return false;
+
+        if (dx == 0 || dy == 0) {
+            return (flags[fx][fy] & cardinalBlockFlag(dx, dy)) == 0;
+        }
+        // Diagonal: both cardinal components must be clear, and so must the two tiles cut through —
+        // the same rule the reachability search uses for corners.
+        return (flags[fx][fy] & cardinalBlockFlag(dx, 0)) == 0
+                && (flags[fx][fy] & cardinalBlockFlag(0, dy)) == 0
+                && (flags[tx][fy] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | cardinalBlockFlag(0, dy))) == 0
+                && (flags[fx][ty] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | cardinalBlockFlag(dx, 0))) == 0;
+    }
+
+    private static int cardinalBlockFlag(int dx, int dy) {
+        if (dx > 0) return CollisionDataFlag.BLOCK_MOVEMENT_EAST;
+        if (dx < 0) return CollisionDataFlag.BLOCK_MOVEMENT_WEST;
+        if (dy > 0) return CollisionDataFlag.BLOCK_MOVEMENT_NORTH;
+        return CollisionDataFlag.BLOCK_MOVEMENT_SOUTH;
+    }
+
+    private static boolean isTileReachableInternal(WorldPoint targetPoint) {
         if (targetPoint == null) return false;
 
         final WorldPoint playerLoc = Rs2Player.getWorldLocation();
         if (playerLoc == null) return false;
 
         if (targetPoint.getPlane() != playerLoc.getPlane()) return false;
-        if (CollisionMap.ignoreCollision.contains(targetPoint)) return true;
+        if (CollisionMap.ignoreCollisionPacked.contains(WorldPointUtil.packWorldPoint(targetPoint))) return true;
 
-        final boolean[][] visited = new boolean[FLAG_DATA_SIZE][FLAG_DATA_SIZE];
-        final int[][] flags = getFlags();
+        final int[][] flags = getFlagsInternal();
         if (flags == null) return false;
 
+        final boolean[][] visited = reachableFromPlayer(flags, playerLoc);
+
+        return isVisited(targetPoint, visited);
+    }
+
+    private static boolean[][] reachableFromPlayer(int[][] flags, WorldPoint playerLoc) {
         final int startX;
         final int startY;
         if (Microbot.getClient().getTopLevelWorldView().getScene().isInstance()) {
@@ -329,6 +644,13 @@ public abstract class Rs2Tile implements Tile {
             startX = playerLoc.getX() - Microbot.getClient().getBaseX();
             startY = playerLoc.getY() - Microbot.getClient().getBaseY();
         }
+        return reachableFrom(flags, startX, startY);
+    }
+
+    static boolean[][] reachableFrom(int[][] flags, int startX, int startY) {
+        final boolean[][] visited = new boolean[FLAG_DATA_SIZE][FLAG_DATA_SIZE];
+        if (!isWithinBounds(startX, startY)) return visited;
+
         final int startPoint = (startX << 16) | startY;
 
         ArrayDeque<Integer> queue = new ArrayDeque<>();
@@ -341,15 +663,123 @@ public abstract class Rs2Tile implements Tile {
             int y = point & 0xFFFF;
 
             if (isWithinBounds(x, y)) {
+                boolean canN = (flags[x][y] & CollisionDataFlag.BLOCK_MOVEMENT_NORTH) == 0;
+                boolean canS = (flags[x][y] & CollisionDataFlag.BLOCK_MOVEMENT_SOUTH) == 0;
+                boolean canE = (flags[x][y] & CollisionDataFlag.BLOCK_MOVEMENT_EAST) == 0;
+                boolean canW = (flags[x][y] & CollisionDataFlag.BLOCK_MOVEMENT_WEST) == 0;
+
                 checkAndAddNeighbour(queue, visited, flags, x, y, -1, 0, CollisionDataFlag.BLOCK_MOVEMENT_WEST);
                 checkAndAddNeighbour(queue, visited, flags, x, y, 1, 0, CollisionDataFlag.BLOCK_MOVEMENT_EAST);
                 checkAndAddNeighbour(queue, visited, flags, x, y, 0, -1, CollisionDataFlag.BLOCK_MOVEMENT_SOUTH);
                 checkAndAddNeighbour(queue, visited, flags, x, y, 0, 1, CollisionDataFlag.BLOCK_MOVEMENT_NORTH);
+
+                if (canN && canE && isWithinBounds(x + 1, y + 1)
+                        && !visited[x + 1][y + 1]
+                        && (flags[x + 1][y] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_NORTH)) == 0
+                        && (flags[x][y + 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_EAST)) == 0
+                        && (flags[x + 1][y + 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0) {
+                    queue.add(((x + 1) << 16) | (y + 1));
+                    visited[x + 1][y + 1] = true;
+                }
+                if (canN && canW && isWithinBounds(x - 1, y + 1)
+                        && !visited[x - 1][y + 1]
+                        && (flags[x - 1][y] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_NORTH)) == 0
+                        && (flags[x][y + 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_WEST)) == 0
+                        && (flags[x - 1][y + 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0) {
+                    queue.add(((x - 1) << 16) | (y + 1));
+                    visited[x - 1][y + 1] = true;
+                }
+                if (canS && canE && isWithinBounds(x + 1, y - 1)
+                        && !visited[x + 1][y - 1]
+                        && (flags[x + 1][y] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_SOUTH)) == 0
+                        && (flags[x][y - 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_EAST)) == 0
+                        && (flags[x + 1][y - 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0) {
+                    queue.add(((x + 1) << 16) | (y - 1));
+                    visited[x + 1][y - 1] = true;
+                }
+                if (canS && canW && isWithinBounds(x - 1, y - 1)
+                        && !visited[x - 1][y - 1]
+                        && (flags[x - 1][y] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_SOUTH)) == 0
+                        && (flags[x][y - 1] & (CollisionDataFlag.BLOCK_MOVEMENT_FULL | CollisionDataFlag.BLOCK_MOVEMENT_WEST)) == 0
+                        && (flags[x - 1][y - 1] & CollisionDataFlag.BLOCK_MOVEMENT_FULL) == 0) {
+                    queue.add(((x - 1) << 16) | (y - 1));
+                    visited[x - 1][y - 1] = true;
+                }
             }
         }
 
-        return isVisited(targetPoint, visited);
+        return visited;
     }
+
+    public static boolean isTileObjectReachable(TileObject tileObject) {
+        return runClientReadBoolean(() -> isTileObjectReachableInternal(tileObject));
+    }
+
+    private static boolean isTileObjectReachableInternal(TileObject tileObject) {
+        if (tileObject == null) return false;
+
+        final WorldPoint playerLoc = Rs2Player.getWorldLocation();
+        if (playerLoc == null || tileObject.getPlane() != playerLoc.getPlane()) return false;
+
+        final LocalPoint objectLocal = tileObject.getLocalLocation();
+        if (objectLocal == null || !objectLocal.isInScene()) return false;
+
+        if (CollisionMap.ignoreCollisionPacked.contains(WorldPointUtil.packWorldPoint(tileObject.getWorldLocation()))) return true;
+
+        final int[][] flags = getFlagsInternal();
+        if (flags == null) return false;
+
+        int orientation = 0;
+        if (tileObject instanceof WallObject) {
+            WallObject wall = (WallObject) tileObject;
+            orientation = wall.getOrientationA() | wall.getOrientationB();
+        }
+
+        return canInteractFromReachableTile(flags, reachableFromPlayer(flags, playerLoc),
+                objectLocal.getSceneX(), objectLocal.getSceneY(), orientation);
+    }
+
+    static boolean canInteractFromReachableTile(int[][] flags, boolean[][] reachable, int x, int y, int wallOrientation) {
+        if (!isWithinBounds(x, y)) return false;
+        if (reachable[x][y]) return true;
+
+        for (int[] edge : WALL_EDGES) {
+            if ((wallOrientation & edge[0]) == 0) continue;
+            int nx = x + edge[1];
+            int ny = y + edge[2];
+            if (isWithinBounds(nx, ny) && reachable[nx][ny]) return true;
+        }
+
+        for (int[] side : CARDINAL_SIDES) {
+            if (isBehindWallFace(wallOrientation, side[0], side[1])) continue;
+            int nx = x + side[0];
+            int ny = y + side[1];
+            if (!isWithinBounds(nx, ny) || !reachable[nx][ny]) continue;
+            if ((flags[nx][ny] & side[2]) == 0 && (flags[x][y] & side[3]) == 0) return true;
+        }
+
+        return false;
+    }
+
+    private static boolean isBehindWallFace(int wallOrientation, int dx, int dy) {
+        for (int[] edge : WALL_EDGES) {
+            if ((wallOrientation & edge[0]) != 0 && edge[1] == -dx && edge[2] == -dy) return true;
+        }
+        return false;
+    }
+
+    private static final int[][] WALL_EDGES = {
+            {1, -1, 0}, {2, 0, 1}, {4, 1, 0}, {8, 0, -1},
+            {16, -1, 0}, {16, 0, 1}, {32, 1, 0}, {32, 0, 1},
+            {64, 1, 0}, {64, 0, -1}, {128, -1, 0}, {128, 0, -1}
+    };
+
+    private static final int[][] CARDINAL_SIDES = {
+            {-1, 0, CollisionDataFlag.BLOCK_MOVEMENT_EAST, CollisionDataFlag.BLOCK_MOVEMENT_WEST},
+            {1, 0, CollisionDataFlag.BLOCK_MOVEMENT_WEST, CollisionDataFlag.BLOCK_MOVEMENT_EAST},
+            {0, -1, CollisionDataFlag.BLOCK_MOVEMENT_NORTH, CollisionDataFlag.BLOCK_MOVEMENT_SOUTH},
+            {0, 1, CollisionDataFlag.BLOCK_MOVEMENT_SOUTH, CollisionDataFlag.BLOCK_MOVEMENT_NORTH}
+    };
 
     /**
      * Checks if any of the tiles immediately surrounding the given object are walkable & reachable.
@@ -361,6 +791,10 @@ public abstract class Rs2Tile implements Tile {
      * @return true if any surrounding tile is walkable, false otherwise.
      */
     public static boolean areSurroundingTilesWalkable(WorldPoint worldPoint, int sizeX, int sizeY) {
+        return runClientReadBoolean(() -> areSurroundingTilesWalkableInternal(worldPoint, sizeX, sizeY));
+    }
+
+    private static boolean areSurroundingTilesWalkableInternal(WorldPoint worldPoint, int sizeX, int sizeY) {
         int plane = worldPoint.getPlane();
 
         // Calculate the boundaries of the object
@@ -378,7 +812,7 @@ public abstract class Rs2Tile implements Tile {
                 }
 
                 // Check if the surrounding tile is walkable
-                if (isTileReachable(new WorldPoint(x, y, plane))) {
+                if (isTileReachableInternal(new WorldPoint(x, y, plane))) {
                     return true;
                 }
             }
@@ -457,7 +891,10 @@ public abstract class Rs2Tile implements Tile {
         int x = 0;
         int y = 0;
         if (Microbot.getClient().getTopLevelWorldView().getScene().isInstance()) {
-            LocalPoint localPoint = Rs2Player.getLocalLocation();
+            LocalPoint localPoint = Rs2LocalPoint.fromWorldInstance(worldPoint);
+            if (localPoint == null) {
+                return false;
+            }
             x = localPoint.getSceneX();
             y = localPoint.getSceneY();
         } else {
@@ -511,10 +948,14 @@ public abstract class Rs2Tile implements Tile {
      * @return The nearest walkable tile, or null if no walkable tile is found.
      */
     public static WorldPoint getNearestWalkableTile(WorldPoint source) {
+        return runClientRead(() -> getNearestWalkableTileWorldInternal(source), null);
+    }
+
+    private static WorldPoint getNearestWalkableTileWorldInternal(WorldPoint source) {
         for (Direction direction : Direction.values()) {
             WorldPoint neighbour = getNeighbour(direction, source);
             if (neighbour.equals(Rs2Player.getWorldLocation())) continue;
-            if (isWalkable(neighbour)) {
+            if (isWalkableWorldPointInternal(neighbour)) {
                 return neighbour;
             }
         }
@@ -543,19 +984,26 @@ public abstract class Rs2Tile implements Tile {
      *         tile is found.
      */
     public static WorldPoint getNearestWalkableTileWithLineOfSight(WorldPoint source) {
+        return runClientRead(() -> getNearestWalkableTileWithLineOfSightInternal(source), null);
+    }
+
+    private static WorldPoint getNearestWalkableTileWithLineOfSightInternal(WorldPoint source) {
+        final WorldView wv = Microbot.getClient().getTopLevelWorldView();
+        if (wv == null) return null;
+
         // check if source is walkable
-        if (!tileHasWalls(source)
-                && isValidTile(getTile(source.getX(), source.getY()))
-                && (isWalkable(LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), source.getX(), source.getY())) || isBankBooth(source))) {
+        if (!tileHasWallsInternal(source)
+                && isValidTileInternal(getTileInternal(source.getX(), source.getY()))
+                && (isWalkableLocalInternal(LocalPoint.fromWorld(wv, source.getX(), source.getY())) || isBankBoothInternal(source))) {
             return source;
         }
         //check if neightbours are walkable
         for (Direction direction : Direction.values()) {
             WorldPoint neighbour = getNeighbour(direction, source);
             if (neighbour.equals(Rs2Player.getWorldLocation())) continue;
-            if (!tileHasWalls(neighbour)
-                    && isValidTile(getTile(neighbour.getX(), neighbour.getY()))
-                    && (isWalkable(LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), neighbour.getX(), neighbour.getY())) || isBankBooth(neighbour))) {
+            if (!tileHasWallsInternal(neighbour)
+                    && isValidTileInternal(getTileInternal(neighbour.getX(), neighbour.getY()))
+                    && (isWalkableLocalInternal(LocalPoint.fromWorld(wv, neighbour.getX(), neighbour.getY())) || isBankBoothInternal(neighbour))) {
                 return neighbour;
             }
         }
@@ -574,6 +1022,10 @@ public abstract class Rs2Tile implements Tile {
      * @return An {@link Rs2WorldPoint} representing the nearest walkable tile around the object, or {@code null} if none are found.
      */
     public static Rs2WorldPoint getNearestWalkableTile(GameObject tileObject) {
+        return runClientRead(() -> getNearestWalkableTileForObjectInternal(tileObject), null);
+    }
+
+    private static Rs2WorldPoint getNearestWalkableTileForObjectInternal(GameObject tileObject) {
         // Cache player's location and top-level world view
         Rs2WorldPoint playerLocation = Rs2Player.getRs2WorldPoint();
         WorldView topLevelWorldView = Microbot.getClient().getTopLevelWorldView();
@@ -595,7 +1047,7 @@ public abstract class Rs2Tile implements Tile {
 
         // Filter points that are walkable
         List<WorldPoint> walkablePoints = interactablePoints.stream()
-                .filter(Rs2Tile::isWalkable)
+                .filter(Rs2Tile::isWalkableWorldPointInternal)
                 .collect(Collectors.toList());
 
         if (walkablePoints.isEmpty()) {
@@ -604,7 +1056,7 @@ public abstract class Rs2Tile implements Tile {
 
         // Find the nearest walkable interact point to the player
         WorldPoint nearestPoint = walkablePoints.stream()
-                .min(Comparator.comparingInt(playerLocation::distanceToPath))
+                .min(Comparator.comparingInt(wp -> Rs2WorldPoint.quickDistance(playerLocation.getWorldPoint(), wp)))
                 .orElse(null);
 
         return new Rs2WorldPoint(nearestPoint);
@@ -644,7 +1096,7 @@ public abstract class Rs2Tile implements Tile {
             if (interactablePoints.isEmpty()) {
                 // If no melee points, remove points with walls
                 interactablePoints = gameObjectArea.getInteractable();
-                interactablePoints.removeIf(Rs2Tile::tileHasWalls);
+                interactablePoints.removeIf(Rs2Tile::tileHasWallsInternal);
             }
         }
 
@@ -666,6 +1118,10 @@ public abstract class Rs2Tile implements Tile {
      * @return True if the tile has walls or obstacles, false otherwise.
      */
     public static boolean tileHasWalls(WorldPoint source) {
+        return runClientReadBoolean(() -> tileHasWallsInternal(source));
+    }
+
+    private static boolean tileHasWallsInternal(WorldPoint source) {
         return Rs2GameObject.getWallObjects().stream().filter(x -> x.getWorldLocation().equals(source)).findFirst().orElse(null) != null;
     }
 
@@ -683,6 +1139,10 @@ public abstract class Rs2Tile implements Tile {
      * @return True if the tile contains a bank booth, false otherwise.
      */
     public static boolean isBankBooth(WorldPoint source) {
+        return runClientReadBoolean(() -> isBankBoothInternal(source));
+    }
+
+    private static boolean isBankBoothInternal(WorldPoint source) {
         GameObject gameObject = Rs2GameObject.getGameObjects().stream().filter(x -> x.getWorldLocation().equals(source)).findFirst().orElse(null);
         if (gameObject != null) {
             ObjectComposition objectComposition = Rs2GameObject.convertToObjectComposition(gameObject);
@@ -706,6 +1166,10 @@ public abstract class Rs2Tile implements Tile {
      * @return The Tile at the specified coordinates, or null if the tile is invalid or not in the scene.
      */
     public static Tile getTile(int x, int y) {
+        return runClientRead(() -> getTileInternal(x, y), null);
+    }
+
+    private static Tile getTileInternal(int x, int y) {
         WorldPoint worldPoint = new WorldPoint(x, y, Microbot.getClient().getTopLevelWorldView().getPlane());
         LocalPoint localPoint;
 
@@ -734,6 +1198,10 @@ public abstract class Rs2Tile implements Tile {
      * @return True if the tile is valid (not blocked by movement restrictions), false otherwise.
      */
     public static boolean isValidTile(Tile tile) {
+        return runClientReadBoolean(() -> isValidTileInternal(tile));
+    }
+
+    private static boolean isValidTileInternal(Tile tile) {
         if (tile == null) return false;
         int[][] flags = Microbot.getClient().getCollisionMaps()[Microbot.getClient().getPlane()].getFlags();
         int data = flags[tile.getSceneLocation().getX()][tile.getSceneLocation().getY()];
@@ -759,6 +1227,10 @@ public abstract class Rs2Tile implements Tile {
      *         or null if no path is found.
      */
     public static List<Tile> fullPathTo(Tile source, Tile other) {
+        return runClientRead(() -> fullPathToInternal(source, other), null);
+    }
+
+    private static List<Tile> fullPathToInternal(Tile source, Tile other) {
         int z = source.getPlane();
         if (z != other.getPlane()) {
             return null;
@@ -984,9 +1456,11 @@ public abstract class Rs2Tile implements Tile {
      * @param other The destination tile to reach.
      * @return A list of tiles representing the path from source to destination, or null if no path is found.
      */
-    public static List<Tile> pathTo(Tile source,Tile other)
-    {
+    public static List<Tile> pathTo(Tile source, Tile other) {
+        return runClientRead(() -> pathToInternal(source, other), null);
+    }
 
+    private static List<Tile> pathToInternal(Tile source, Tile other) {
         int z = source.getPlane();
         if (z != other.getPlane())
         {
@@ -999,19 +1473,15 @@ public abstract class Rs2Tile implements Tile {
             return null;
         }
 
-        int[][] directions = new int[128][128];
-        int[][] distances = new int[128][128];
-        int[] bufferX = new int[4096];
-        int[] bufferY = new int[4096];
+        int[][] directions = DIRECTIONS_TL.get();
+        int[][] distances = DISTANCES_TL.get();
+        int[] bufferX = BUFFER_X_TL.get();
+        int[] bufferY = BUFFER_Y_TL.get();
 
-        // Initialise directions and distances
         for (int i = 0; i < 128; ++i)
         {
-            for (int j = 0; j < 128; ++j)
-            {
-                directions[i][j] = 0;
-                distances[i][j] = Integer.MAX_VALUE;
-            }
+            Arrays.fill(directions[i], 0);
+            Arrays.fill(distances[i], Integer.MAX_VALUE);
         }
 
         Point p1 = source.getSceneLocation();

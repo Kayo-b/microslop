@@ -1,6 +1,8 @@
 package net.runelite.client.plugins.microbot.shortestpath;
 
 import net.runelite.api.Client;
+import net.runelite.api.Player;
+import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldArea;
@@ -17,7 +19,7 @@ public class WorldPointUtil {
 
     public static int packWorldPoint(WorldPoint point) {
         if (point == null) {
-            return -1;
+            return UNDEFINED;
         }
         return packWorldPoint(point.getX(), point.getY(), point.getPlane());
     }
@@ -83,9 +85,7 @@ public class WorldPointUtil {
 
     public static int distanceBetween(int previousX, int previousY, int previousZ,
                                       int currentX, int currentY, int currentZ, int diagonal) {
-        final int dz = Math.abs(previousZ - currentZ);
-
-        if (dz != 0) {
+        if (previousZ != currentZ) {
             return Integer.MAX_VALUE;
         }
 
@@ -106,6 +106,29 @@ public class WorldPointUtil {
         return Integer.MAX_VALUE;
     }
 
+    // OSRS shifts underground coords by +6400 on the Y axis (e.g. Varrock sewers at y≈9800 sit
+    // under Varrock at y≈3400). Plain straight-line distance across this offset is meaningless and
+    // misleads "is this closer to the goal" checks. See Pathfinder's admissible heuristic.
+    public static final int UNDERGROUND_Y_OFFSET = 6400;
+
+    /**
+     * Chebyshev (2D) distance that tolerates the surface↔underground Y-offset convention: it takes
+     * the smaller of the direct distance and the distance after folding both Y coords into the
+     * [0, {@link #UNDERGROUND_Y_OFFSET}) band. This keeps an underground tile and its surface
+     * neighbour "close" (one transport apart) instead of ~6400 tiles apart. Same formula the
+     * pathfinder heuristic uses, so the walker and pathfinder agree on what "toward the goal" means.
+     */
+    public static int undergroundAwareDistance(int x1, int y1, int x2, int y2) {
+        final int dx = Math.abs(x1 - x2);
+        final int direct = Math.max(dx, Math.abs(y1 - y2));
+        final int wrapped = Math.max(dx, Math.abs((y1 % UNDERGROUND_Y_OFFSET) - (y2 % UNDERGROUND_Y_OFFSET)));
+        return Math.min(direct, wrapped);
+    }
+
+    public static int undergroundAwareDistance(WorldPoint a, WorldPoint b) {
+        return undergroundAwareDistance(a.getX(), a.getY(), b.getX(), b.getY());
+    }
+
     public static int distanceBetween(WorldPoint previous, WorldPoint current) {
         return distanceBetween(previous, current, 1);
     }
@@ -115,19 +138,23 @@ public class WorldPointUtil {
                 current.getX(), current.getY(), current.getPlane(), diagonal);
     }
 
-    // Matches WorldArea.distanceTo
-    public static int distanceToArea(int packedPoint, WorldArea area) {
-        final int plane = unpackWorldPlane(packedPoint);
-        if (area.getPlane() != plane) {
-            return Integer.MAX_VALUE;
-        }
+	public static int distanceToArea(int packedPoint, WorldArea area) {
+		final int plane = unpackWorldPlane(packedPoint);
+		if (area.getPlane() != plane) {
+			return Integer.MAX_VALUE;
+		}
+		return distanceToArea2D(packedPoint, area);
+	}
 
-        final int y = unpackWorldY(packedPoint);
-        final int x = unpackWorldX(packedPoint);
-        final int areaMaxX = area.getX() + area.getWidth() - 1;
-        final int areaMaxY = area.getY() + area.getHeight() - 1;
-        final int dx = Math.max(Math.max(area.getX() - x, 0), x - areaMaxX);
-        final int dy = Math.max(Math.max(area.getY() - y, 0), y - areaMaxY);
+    // Matches WorldArea.distanceTo
+    public static int distanceToArea2D(int packedPoint, WorldArea area)
+	{
+		final int y = unpackWorldY(packedPoint);
+		final int x = unpackWorldX(packedPoint);
+		final int areaMaxX = area.getX() + area.getWidth() - 1;
+		final int areaMaxY = area.getY() + area.getHeight() - 1;
+		final int dx = Math.max(Math.max(area.getX() - x, 0), x - areaMaxX);
+		final int dy = Math.max(Math.max(area.getY() - y, 0), y - areaMaxY);
 
         return Math.max(dx, dy);
     }
@@ -146,6 +173,17 @@ public class WorldPointUtil {
                 return packWorldPoint(chunkX + (CHUNK_SIZE - 1 - y), chunkY + x, z);
         }
         return packWorldPoint(originalX, originalY, z);
+    }
+
+    public static int fromLocalInstance(Client client, Player localPlayer) {
+        WorldView worldView = localPlayer.getWorldView();
+        int worldViewId = worldView.getId();
+        boolean isOnBoat = worldViewId != WorldView.TOPLEVEL;
+        if (isOnBoat) {
+            WorldEntity worldEntity = client.getTopLevelWorldView().worldEntities().byIndex(worldViewId);
+            return fromLocalInstance(client, worldEntity.getLocalLocation());
+        }
+        return fromLocalInstance(client, localPlayer.getLocalLocation());
     }
 
     public static int fromLocalInstance(Client client, LocalPoint localPoint) {
@@ -253,5 +291,20 @@ public class WorldPointUtil {
                 (unpackWorldX(packedPoint) - worldView.getBaseX() << LOCAL_COORD_BITS) + (1 << LOCAL_COORD_BITS - 1),
                 (unpackWorldY(packedPoint) - worldView.getBaseY() << LOCAL_COORD_BITS) + (1 << LOCAL_COORD_BITS - 1),
                 worldView.getId());
+    }
+
+    public static String toString(int packedPoint) {
+        final int x = unpackWorldX(packedPoint);
+        final int y = unpackWorldY(packedPoint);
+        final int z = unpackWorldPlane(packedPoint);
+        return "(" + x + "," + y + "," + z + ")";
+    }
+
+    public static String toString(Collection<Integer> packedPoints) {
+        StringBuilder s = new StringBuilder();
+        if (packedPoints.size() != 1) s.append("[");
+        for (int packedPoint : packedPoints) s.append(toString(packedPoint));
+        if (packedPoints.size() != 1) s.append("]");
+        return s.toString();
     }
 }

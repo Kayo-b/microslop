@@ -30,70 +30,8 @@ import com.formdev.flatlaf.util.SystemInfo;
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import com.google.inject.Inject;
-import java.awt.AWTException;
-import java.awt.Canvas;
-import java.awt.Component;
-import java.awt.Container;
-import java.awt.Cursor;
-import java.awt.Desktop;
-import java.awt.Dimension;
-import java.awt.Frame;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.GraphicsConfiguration;
-import java.awt.GraphicsDevice;
-import java.awt.GraphicsEnvironment;
-import java.awt.Image;
-import java.awt.Insets;
-import java.awt.KeyboardFocusManager;
-import java.awt.LayoutManager2;
-import java.awt.Point;
-import java.awt.Rectangle;
-import java.awt.SystemTray;
-import java.awt.Taskbar;
-import java.awt.Toolkit;
-import java.awt.TrayIcon;
-import java.awt.desktop.QuitStrategy;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
-import java.awt.event.KeyEvent;
-import java.awt.event.MouseEvent;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
-import java.awt.event.WindowFocusListener;
-import java.awt.image.BufferedImage;
-import java.time.Duration;
-import java.util.ArrayDeque;
-import java.util.Arrays;
-import java.util.Deque;
-import java.util.List;
-import java.util.TreeSet;
-import java.util.function.Function;
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-import javax.inject.Named;
-import javax.inject.Provider;
-import javax.inject.Singleton;
-import javax.swing.Box;
-import javax.swing.Icon;
-import javax.swing.ImageIcon;
-import javax.swing.JButton;
-import javax.swing.JDialog;
-import javax.swing.JEditorPane;
-import javax.swing.JFrame;
-import javax.swing.JMenuBar;
-import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
-import javax.swing.JRootPane;
-import javax.swing.JTabbedPane;
-import javax.swing.SwingUtilities;
-import javax.swing.Timer;
-import javax.swing.ToolTipManager;
-import javax.swing.border.EmptyBorder;
-import javax.swing.border.MatteBorder;
-import javax.swing.event.HyperlinkEvent;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -119,15 +57,41 @@ import net.runelite.client.input.MouseAdapter;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.questhelper.QuestHelperConfig;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.ui.laf.RuneLiteLAF;
 import net.runelite.client.ui.laf.RuneLiteRootPaneUI;
 import net.runelite.client.util.HotkeyListener;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.LinkBrowser;
 import net.runelite.client.util.OSType;
-import net.runelite.client.util.OSXUtil;
 import net.runelite.client.util.SwingUtil;
 import net.runelite.client.util.WinUtil;
+import net.runelite.client.util.*;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import javax.inject.Named;
+import javax.inject.Provider;
+import javax.inject.Singleton;
+import javax.swing.Timer;
+import javax.swing.*;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.MatteBorder;
+import javax.swing.event.HyperlinkEvent;
+import java.awt.*;
+import java.awt.desktop.QuitStrategy;
+import java.awt.event.*;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.*;
+import java.util.function.Function;
 
 import static javax.swing.JOptionPane.INFORMATION_MESSAGE;
 
@@ -175,6 +139,9 @@ public class ClientUI
 	private Dimension lastClientSize;
 	private Cursor defaultCursor;
 
+	private JButton questHelperNavBtn;
+	private BufferedImage questIconOn;
+	private BufferedImage questIconOff;
 	private String lastNormalBounds;
 	private final Timer normalBoundsTimer;
 
@@ -189,6 +156,14 @@ public class ClientUI
 	private int recommendedMemoryLimit = 512;
 
 	private List<KeyListener> keyListeners;
+
+	private LogConsolePanel consolePanel;
+	private ConsoleLogAppender consoleLogAppender;
+	private PrintStream consolePrintStream;
+	private JButton consoleToggleButton;
+	private BufferedImage consoleIconOpen;
+	private BufferedImage consoleIconClosed;
+	private boolean consoleVisible;
 
 	@RequiredArgsConstructor
 	private static class HistoryEntry
@@ -206,8 +181,7 @@ public class ClientUI
 		Provider<ClientThread> clientThreadProvider,
 		EventBus eventBus,
 		@Named("safeMode") boolean safeMode,
-		@Named("runelite.title") String title,
-		@Named("microbot.version") String version
+		@Named("runelite.title") String title
 	)
 	{
 		this.config = config;
@@ -217,8 +191,7 @@ public class ClientUI
 		this.clientThreadProvider = clientThreadProvider;
 		this.eventBus = eventBus;
 		this.safeMode = safeMode;
-		this.title = title + (safeMode ? " (safe mode)" : " V" + version) + 
-             		(proxyMessage.contains(":") ? " " + proxyMessage.split(":")[0] + ":" + proxyMessage.split(":")[1] : "");
+		this.title = title + (safeMode ? " (safe mode)" : "");
 
 		normalBoundsTimer = new Timer(250, _ev -> setLastNormalBounds());
 		normalBoundsTimer.setRepeats(false);
@@ -339,10 +312,19 @@ public class ClientUI
 			// Create main window
 			frame = new ContainableFrame();
 
-			// Try to enable fullscreen on OSX
-			OSXUtil.tryEnableFullscreen(frame);
+			if (OSType.getOSType() == OSType.MacOS)
+			{
+				OSXFullScreenAdapter.install(frame);
+			}
 
-			frame.setTitle(title);
+			final Client apiClient = (Client) this.client;
+			String frameTitle = title;
+			if (apiClient.getLauncherDisplayName() != null && config.usernameInTitle())
+			{
+				frameTitle += " - " + apiClient.getLauncherDisplayName();
+			}
+
+			frame.setTitle(frameTitle);
 			frame.setIconImages(Arrays.asList(ICON_128, ICON_16));
 			frame.setLocationRelativeTo(frame.getOwner());
 			frame.setResizable(true);
@@ -403,6 +385,11 @@ public class ClientUI
 			content.setLayout(new Layout());
 
 			clientPanel = new ClientPanel(client);
+			consolePanel = new LogConsolePanel();
+			clientPanel.setConsole(consolePanel);
+			clientPanel.setConsoleVisible(false);
+			consoleVisible = false;
+			initializeConsoleLogging();
 			content.add(clientPanel);
 
 			sidebar = new JTabbedPane(JTabbedPane.RIGHT);
@@ -544,6 +531,17 @@ public class ClientUI
 			// Decorate window with custom chrome and titlebar if needed
 			withTitleBar = config.enableCustomChrome();
 			toolbarPanel = new ClientToolbarPanel(!withTitleBar);
+			consoleIconClosed = createConsoleIcon(false);
+			consoleIconOpen = createConsoleIcon(true);
+			consoleToggleButton = toolbarPanel.add(
+				NavigationButton.builder()
+					.priority(95)
+					.icon(consoleIconClosed)
+					.tooltip("Show console")
+					.onClick(this::toggleConsole)
+					.popup(Map.of("Clear", () -> consolePanel.clear()))
+					.build(), false);
+			updateConsoleToggleButton();
 
 			sidebarOpenIcon = ImageUtil.loadImageResource(ClientUI.class, withTitleBar ? "open.png" : "open_rs.png");
 			sidebarCloseIcon = ImageUtil.flipImage(sidebarOpenIcon, true, false);
@@ -611,6 +609,23 @@ public class ClientUI
 					FlatClientProperties.TABBED_PANE_TRAILING_COMPONENT,
 					toolbarPanel.createSidebarPanel());
 			}
+
+			questIconOn = net.runelite.client.plugins.microbot.questhelper.tools.Icon.QUEST_ICON_ON.getImage();
+			questIconOff = net.runelite.client.plugins.microbot.questhelper.tools.Icon.QUEST_ICON_OFF.getImage();
+			questHelperNavBtn = toolbarPanel.add(
+				NavigationButton.builder()
+					.icon(configManager.getConfiguration(QuestHelperConfig.QUEST_HELPER_GROUP, "TurnOn", Boolean.class) ? questIconOn : questIconOff)
+					.tooltip(configManager.getConfiguration(QuestHelperConfig.QUEST_HELPER_GROUP, "TurnOn", Boolean.class) ? "Disable 'Semi-Auto' Questing" : "Enable 'Semi-Auto' Questing")
+					.onClick(() ->
+					{
+						boolean isEnabled = configManager.getConfiguration(QuestHelperConfig.QUEST_HELPER_GROUP, "TurnOn", Boolean.class);
+						configManager.setConfiguration(QuestHelperConfig.QUEST_HELPER_GROUP, "TurnOn", !isEnabled);
+						questHelperNavBtn.setIcon(new ImageIcon(!isEnabled ? questIconOn : questIconOff ));
+						questHelperNavBtn.setToolTipText(!isEnabled ? "Disable 'Semi-Auto' Questing" : "Enable 'Semi-Auto' Questing");
+						if (isEnabled) Rs2Walker.clearWalkingRoute("client-ui:quest-helper-toggle-disable");
+					})
+					.build(), false
+			);
 
 			// Update config
 			updateFrameConfig(false);
@@ -883,9 +898,9 @@ public class ClientUI
 		switch (OSType.getOSType())
 		{
 			case MacOS:
-				// On OSX Component::requestFocus has no visible effect, so we use our OSX-specific
-				// requestUserAttention()
-				OSXUtil.requestUserAttention();
+				// On macOS Component::requestFocus doesn't cause the taskbar icon to bounce, so use
+				// Taskbar.requestUserAttention
+				Taskbar.getTaskbar().requestUserAttention(true, true);
 				break;
 			default:
 				frame.requestFocus();
@@ -902,7 +917,7 @@ public class ClientUI
 		switch (OSType.getOSType())
 		{
 			case MacOS:
-				OSXUtil.requestForeground();
+				Desktop.getDesktop().requestForeground(true);
 				frame.setState(Frame.NORMAL);
 				break;
 			case Windows:
@@ -1159,6 +1174,93 @@ public class ClientUI
 		}
 	}
 
+	private void toggleConsole()
+	{
+		setConsoleVisible(!consoleVisible);
+	}
+
+	private void setConsoleVisible(boolean visible)
+	{
+		if (consolePanel == null || clientPanel == null || consoleVisible == visible)
+		{
+			return;
+		}
+
+		consoleVisible = visible;
+		clientPanel.setConsoleVisible(visible);
+		updateConsoleToggleButton();
+
+		if (content != null)
+		{
+			content.revalidate();
+			content.repaint();
+		}
+
+		if (frame != null)
+		{
+			frame.revalidateMinimumSize();
+		}
+	}
+
+	private void updateConsoleToggleButton()
+	{
+		if (consoleToggleButton == null)
+		{
+			return;
+		}
+
+		consoleToggleButton.setIcon(new ImageIcon(consoleVisible ? consoleIconOpen : consoleIconClosed));
+		consoleToggleButton.setToolTipText(consoleVisible ? "Hide console" : "Show console");
+	}
+
+
+	private void initializeConsoleLogging()
+	{
+		if (consolePanel == null || consoleLogAppender != null)
+		{
+			return;
+		}
+
+		OutputStream consoleStream = consolePanel.createOutputStream();
+		PrintStream originalOut = System.out;
+		TeeOutputStream teeStream = new TeeOutputStream(consoleStream, originalOut);
+
+		try
+		{
+			consolePrintStream = new PrintStream(teeStream, true, StandardCharsets.UTF_8);
+		}
+		catch (Exception ex)
+		{
+			consolePrintStream = new PrintStream(teeStream, true);
+		}
+
+		System.setOut(consolePrintStream);
+
+		LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+		consoleLogAppender = new ConsoleLogAppender(consolePanel::append);
+		consoleLogAppender.setContext(loggerContext);
+		consoleLogAppender.start();
+
+		Logger rootLogger = loggerContext.getLogger(Logger.ROOT_LOGGER_NAME);
+		rootLogger.addAppender(consoleLogAppender);
+	}
+
+	private BufferedImage createConsoleIcon(boolean active)
+	{
+		BufferedImage icon = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
+		Graphics2D graphics = icon.createGraphics();
+		graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		graphics.setColor(ColorScheme.DARK_GRAY_COLOR);
+		graphics.fillRoundRect(1, 3, 14, 10, 3, 3);
+		graphics.setColor(active ? ColorScheme.BRAND_ORANGE : ColorScheme.LIGHT_GRAY_COLOR);
+		graphics.drawRoundRect(1, 3, 14, 10, 3, 3);
+		graphics.setColor(ColorScheme.PROGRESS_COMPLETE_COLOR);
+		graphics.drawLine(3, 7, 12, 7);
+		graphics.drawLine(3, 10, 9, 10);
+		graphics.dispose();
+		return icon;
+	}
+
 	private void pushHistory()
 	{
 		selectedTabHistory.addLast(new HistoryEntry(sidebar.isVisible(), selectedTab));
@@ -1204,11 +1306,22 @@ public class ClientUI
 
 		if (config.usernameInTitle())
 		{
-			final Player player = ((Client) client).getLocalPlayer();
+			final Client client = (Client) this.client;
+			final Player player = client.getLocalPlayer();
 
-			if (player != null && player.getName() != null)
+			String playerName = null;
+			if (player != null && !Strings.isNullOrEmpty(player.getName()))
 			{
-				frame.setTitle(title + " - " + player.getName());
+				playerName = player.getName();
+			}
+			else if (client.getLauncherDisplayName() != null)
+			{
+				playerName = client.getLauncherDisplayName();
+			}
+
+			if (playerName != null)
+			{
+				frame.setTitle(title + " - " + playerName);
 			}
 		}
 		else
@@ -1414,9 +1527,9 @@ public class ClientUI
 					// frame.setVisible(true) calls CPlatformWindow::nativePushNSWindowToFront.
 					// However, this native method is not called with activateIgnoringOtherApps:YES,
 					// so any other active window will prevent our window from being brought to the front.
-					// To work around this, we use our macOS-specific requestForeground().
+					// To work around this, use eawt requestForeground() via java.desktop.
 					frame.setVisible(false);
-					OSXUtil.requestForeground();
+					Desktop.getDesktop().requestForeground(true);
 				}
 				frame.setVisible(true);
 				frame.setState(Frame.NORMAL); // Restore
@@ -1424,6 +1537,51 @@ public class ClientUI
 		});
 
 		return trayIcon;
+	}
+
+
+	private static final class TeeOutputStream extends OutputStream
+	{
+		private final OutputStream primary;
+		private final OutputStream secondary;
+
+		private TeeOutputStream(OutputStream primary, OutputStream secondary)
+		{
+			this.primary = primary;
+			this.secondary = secondary;
+		}
+
+		@Override
+		public void write(int b) throws IOException
+		{
+			if (primary != null)
+			{
+				primary.write(b);
+			}
+			if (secondary != null)
+			{
+				secondary.write(b);
+			}
+		}
+
+		@Override
+		public void flush() throws IOException
+		{
+			if (primary != null)
+			{
+				primary.flush();
+			}
+			if (secondary != null)
+			{
+				secondary.flush();
+			}
+		}
+
+		@Override
+		public void close() throws IOException
+		{
+			flush();
+		}
 	}
 
 	private class Layout implements LayoutManager2

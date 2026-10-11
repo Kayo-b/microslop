@@ -1,24 +1,17 @@
 package net.runelite.client.plugins.microbot.util;
 
-import java.awt.Graphics2D;
-import java.awt.Polygon;
-import java.awt.Shape;
-import java.awt.image.BufferedImage;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import net.runelite.api.Actor;
-import net.runelite.api.ActorSpotAnim;
-import net.runelite.api.IterableHashTable;
-import net.runelite.api.Model;
-import net.runelite.api.Node;
 import net.runelite.api.Point;
-import net.runelite.api.SpritePixels;
-import net.runelite.api.WorldView;
+import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
 import org.jetbrains.annotations.Nullable;
+
+import java.awt.*;
+import java.awt.image.BufferedImage;
 
 @Getter
 @RequiredArgsConstructor
@@ -34,12 +27,17 @@ public class ActorModel implements Actor
 	}
 
 	@Override
+	public LocalPoint getCameraFocus() {
+		return Microbot.getClientThread().runOnClientThreadOptional(actor::getCameraFocus).orElse(null);
+	}
+
+	@Override
 	public int getCombatLevel()
 	{
 		return Microbot.getClientThread().runOnClientThreadOptional(actor::getCombatLevel).orElse(0);
 	}
 
-	@Override
+    @Override
 	public @Nullable String getName()
 	{
 		return Microbot.getClientThread().runOnClientThreadOptional(actor::getName).orElse(null);
@@ -72,13 +70,13 @@ public class ActorModel implements Actor
 	@Override
 	public WorldPoint getWorldLocation()
 	{
-		return actor.getWorldLocation();
+		return Microbot.getClientThread().invoke(actor::getWorldLocation);
 	}
 
 	@Override
 	public LocalPoint getLocalLocation()
 	{
-		return actor.getLocalLocation();
+		return Microbot.getClientThread().invoke(actor::getLocalLocation);
 	}
 
 	@Override
@@ -234,7 +232,7 @@ public class ActorModel implements Actor
 	@Override
 	public void setActionFrame(int frame)
 	{
-		actor.setActionFrame(frame);
+		actor.setAnimationFrame(frame);
 	}
 
 	@Override
@@ -354,7 +352,7 @@ public class ActorModel implements Actor
 	@Override
 	public WorldArea getWorldArea()
 	{
-		return actor.getWorldArea();
+		return Microbot.getClientThread().invoke(actor::getWorldArea);
 	}
 
 	@Override
@@ -391,6 +389,22 @@ public class ActorModel implements Actor
 	public void setDead(boolean dead)
 	{
 		actor.setDead(dead);
+	}
+
+	@Override
+	public int getFootprintSize() {
+		return actor.getFootprintSize();
+	}
+
+	@Override
+	public int getAnimationHeightOffset()
+	{
+		return actor.getAnimationHeightOffset();
+	}
+
+	@Override
+	public int getRenderMode() {
+		return actor.getRenderMode();
 	}
 
 	@Override

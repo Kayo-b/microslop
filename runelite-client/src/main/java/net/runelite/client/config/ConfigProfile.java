@@ -36,19 +36,28 @@ public class ConfigProfile
 	@Getter
 	private final long id;
 	@Getter
-	@Setter(AccessLevel.PACKAGE)
-	private String name;
+	@Setter
+    public String name;
 	@Getter
-	@Setter(AccessLevel.PACKAGE)
-	private String password;
+	@Setter
+	public String password;
 	@Getter
-	@Setter(AccessLevel.PACKAGE)
-	private String bankPin;
+	@Setter
+    public String bankPin;
 	@Getter
-	@Setter(AccessLevel.PACKAGE)
-	private boolean isMember;
+	@Setter
+	private long memberExpireDaysTimeStemp;
 	@Getter
-	@Setter(AccessLevel.PACKAGE)
+	@Setter
+	private long memberExpireDays;
+	@Getter
+	@Setter
+    public boolean isMember;
+	@Getter
+	@Setter
+	private Integer selectedWorld; // null = not set, -1 = Random Members, -2 = Random F2P, positive = specific world ID
+	@Getter
+	@Setter
 	private String discordWebhookUrl;
 	@Getter
 	@Setter

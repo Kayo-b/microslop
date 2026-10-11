@@ -27,8 +27,9 @@ package net.runelite.client.plugins.slayer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import com.google.inject.Binder;
+import com.google.inject.Module;
 import com.google.inject.Provides;
+import com.google.inject.util.Providers;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -50,14 +51,11 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.EnumComposition;
-import net.runelite.api.EnumID;
 import net.runelite.api.GameState;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MessageNode;
 import net.runelite.api.NPC;
 import net.runelite.api.NPCComposition;
-import net.runelite.api.ParamID;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.CommandExecuted;
 import net.runelite.api.events.GameStateChanged;
@@ -66,6 +64,7 @@ import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.NpcDespawned;
 import net.runelite.api.events.NpcSpawned;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
@@ -91,7 +90,6 @@ import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
 import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.Text;
 import org.apache.commons.lang3.ArrayUtils;
-import org.apache.commons.lang3.StringUtils;
 
 @PluginDescriptor(
 	name = "Slayer",
@@ -103,11 +101,17 @@ public class SlayerPlugin extends Plugin
 {
 	//Chat messages
 	private static final String CHAT_SUPERIOR_MESSAGE = "A superior foe has appeared...";
+	private static final Pattern CHAT_SUPERIOR_PATTERN = Pattern.compile(
+		"^(?:@mes_hl_red@|<col=[0-9a-fA-F]{6}>)?" + Pattern.quote(CHAT_SUPERIOR_MESSAGE) + "(?:</col>)?$");
 
 	// Chat Command
 	private static final String TASK_COMMAND_STRING = "!task";
 	private static final Pattern TASK_STRING_VALIDATION = Pattern.compile("[^a-zA-Z0-9' -]");
 	private static final int TASK_STRING_MAX_LENGTH = 50;
+
+	// Task streak
+	private static final int KRYSTILIA_SLAYER_MASTER = 7;
+	private static final int MORTIMER_SLAYER_MASTER = 10;
 
 	@Inject
 	private Client client;
@@ -150,6 +154,9 @@ public class SlayerPlugin extends Plugin
 
 	@Inject
 	private NpcOverlayService npcOverlayService;
+
+	@Inject
+	private SlayerPluginServiceImpl slayerPluginService;
 
 	@Getter(AccessLevel.PACKAGE)
 	private final List<NPC> targets = new ArrayList<>();
@@ -200,9 +207,9 @@ public class SlayerPlugin extends Plugin
 	};
 
 	@Override
-	public void configure(Binder binder)
+	public Module getPublicModule()
 	{
-		binder.bind(SlayerPluginService.class).to(SlayerPluginServiceImpl.class);
+		return b -> b.bind(SlayerPluginService.class).toProvider(Providers.of(slayerPluginService));
 	}
 
 	@Override
@@ -228,8 +235,10 @@ public class SlayerPlugin extends Plugin
 			}
 
 			// !task requires off-thread access to slayer task locations
-			EnumComposition e = client.getEnum(EnumID.SLAYER_TASK_LOCATION);
-			taskLocations = e.getStringVals().clone();
+			taskLocations = client.getDBTableRows(DBTableID.SlayerArea.ID)
+				.stream()
+				.map(row -> (String) client.getDBTableField(row, DBTableID.SlayerArea.COL_AREA_NAME_IN_HELPER, 0)[0])
+				.toArray(String[]::new);
 			return true;
 		});
 	}
@@ -259,15 +268,10 @@ public class SlayerPlugin extends Plugin
 	{
 		switch (event.getGameState())
 		{
-			// client (or with CONNECTION_LOST, the server...) will soon zero the slayer varps.
-			// zero task/amount so that this doesn't cause the plugin to reset the task, which
-			// would forget the initial amount. The vars are then resynced shortly after
 			case HOPPING:
 			case LOGGING_IN:
 			case CONNECTION_LOST:
-				taskName = "";
-				amount = 0;
-				loginFlag = true; // to reinitialize initialAmount and avoid re-adding the infobox
+				loginFlag = true; // to avoid re-adding the infobox
 				targets.clear();
 				break;
 		}
@@ -282,13 +286,6 @@ public class SlayerPlugin extends Plugin
 			setTask(task, 42, 42);
 			log.debug("Set task to {}", task);
 		}
-	}
-
-	@VisibleForTesting
-	int getIntProfileConfig(String key)
-	{
-		Integer value = configManager.getRSProfileConfiguration(SlayerConfig.GROUP_NAME, key, int.class);
-		return value == null ? -1 : value;
 	}
 
 	private void setProfileConfig(String key, Object value)
@@ -336,7 +333,11 @@ public class SlayerPlugin extends Plugin
 		if (varpId == VarPlayerID.SLAYER_COUNT
 			|| varpId == VarPlayerID.SLAYER_AREA
 			|| varpId == VarPlayerID.SLAYER_TARGET
-			|| varbitId == VarbitID.SLAYER_TARGET_BOSSID)
+			|| varbitId == VarbitID.SLAYER_TARGET_BOSSID
+			|| varpId == VarPlayerID.SLAYER_COUNT_ORIGINAL
+			|| varbitId == VarbitID.SLAYER_MODIFIER_ID
+			|| varbitId == VarbitID.SLAYER_MODIFIER_VALUE
+			|| varbitId == VarbitID.SLAYER_MODIFIER_NEGATIVE)
 		{
 			clientThread.invokeLater(this::updateTask);
 		}
@@ -351,9 +352,9 @@ public class SlayerPlugin extends Plugin
 				addCounter();
 			}
 		}
-		else if (varbitId == VarbitID.SLAYER_TASKS_COMPLETED)
+		else if (varbitId == VarbitID.SLAYER_TASKS_COMPLETED || varbitId == VarbitID.SLAYER_WILDERNESS_TASKS_COMPLETED || varpId == VarPlayerID.SLAYER_MORTIMER_TASKS_COMPLETED)
 		{
-			setProfileConfig(SlayerConfig.STREAK_KEY, varbitChanged.getValue());
+			setProfileConfig(SlayerConfig.STREAK_KEY, getTaskStreak());
 
 			// streak is on a tooltip on the counter, so requires a rebuild if it changes
 			if (counter != null)
@@ -370,44 +371,68 @@ public class SlayerPlugin extends Plugin
 		if (amount > 0)
 		{
 			int taskId = client.getVarpValue(VarPlayerID.SLAYER_TARGET);
-			String taskName;
+
+			int taskDBRow;
 			if (taskId == 98 /* Bosses, from [proc,helper_slayer_current_assignment] */)
 			{
-				int structId = client.getEnum(EnumID.SLAYER_TASK)
-					.getIntValue(client.getVarbitValue(VarbitID.SLAYER_TARGET_BOSSID));
-				taskName = client.getStructComposition(structId)
-					.getStringValue(ParamID.SLAYER_TASK_NAME);
+				var bossRows = client.getDBRowsByValue(
+					DBTableID.SlayerTaskSublist.ID,
+					DBTableID.SlayerTaskSublist.COL_TASK_SUBTABLE_ID,
+					0,
+					client.getVarbitValue(VarbitID.SLAYER_TARGET_BOSSID));
+
+				if (bossRows.isEmpty())
+				{
+					return;
+				}
+				taskDBRow = (Integer) client.getDBTableField(bossRows.get(0), DBTableID.SlayerTaskSublist.COL_TASK, 0)[0];
 			}
 			else
 			{
-				taskName = client.getEnum(EnumID.SLAYER_TASK_CREATURE)
-					.getStringValue(taskId);
+				var taskRows = client.getDBRowsByValue(DBTableID.SlayerTask.ID, DBTableID.SlayerTask.COL_ID, 0, taskId);
+				if (taskRows.isEmpty())
+				{
+					return;
+				}
+				taskDBRow = taskRows.get(0);
 			}
+
+			var taskName = (String) client.getDBTableField(taskDBRow, DBTableID.SlayerTask.COL_NAME_UPPERCASE, 0)[0];
 
 			int areaId = client.getVarpValue(VarPlayerID.SLAYER_AREA);
 			String taskLocation = null;
 			if (areaId > 0)
 			{
-				taskLocation = StringUtils.capitalize(client.getEnum(EnumID.SLAYER_TASK_LOCATION)
-					.getStringValue(areaId));
+				var areaRows = client.getDBRowsByValue(DBTableID.SlayerArea.ID, DBTableID.SlayerArea.COL_AREA_ID, 0, areaId);
+				if (areaRows.isEmpty())
+				{
+					return;
+				}
+
+				taskLocation = (String) client.getDBTableField(areaRows.get(0), DBTableID.SlayerArea.COL_AREA_NAME_IN_HELPER, 0)[0];
+			}
+
+			int initialAmount = client.getVarpValue(VarPlayerID.SLAYER_COUNT_ORIGINAL);
+			if (client.getVarbitValue(VarbitID.SLAYER_MODIFIER_ID) == 2)
+			{
+				boolean isNegative = client.getVarbitValue(VarbitID.SLAYER_MODIFIER_NEGATIVE) == 1;
+				int modifierValue = client.getVarbitValue(VarbitID.SLAYER_MODIFIER_VALUE);
+				initialAmount += isNegative ? -modifierValue : modifierValue;
 			}
 
 			if (loginFlag)
 			{
 				log.debug("Sync slayer task: {}x {} at {}", amount, taskName, taskLocation);
-
-				// initial amount is not in a var, so we initialize it from the stored amount
-				initialAmount = getIntProfileConfig(SlayerConfig.INIT_AMOUNT_KEY);
 				setTask(taskName, amount, initialAmount, taskLocation, false);
 
 				// initialize streak and points in the event the plugin was toggled on after login
 				setProfileConfig(SlayerConfig.POINTS_KEY, client.getVarbitValue(VarbitID.SLAYER_POINTS));
-				setProfileConfig(SlayerConfig.STREAK_KEY, client.getVarbitValue(VarbitID.SLAYER_TASKS_COMPLETED));
+				setProfileConfig(SlayerConfig.STREAK_KEY, getTaskStreak());
 			}
 			else if (!Objects.equals(taskName, this.taskName) || !Objects.equals(taskLocation, this.taskLocation))
 			{
 				log.debug("Task change: {}x {} at {}", amount, taskName, taskLocation);
-				setTask(taskName, amount, amount, taskLocation, true);
+				setTask(taskName, amount, initialAmount, taskLocation, true);
 			}
 			else if (amount != this.amount)
 			{
@@ -458,9 +483,7 @@ public class SlayerPlugin extends Plugin
 			return;
 		}
 
-		String chatMsg = Text.removeTags(event.getMessage()); //remove color and linebreaks
-
-		if (chatMsg.equals(CHAT_SUPERIOR_MESSAGE))
+		if (CHAT_SUPERIOR_PATTERN.matcher(event.getMessage()).matches())
 		{
 			notifier.notify(config.showSuperiorNotification(), CHAT_SUPERIOR_MESSAGE);
 		}
@@ -658,10 +681,24 @@ public class SlayerPlugin extends Plugin
 				+ " " + initialAmount;
 		}
 
+		final int streak = getTaskStreak();
 		counter = new TaskCounter(taskImg, this, amount);
-		counter.setTooltip(String.format(taskTooltip, capsString(taskName), getIntProfileConfig(SlayerConfig.POINTS_KEY), getIntProfileConfig(SlayerConfig.STREAK_KEY)));
+		counter.setTooltip(String.format(taskTooltip, capsString(taskName), client.getVarbitValue(VarbitID.SLAYER_POINTS),  streak));
 
 		infoBoxManager.addInfoBox(counter);
+	}
+
+	private int getTaskStreak()
+	{
+		switch (client.getVarbitValue(VarbitID.SLAYER_MASTER))
+		{
+			case KRYSTILIA_SLAYER_MASTER:
+				return client.getVarbitValue(VarbitID.SLAYER_WILDERNESS_TASKS_COMPLETED);
+			case MORTIMER_SLAYER_MASTER:
+				return client.getVarpValue(VarPlayerID.SLAYER_MORTIMER_TASKS_COMPLETED);
+			default:
+				return client.getVarbitValue(VarbitID.SLAYER_TASKS_COMPLETED);
+		}
 	}
 
 	private void removeCounter()

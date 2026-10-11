@@ -1,17 +1,9 @@
 package net.runelite.client.plugins.microbot.util.inventory;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.function.BiPredicate;
-import java.util.function.Predicate;
-import java.util.logging.Level;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
+import java.awt.Rectangle;
 import lombok.Getter;
 import lombok.Setter;
+import net.runelite.api.MenuAction;
 import net.runelite.api.Varbits;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetLoaded;
@@ -22,7 +14,16 @@ import net.runelite.client.plugins.microbot.inventorysetups.InventorySetupsItem;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.magic.Runes;
+import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
+
+import java.util.*;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
+import java.util.logging.Level;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Utility class to manage and interact with the player's Rune Pouch.
@@ -45,10 +46,10 @@ public class Rs2RunePouch
 	};
 
 	private static final int BANK_PARENT_ID = InterfaceID.BANKSIDE;
-	private static final int RUNEPOUCH_ROOT_CHILD_ID = 19;
-	private static final int RUNEPOUCH_CLOSE_CHILD_ID = 22;
-	private static final int RUNEPOUCH_DEPOSIT_ALL_CHILD_ID = 20;
-	private static final List<Integer> RUNEPOUCH_LOADOUT_WIDGETS = Arrays.asList(28, 30, 32, 34);
+	private static final int RUNEPOUCH_ROOT_CHILD_ID = 19; // Validated
+	private static final int RUNEPOUCH_CLOSE_CHILD_ID = 22; // Validated
+	private static final int RUNEPOUCH_DEPOSIT_ALL_CHILD_ID = 20; // Validated
+	private static final List<Integer> RUNEPOUCH_LOADOUT_WIDGETS = Arrays.asList(34, 38, 41, 44, 46, 48, 50, 52, 54, 56); // New Loadout Child IDs
 
 	@Getter
 	private static final List<PouchSlot> slots = new ArrayList<>();
@@ -84,20 +85,32 @@ public class Rs2RunePouch
 	 *
 	 * @param ev The varbit changed event.
 	 */
-	public static void onVarbitChanged(VarbitChanged ev) {
-		assert Microbot.getClient().isClientThread();
+    public static void onVarbitChanged(VarbitChanged ev) {
+        assert Microbot.getClient().isClientThread();
 
-		for (int i = 0; i < NUM_SLOTS; i++) {
-			if (ev.getVarbitId() == RUNE_VARBITS[i]) {
-				slots.get(i).setRune(Runes.byVarbitId(ev.getValue()));
-				break;
-			}
-			if (ev.getVarbitId() == AMOUNT_VARBITS[i]) {
-				slots.get(i).setQuantity(ev.getValue());
-				break;
-			}
-		}
-	}
+        for (int i = 0; i < NUM_SLOTS; i++) {
+            if (i >= slots.size()) {
+                break; // avoid index out of bounds
+            }
+
+            PouchSlot slot = slots.get(i);
+            if (slot == null) {
+                continue; // skip null entries
+            }
+
+            int varbitId = ev.getVarbitId();
+            int value = ev.getValue();
+
+            if (varbitId == RUNE_VARBITS[i]) {
+                slot.setRune(Runes.byVarbitId(value));
+                break;
+            }
+            if (varbitId == AMOUNT_VARBITS[i]) {
+                slot.setQuantity(value);
+                break;
+            }
+        }
+    }
 
 	/**
 	 * Handles reading rune pouch loadouts from the bank interface widgets.
@@ -258,6 +271,7 @@ public class Rs2RunePouch
 	 */
 	public static boolean contains(Runes rune, int amt, boolean allowCombinationRunes)
 	{
+		if (rune == null) return false;
 		Map<Runes, Integer> required = Map.of(rune, amt);
 		return contains(required, allowCombinationRunes);
 	}
@@ -297,12 +311,7 @@ public class Rs2RunePouch
 	 */
 	public static boolean contains(Map<Runes, Integer> requiredRunes, boolean allowCombinationRunes)
 	{
-		Map<Runes, Integer> availableRunes = slots.stream()
-			.filter(s -> s.getRune() != null && s.getQuantity() > 0)
-			.collect(Collectors.toMap(
-				PouchSlot::getRune,
-				PouchSlot::getQuantity
-			));
+		Map<Runes, Integer> availableRunes = getRunes();
 
 		return contains(requiredRunes, availableRunes, allowCombinationRunes ? COMBO_SUPPORT : STRICT_ONLY);
 	}
@@ -434,8 +443,29 @@ public class Rs2RunePouch
 
 			if (loadoutMap.equals(requiredRunes))
 			{
-				int widgetIndex = RUNEPOUCH_LOADOUT_WIDGETS.get(entry.getKey());
-				Rs2Widget.clickWidget(BANK_PARENT_ID, (widgetIndex + 1));
+				final int widgetIndex = RUNEPOUCH_LOADOUT_WIDGETS.get(entry.getKey());
+				Widget parentLoadoutWidget = Rs2Widget.getWidget(BANK_PARENT_ID, widgetIndex);
+				if (parentLoadoutWidget == null || parentLoadoutWidget.getStaticChildren() == null)
+				{
+					Microbot.log("Failed to find loadout widget for index: " + widgetIndex, Level.WARNING);
+					break;
+				}
+				Widget loadWidget = Rs2Widget.findWidget("Load", List.of(parentLoadoutWidget.getStaticChildren()));
+				if (loadWidget == null)
+				{
+					Microbot.log("Failed to find 'Load' child widget in loadout index: " + widgetIndex, Level.WARNING);
+					break;
+				}
+				Rectangle loadBounds = loadWidget.getBounds();
+				NewMenuEntry menuEntry = new NewMenuEntry()
+						.option("Load")
+						.target("")
+						.identifier(1)
+						.type(MenuAction.CC_OP)
+						.itemId(-1)
+						.param1(loadWidget.getId())
+						.forceLeftClick(false);
+				Microbot.doInvoke(menuEntry, loadBounds != null && Rs2UiHelper.isRectangleWithinCanvas(loadBounds) ? loadBounds : Rs2UiHelper.getDefaultRectangle());
 				Global.sleepUntil(() -> getRunes().entrySet().stream().allMatch(e -> requiredRunes.getOrDefault(e.getKey(), 0) <= e.getValue()));
 				return closeRunePouch();
 			}
@@ -475,7 +505,7 @@ public class Rs2RunePouch
 	public static Map<Runes, Integer> getRunes() {
 		return slots.stream()
 			.filter(s -> s.getRune() != null && s.getQuantity() > 0)
-			.collect(Collectors.toMap(PouchSlot::getRune, PouchSlot::getQuantity));
+			.collect(Collectors.toMap(PouchSlot::getRune, PouchSlot::getQuantity, Integer::sum));
 	}
 
 	/**

@@ -1,0 +1,8 @@
+{
+  "name": "gold-4-herblore",
+  "account": "char2",
+  "targets": { "Herblore": 65 },
+  "quests": [],
+  "items": [],
+  "policy": { "boosterQuests": true, "levelsPerPhase": 10, "llm": { "tier1PerHour": 20, "tier2PerHour": 4 } }
+}

@@ -74,6 +74,7 @@ public class XpUpdaterPlugin extends Plugin
 	private OkHttpClient okHttpClient;
 
 	private long lastAccount;
+	private String lastDisplayName;
 	private boolean fetchXp;
 	private long lastXp;
 
@@ -104,18 +105,12 @@ public class XpUpdaterPlugin extends Plugin
 		}
 		else if (state == GameState.LOGIN_SCREEN || state == GameState.HOPPING)
 		{
-			Player local = client.getLocalPlayer();
-			if (local == null)
-			{
-				return;
-			}
-
 			long totalXp = client.getOverallExperience();
 			// Don't submit update unless xp threshold is reached
-			if (Math.abs(totalXp - lastXp) > XP_THRESHOLD)
+			if (lastDisplayName != null && Math.abs(totalXp - lastXp) > XP_THRESHOLD)
 			{
-				log.debug("Submitting update for {} accountHash {}", local.getName(), lastAccount);
-				update(lastAccount, local.getName());
+				log.debug("Submitting update for {} accountHash {}", lastDisplayName, lastAccount);
+				update(lastAccount, lastDisplayName);
 				lastXp = totalXp;
 			}
 		}
@@ -127,7 +122,12 @@ public class XpUpdaterPlugin extends Plugin
 		if (fetchXp)
 		{
 			lastXp = client.getOverallExperience();
-			fetchXp = false;
+			Player local = client.getLocalPlayer();
+			if (local != null)
+			{
+				lastDisplayName = local.getName();
+				fetchXp = false;
+			}
 		}
 	}
 
@@ -136,7 +136,6 @@ public class XpUpdaterPlugin extends Plugin
 		EnumSet<WorldType> worldTypes = client.getWorldType();
 		username = username.replace(" ", "_");
 		updateCml(username, worldTypes);
-		updateRunetracker(username, worldTypes);
 		updateTempleosrs(accountHash, username, worldTypes);
 		updateWom(accountHash, username, worldTypes);
 	}
@@ -147,7 +146,8 @@ public class XpUpdaterPlugin extends Plugin
 			&& !worldTypes.contains(WorldType.SEASONAL)
 			&& !worldTypes.contains(WorldType.DEADMAN)
 			&& !worldTypes.contains(WorldType.NOSAVE_MODE)
-			&& !worldTypes.contains(WorldType.FRESH_START_WORLD))
+			&& !worldTypes.contains(WorldType.FRESH_START_WORLD)
+			&& !worldTypes.contains(WorldType.TOURNAMENT_WORLD))
 		{
 			HttpUrl url = new HttpUrl.Builder()
 				.scheme("https")
@@ -167,37 +167,13 @@ public class XpUpdaterPlugin extends Plugin
 		}
 	}
 
-	private void updateRunetracker(String username, EnumSet<WorldType> worldTypes)
-	{
-		if (config.runetracker()
-			&& !worldTypes.contains(WorldType.SEASONAL)
-			&& !worldTypes.contains(WorldType.DEADMAN)
-			&& !worldTypes.contains(WorldType.NOSAVE_MODE)
-			&& !worldTypes.contains(WorldType.FRESH_START_WORLD))
-		{
-			HttpUrl url = new HttpUrl.Builder()
-				.scheme("https")
-				.host("rscript.org")
-				.addPathSegment("lookup.php")
-				.addQueryParameter("type", "stats07")
-				.addQueryParameter("user", username)
-				.build();
-
-			Request request = new Request.Builder()
-				.header("User-Agent", "RuneLite")
-				.url(url)
-				.build();
-
-			sendRequest("RuneTracker", request);
-		}
-	}
-
 	private void updateTempleosrs(long accountHash, String username, EnumSet<WorldType> worldTypes)
 	{
 		if (config.templeosrs()
 			&& !worldTypes.contains(WorldType.SEASONAL)
 			&& !worldTypes.contains(WorldType.DEADMAN)
-			&& !worldTypes.contains(WorldType.NOSAVE_MODE))
+			&& !worldTypes.contains(WorldType.NOSAVE_MODE)
+			&& !worldTypes.contains(WorldType.TOURNAMENT_WORLD))
 		{
 			HttpUrl.Builder url = new HttpUrl.Builder()
 				.scheme("https")
@@ -225,7 +201,8 @@ public class XpUpdaterPlugin extends Plugin
 	{
 		if (config.wiseoldman()
 			&& !worldTypes.contains(WorldType.DEADMAN)
-			&& !worldTypes.contains(WorldType.NOSAVE_MODE))
+			&& !worldTypes.contains(WorldType.NOSAVE_MODE)
+			&& !worldTypes.contains(WorldType.TOURNAMENT_WORLD))
 		{
 			HttpUrl url = new HttpUrl.Builder()
 				.scheme("https")

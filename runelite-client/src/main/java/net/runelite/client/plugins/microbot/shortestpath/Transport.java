@@ -2,11 +2,11 @@ package net.runelite.client.plugins.microbot.shortestpath;
 
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Quest;
+import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.client.plugins.microbot.Microbot;
-
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -14,15 +14,21 @@ import java.util.*;
 /**
  * This class represents a travel point between two WorldPoints.
  */
+@Slf4j
 public class Transport {
+    public static final int TOTAL_LEVEL_INDEX = Skill.values().length;
+    public static final int COMBAT_LEVEL_INDEX = TOTAL_LEVEL_INDEX + 1;
+    public static final int QUEST_POINTS_INDEX = COMBAT_LEVEL_INDEX + 1;
+    public static final int REQUIREMENT_LEVEL_COUNT = QUEST_POINTS_INDEX + 1;
+
     //START microbot variables
     @Getter
+	@Setter
     private String action;
     @Getter
     private int objectId;
     @Getter
     private String name;
-    //END microbot variables
 
     /**
      * A location placeholder different from null to use for permutation transports
@@ -45,22 +51,27 @@ public class Transport {
      * The skill levels required to use this transport
      */
     @Getter
-    private final int[] skillLevels = new int[Skill.values().length];
+    private final int[] skillLevels = new int[REQUIREMENT_LEVEL_COUNT];
 
     /**
      * The quests required to use this transport
      */
     @Getter
-    private Set<Quest> quests = new HashSet<>();
+    private Map<Quest, QuestState> quests = new HashMap<>();
 
     /**
-     * The ids of items required to use this transport.
-     * If the player has **any** of the matching list of items,
-     * this transport is valid
+     * Compatibility view of the item IDs required to use this transport. New code should use
+     * {@link #getItemRequirements()} so AND groups and quantities are not discarded.
      */
     @Getter
-    @Setter
     private Set<Set<Integer>> itemIdRequirements = new HashSet<>();
+
+    /**
+     * Lossless item requirements. Entries are AND-ed; alternatives within an entry are OR-ed.
+     * {@link #itemIdRequirements} remains as the compatibility view used by older callers.
+     */
+    @Getter
+    private List<TransportItemRequirement> itemRequirements = new ArrayList<>();
 
     /**
      * The type of transport
@@ -104,7 +115,7 @@ public class Transport {
      */
     @Getter
     private final Set<TransportVarPlayer> varplayers = new HashSet<>();
-    
+
     @Getter
     private String currencyName = "";
     @Getter
@@ -116,11 +127,13 @@ public class Transport {
     @Getter
     private boolean isMembers = false;
 
+
+
     /**
      * Creates a new transport from an origin-only transport
      * and a destination-only transport, and merges requirements
      */
-    Transport(Transport origin, Transport destination) {
+    public Transport(Transport origin, Transport destination) {
         this.origin = origin.origin;
         this.destination = destination.destination;
 
@@ -130,11 +143,13 @@ public class Transport {
                     destination.skillLevels[i]);
         }
 
-        this.quests.addAll(origin.quests);
-        this.quests.addAll(destination.quests);
+        this.quests.putAll(origin.quests);
+        this.quests.putAll(destination.quests);
 
         this.itemIdRequirements.addAll(origin.itemIdRequirements);
         this.itemIdRequirements.addAll(destination.itemIdRequirements);
+        this.itemRequirements.addAll(origin.itemRequirements);
+        this.itemRequirements.addAll(destination.itemRequirements);
 
         this.type = origin.type;
 
@@ -156,7 +171,7 @@ public class Transport {
 
         this.varplayers.addAll(origin.varplayers);
         this.varplayers.addAll(destination.varplayers);
-        
+
         //START microbot variables
         this.name = origin.getName();
         this.objectId = origin.getObjectId();
@@ -165,6 +180,56 @@ public class Transport {
         this.currencyAmount = origin.getCurrencyAmount();
         this.isMembers = origin.isMembers;
         //END microbot variables
+    }
+
+    /**
+     * Base Transport constructor
+     */
+    public Transport(WorldPoint origin, WorldPoint destination, String displayInfo, TransportType transportType, boolean isMember, int duration) {
+        this.origin = origin;
+        this.destination = destination;
+        this.displayInfo = displayInfo;
+        this.type = transportType;
+        this.isMembers = isMember;
+        this.duration = duration;
+    }
+
+    /**
+     * Object interaction Transport constructor
+     */
+    public Transport(WorldPoint origin, WorldPoint destination, String displayInfo, TransportType transportType, boolean isMember, String action, String target, int objectId) {
+		this(origin, destination, displayInfo, transportType, isMember, action, target, objectId, 1);
+	}
+
+	/** Object interaction transport with an explicit planner cost in ticks. */
+	public Transport(WorldPoint origin, WorldPoint destination, String displayInfo, TransportType transportType,
+	                 boolean isMember, String action, String target, int objectId, int duration) {
+		this(origin, destination, displayInfo, transportType, isMember, duration);
+        this.action = action;
+        this.name = target;
+        this.objectId = objectId;
+    }
+
+    /**
+     * Transport constructor with item requirements
+     */
+    public Transport(WorldPoint destination, String displayInfo, TransportType transportType, boolean isMember, int maxWildernessLevel, Set<Set<Integer>> itemIdRequirements) {
+        this(null, destination, displayInfo, transportType, isMember, 1);
+        this.maxWildernessLevel = maxWildernessLevel;
+        setItemIdRequirements(itemIdRequirements);
+    }
+
+    /**
+     * Transport constructor with skill requirements
+     */
+    public Transport(WorldPoint destination, String displayInfo, TransportType transportType, boolean isMember, int maxWildernessLevel, Map<Skill, Integer> skillRequirement) {
+        this(null, destination, displayInfo, transportType, isMember, 1);
+        this.maxWildernessLevel = maxWildernessLevel;
+        if (skillRequirement != null) {
+            for (Map.Entry<Skill, Integer> entry : skillRequirement.entrySet()) {
+                this.skillLevels[entry.getKey().ordinal()] = entry.getValue();
+            }
+        }
     }
 
     Transport(Map<String, String> fieldMap, TransportType transportType) {
@@ -194,14 +259,20 @@ public class Transport {
         }
 
         //START microbot variables
-
         if ((value = fieldMap.get("menuOption menuTarget objectID")) != null && !value.trim().isEmpty()) {
             value = value.trim(); // Remove leading/trailing spaces
 
-            // Regex pattern for semicolon-separated values
-            String regex = "^([^;]+);([^;]+);(\\d+)$";
-            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(regex);
-            java.util.regex.Matcher matcher = pattern.matcher(value);
+            // Microbot historically used semicolons while upstream uses whitespace. In the
+            // whitespace form the option is one token, the object id is the final numeric token,
+            // and the target may contain spaces.
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                    .compile("^([^;]+);([^;]+);(\\d+)$")
+                    .matcher(value);
+            if (!matcher.matches()) {
+                matcher = java.util.regex.Pattern
+                        .compile("^(\\S+)\\s+(.+?)\\s+(\\d+)$")
+                        .matcher(value);
+            }
 
             if (matcher.matches()) {
                 // Extract matched groups
@@ -209,17 +280,19 @@ public class Transport {
                 name = matcher.group(2).trim();    // Second group: menuTarget (name)
                 objectId = Integer.parseInt(matcher.group(3).trim()); // Third group: objectID
             } else {
-                System.out.println("Skipped invalid value: " + value);
+                log.debug("Skipped invalid menuOption/menuTarget/objectID value: {}", value);
             }
         }
-        
+
         if ((value = fieldMap.get("Currency")) != null) {
-            // Split the string by space
             String[] parts = value.split(DELIM);
             if (parts.length > 1) {
-                // Parse the first part as an integer amount
-                currencyAmount = Integer.parseInt(parts[0]);
-                currencyName = parts[1];
+                try {
+                    currencyAmount = Integer.parseInt(parts[0].trim());
+                    currencyName = parts[1].trim();
+                } catch (NumberFormatException e) {
+                    log.debug("Skipping invalid Currency field: {}", value);
+                }
             }
         }
         //END microbot variables
@@ -228,47 +301,80 @@ public class Transport {
             String[] skillRequirements = value.split(DELIM_MULTI);
 
             for (String requirement : skillRequirements) {
-                String[] levelAndSkill = requirement.split(DELIM);
+                String[] levelAndSkill = requirement.trim().split("\\s+", 2);
 
                 if (levelAndSkill.length < 2) {
                     continue;
                 }
 
                 int level = Integer.parseInt(levelAndSkill[0]);
-                String skillName = levelAndSkill[1];
+                String skillName = levelAndSkill[1].trim();
 
+                boolean resolved = false;
                 Skill[] skills = Skill.values();
                 for (int i = 0; i < skills.length; i++) {
                     if (skills[i].getName().equals(skillName)) {
                         skillLevels[i] = level;
+                        resolved = true;
                         break;
                     }
+                }
+                String normalizedSkillName = skillName.toLowerCase(Locale.ROOT);
+                if (normalizedSkillName.startsWith("total")) {
+                    skillLevels[TOTAL_LEVEL_INDEX] = level;
+                    resolved = true;
+                } else if (normalizedSkillName.startsWith("combat")) {
+                    skillLevels[COMBAT_LEVEL_INDEX] = level;
+                    resolved = true;
+                } else if (normalizedSkillName.startsWith("quest")) {
+                    skillLevels[QUEST_POINTS_INDEX] = level;
+                    resolved = true;
+                }
+                // A requirement we cannot resolve used to vanish without a word, and an unset level is
+                // indistinguishable from "no requirement" — so the transport became usable by everyone.
+                // That is how "42 Agility<spaces>7" (a Duration separated by spaces instead of a tab)
+                // turned the Draynor underwall tunnel into a free shortcut: the name read as
+                // "Agility      7", matched nothing, and the 42 was silently dropped. Worse than a
+                // no-op, because blocksWalkingEdgeWhenUnavailable would otherwise have routed AROUND
+                // an unusable shortcut; with the gate erased the planner actively prefers it.
+                if (!resolved) {
+                    throw new IllegalArgumentException("Unresolved transport skill requirement '"
+                            + requirement.trim() + "' in raw field '" + value.trim() + "'");
                 }
             }
         }
 
-        if ((value = fieldMap.get("Item IDs")) != null && !value.trim().isEmpty()) {
-            String[] itemIdsList = value.split(DELIM_MULTI);
-            for (String listIds : itemIdsList) {
-                Set<Integer> multiitemList = new HashSet<>();
-                String[] itemIds = listIds.split(DELIM);
-                for (String item : itemIds) {
-                    int itemId = Integer.parseInt(item);
-                    multiitemList.add(itemId);
+        if ((value = fieldMap.get("Items")) != null && !value.trim().isEmpty()) {
+            setItemRequirements(TransportItemRequirement.parseRequirements(value));
+        } else if ((value = fieldMap.get("Item IDs")) != null && !value.trim().isEmpty()) {
+            if (value.contains("=") || value.contains("&") || value.contains("|")) {
+                setItemRequirements(TransportItemRequirement.parseRequirements(value));
+            } else {
+                Set<Set<Integer>> legacyGroups = new LinkedHashSet<>();
+                for (String listIds : value.split(DELIM_MULTI)) {
+                    Set<Integer> group = new LinkedHashSet<>();
+                    for (String item : listIds.trim().split("\\s+")) {
+                        if (!item.isEmpty()) {
+                            group.add(Integer.parseInt(item));
+                        }
+                    }
+                    if (!group.isEmpty()) {
+                        legacyGroups.add(group);
+                    }
                 }
-                itemIdRequirements.add(multiitemList);
+                setItemIdRequirements(legacyGroups);
             }
         }
 
         if ((value = fieldMap.get("Quests")) != null && !value.trim().isEmpty()) {
-            this.quests = findQuests(value);
+            this.quests = parseQuestStates(value);
         }
 
         if ((value = fieldMap.get("Duration")) != null && !value.trim().isEmpty()) {
             this.duration = Integer.parseInt(value);
         }
 
-        if (TransportType.isTeleport(transportType)) {
+        if (TransportType.isTeleport(transportType, origin)) {
             // Teleports should always have a non-zero wait,
             // so the pathfinder doesn't calculate the cost by distance
             this.duration = Math.max(this.duration, 1);
@@ -285,13 +391,16 @@ public class Transport {
         if ((value = fieldMap.get("Wilderness level")) != null && !value.trim().isEmpty()) {
             this.maxWildernessLevel = Integer.parseInt(value);
         }
-        
+
         if ((value = fieldMap.get("isMembers")) != null && !value.trim().isEmpty()) {
             this.isMembers = "Y".equals(value.trim()) || "yes".equals(value.trim().toLowerCase());
         }
 
         if ((value = fieldMap.get("Varbits")) != null && !value.trim().isEmpty()) {
             for (String varbitCheck : value.split(DELIM_MULTI)) {
+                if (varbitCheck.isBlank()) {
+                    continue;
+                }
                 String[] parts;
                 TransportVarbit.Operator operator;
 
@@ -311,17 +420,29 @@ public class Transport {
                     parts = varbitCheck.split("@");
                     operator = TransportVarbit.Operator.COOLDOWN_MINUTES;
                 } else {
-                    throw new IllegalArgumentException("Invalid varbit format: " + varbitCheck);
+                    log.debug("Skipping invalid varbit token: {}", varbitCheck);
+                    continue;
                 }
 
-                int varbitId = Integer.parseInt(parts[0]);
-                int varbitValue = Integer.parseInt(parts[1]);
-                varbits.add(new TransportVarbit(varbitId, varbitValue, operator));
+                try {
+                    int varbitId = Integer.parseInt(parts[0].trim());
+                    int varbitValue = Integer.parseInt(parts[1].trim());
+                    varbits.add(new TransportVarbit(varbitId, varbitValue, operator));
+                } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                    log.debug("Skipping malformed varbit token: {}", varbitCheck);
+                }
             }
         }
 
-        if ((value = fieldMap.get("Varplayers")) != null && !value.trim().isEmpty()) {
+        value = fieldMap.get("Varplayers");
+        if ((value == null || value.trim().isEmpty())) {
+            value = fieldMap.get("VarPlayers");
+        }
+        if (value != null && !value.trim().isEmpty()) {
             for (String varplayerCheck : value.split(DELIM_MULTI)) {
+                if (varplayerCheck.isBlank()) {
+                    continue;
+                }
                 String[] parts;
                 TransportVarPlayer.Operator operator;
 
@@ -341,12 +462,17 @@ public class Transport {
                     parts = varplayerCheck.split("@");
                     operator = TransportVarPlayer.Operator.COOLDOWN_MINUTES;
                 } else {
-                    throw new IllegalArgumentException("Invalid varplayer format: " + varplayerCheck);
+                    log.debug("Skipping invalid varplayer token: {}", varplayerCheck);
+                    continue;
                 }
 
-                int varplayerId = Integer.parseInt(parts[0]);
-                int varplayerValue = Integer.parseInt(parts[1]);
-                varplayers.add(new TransportVarPlayer(varplayerId, varplayerValue, operator));
+                try {
+                    int varplayerId = Integer.parseInt(parts[0].trim());
+                    int varplayerValue = Integer.parseInt(parts[1].trim());
+                    varplayers.add(new TransportVarPlayer(varplayerId, varplayerValue, operator));
+                } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                    log.debug("Skipping malformed varplayer token: {}", varplayerCheck);
+                }
             }
         }
 
@@ -364,6 +490,53 @@ public class Transport {
         return skillLevels[skill.ordinal()];
     }
 
+    public int getRequiredTotalLevel() {
+        return skillLevels[TOTAL_LEVEL_INDEX];
+    }
+
+    public int getRequiredCombatLevel() {
+        return skillLevels[COMBAT_LEVEL_INDEX];
+    }
+
+    public int getRequiredQuestPoints() {
+        return skillLevels[QUEST_POINTS_INDEX];
+    }
+
+    /**
+     * Updates the legacy compatibility view. Historically every ID in this structure was treated as
+     * an alternative, regardless of its nested set, so preserve that behavior as one OR requirement.
+     */
+    public void setItemIdRequirements(Set<Set<Integer>> requirements) {
+        Set<Set<Integer>> copied = new LinkedHashSet<>();
+        Set<Integer> alternatives = new LinkedHashSet<>();
+        if (requirements != null) {
+            for (Set<Integer> group : requirements) {
+                if (group == null || group.isEmpty()) {
+                    continue;
+                }
+                Set<Integer> copiedGroup = new LinkedHashSet<>(group);
+                copied.add(Collections.unmodifiableSet(copiedGroup));
+                alternatives.addAll(copiedGroup);
+            }
+        }
+        this.itemIdRequirements = copied;
+        this.itemRequirements = alternatives.isEmpty()
+                ? new ArrayList<>()
+                : new ArrayList<>(Collections.singletonList(
+                        TransportItemRequirement.legacyAlternatives(alternatives)));
+    }
+
+    private void setItemRequirements(List<TransportItemRequirement> requirements) {
+        this.itemRequirements = requirements == null
+                ? new ArrayList<>()
+                : new ArrayList<>(requirements);
+        Set<Set<Integer>> compatibility = new LinkedHashSet<>();
+        for (TransportItemRequirement requirement : this.itemRequirements) {
+            compatibility.add(Collections.unmodifiableSet(new LinkedHashSet<>(requirement.getAllItemIds())));
+        }
+        this.itemIdRequirements = compatibility;
+    }
+
     /**
      * Whether the transport has one or more quest requirements
      */
@@ -371,19 +544,42 @@ public class Transport {
         return !quests.isEmpty();
     }
 
-    private static Set<Quest> findQuests(String questNamesCombined) {
-        String[] questNames = questNamesCombined.split(";");
-        Set<Quest> quests = new HashSet<>();
-        for (String questName : questNames) {
-            for (Quest quest : Quest.values()) {
-                if (quest.getName().equalsIgnoreCase(questName.trim())) {
-                    quests.add(quest);
-                    break;
-                }
-            }
-        }
-        return quests;
-    }
+	private static Map<Quest, QuestState> parseQuestStates(String questStatesCombined)
+	{
+		Map<Quest, QuestState> questStateMap = new HashMap<>();
+		String[] entries = questStatesCombined.split(";");
+		for (String entry : entries)
+		{
+			String questName;
+			String stateStr;
+			if (entry.contains("=")) {
+				String[] parts = entry.split("=");
+				if (parts.length != 2) continue;
+				questName = parts[0].trim();
+				stateStr = parts[1].trim();
+			} else {
+				questName = entry.trim();
+				stateStr = QuestState.FINISHED.name();
+			}
+			for (Quest quest : Quest.values())
+			{
+				if (quest.getName().equalsIgnoreCase(questName))
+				{
+					try
+					{
+						QuestState state = QuestState.valueOf(stateStr);
+						questStateMap.put(quest, state);
+					}
+					catch (IllegalArgumentException e)
+					{
+						// Invalid state string, skip
+					}
+					break;
+				}
+			}
+		}
+		return questStateMap;
+	}
 
     private static void addTransports(Map<WorldPoint, Set<Transport>> transports, String path, TransportType transportType) {
         addTransports(transports, path, transportType, 0);
@@ -394,19 +590,37 @@ public class Transport {
         final String PREFIX_COMMENT = "#";
 
         try {
-            String s = new String(Util.readAllBytes(ShortestPathPlugin.class.getResourceAsStream(path)), StandardCharsets.UTF_8);
+            java.io.InputStream stream = ShortestPathPlugin.class.getResourceAsStream(path);
+            if (stream == null) {
+                log.warn("Transport resource missing, skipping: {}", path);
+                return;
+            }
+            String s = new String(Util.readAllBytes(stream), StandardCharsets.UTF_8);
             Scanner scanner = new Scanner(s);
+            if (!scanner.hasNextLine()) {
+                scanner.close();
+                log.warn("Transport resource empty, skipping: {}", path);
+                return;
+            }
 
             // Header line is the first line in the file and will start with either '#' or '# '
             String headerLine = scanner.nextLine();
+            if (headerLine.endsWith("\r")) {
+                headerLine = headerLine.substring(0, headerLine.length() - 1);
+            }
             headerLine = headerLine.startsWith(PREFIX_COMMENT + " ") ? headerLine.replace(PREFIX_COMMENT + " ", PREFIX_COMMENT) : headerLine;
             headerLine = headerLine.startsWith(PREFIX_COMMENT) ? headerLine.replace(PREFIX_COMMENT, "") : headerLine;
             String[] headers = headerLine.split(DELIM_COLUMN);
 
             Set<Transport> newTransports = new HashSet<>();
 
+            int lineNumber = 1;
             while (scanner.hasNextLine()) {
+                lineNumber++;
                 String line = scanner.nextLine();
+                if (line.endsWith("\r")) {
+                    line = line.substring(0, line.length() - 1);
+                }
 
                 if (line.startsWith(PREFIX_COMMENT) || line.isBlank()) {
                     continue;
@@ -420,10 +634,12 @@ public class Transport {
                     }
                 }
 
-
-                Transport transport = new Transport(fieldMap, transportType);
-                newTransports.add(transport);
-
+                try {
+                    Transport transport = new Transport(fieldMap, transportType);
+                    newTransports.add(transport);
+                } catch (RuntimeException e) {
+                    log.warn("Skipping transport row {} in {}: {}", lineNumber, path, e.getMessage());
+                }
             }
             scanner.close();
 
@@ -476,14 +692,11 @@ public class Transport {
                 }
             }
         } catch (IOException e) {
-            Microbot.log(e.getMessage());
-            e.printStackTrace();
-            throw new RuntimeException(e);
+            log.warn("Failed to read transport file {}: {}", path, e.getMessage());
         }
     }
 
-    public static HashMap<WorldPoint, Set<Transport>> loadAllFromResources() {
-        HashMap<WorldPoint, Set<Transport>> transports = new HashMap<>();
+    private static void appendStandardTransportFiles(HashMap<WorldPoint, Set<Transport>> transports) {
         addTransports(transports, "transports.tsv", TransportType.TRANSPORT);
         addTransports(transports, "agility_shortcuts.tsv", TransportType.AGILITY_SHORTCUT);
         addTransports(transports, "boats.tsv", TransportType.BOAT);
@@ -502,8 +715,25 @@ public class Transport {
         addTransports(transports, "teleportation_spells.tsv", TransportType.TELEPORTATION_SPELL);
         addTransports(transports, "wilderness_obelisks.tsv", TransportType.WILDERNESS_OBELISK);
         addTransports(transports, "magic_carpets.tsv", TransportType.MAGIC_CARPET);
+        addTransports(transports, "hot_air_balloons.tsv", TransportType.HOT_AIR_BALLOON, 7);
+        addTransports(transports, "magic_mushtrees.tsv", TransportType.MAGIC_MUSHTREE, 5);
+        addTransports(transports, "seasonal_transports.tsv", TransportType.SEASONAL_TRANSPORT);
         addTransports(transports, "npcs.tsv", TransportType.NPC);
+    }
+
+    public static HashMap<WorldPoint, Set<Transport>> loadAllFromResources() {
+        HashMap<WorldPoint, Set<Transport>> transports = new HashMap<>();
+        appendStandardTransportFiles(transports);
+        log.info("Loaded {} transports", transports.size());
         return transports;
+    }
+
+    /**
+     * Reload transport TSVs from the plugin classpath (same as {@link #loadAllFromResources()}).
+     * Apply to {@link PathfinderConfig} via {@link ShortestPathPlugin} config hot-reload.
+     */
+    public static HashMap<WorldPoint, Set<Transport>> reloadFromResources() {
+        return loadAllFromResources();
     }
 
     // To string method for debugging
@@ -518,6 +748,7 @@ public class Transport {
                 ", skillLevels=" + Arrays.toString(skillLevels) +
                 ", quests=" + quests +
                 ", itemIdRequirements=" + itemIdRequirements +
+                ", itemRequirements=" + itemRequirements +
                 ", type=" + type +
                 ", duration=" + duration +
                 ", displayInfo='" + displayInfo + '\'' +

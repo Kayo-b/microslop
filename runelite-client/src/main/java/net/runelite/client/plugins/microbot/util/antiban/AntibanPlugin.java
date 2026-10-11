@@ -13,6 +13,8 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.breakhandler.BreakHandlerPlugin;
+import net.runelite.client.plugins.microbot.util.events.PluginPauseEvent;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.plugins.microbot.util.antiban.enums.Activity;
 import net.runelite.client.plugins.microbot.util.antiban.enums.ActivityIntensity;
 import net.runelite.client.plugins.microbot.util.antiban.enums.CombatSkills;
@@ -79,7 +81,7 @@ import java.util.TimerTask;
         alwaysOn = true,
         hidden = true
 )
-
+@Slf4j
 public class AntibanPlugin extends Plugin {
 
     private static final int COOK_TIMEOUT = 3;
@@ -99,6 +101,17 @@ public class AntibanPlugin extends Plugin {
     private static final int MICRO_BREAK_DURATION_LOW_MAX = 10;
     private static final int MICRO_BREAK_DURATION_HIGH_MIN = 1;
     private static final int MICRO_BREAK_DURATION_HIGH_MAX = 30;
+
+    /**
+     * Avoid spamming the user if they keep micro breaks on while the break handler is disabled.
+     */
+    private boolean warnedBreakHandlerDisabled;
+    private Timer panelRefreshTimer;
+
+    /**
+     * Remembers last micro-break state to detect transitions (start/end).
+     */
+    private boolean lastMicroBreakActive;
 
     @Inject
     private OverlayManager overlayManager;
@@ -160,10 +173,11 @@ public class AntibanPlugin extends Plugin {
                 .panel(panel)
                 .build();
         Rs2AntibanSettings.reset();
+        Rs2AntibanSettings.loadFromProfile();
         validateAndSetBreakDurations();
 
-        Timer timer = new Timer();
-        timer.scheduleAtFixedRate(new TimerTask() {
+        panelRefreshTimer = new Timer();
+        panelRefreshTimer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 SwingUtilities.invokeLater(panel::loadSettings);
@@ -178,6 +192,11 @@ public class AntibanPlugin extends Plugin {
     protected void shutDown() {
         overlayManager.removeIf(overlay -> overlay instanceof AntibanOverlay);
         clientToolbar.removeNavigation(navButton);
+        if (panelRefreshTimer != null) {
+            panelRefreshTimer.cancel();
+            panelRefreshTimer = null;
+        }
+        clearPauseFlags();
     }
 
     @Subscribe
@@ -190,6 +209,8 @@ public class AntibanPlugin extends Plugin {
     @Subscribe
     public void onProfileChanged(ProfileChanged event) {
         Rs2Antiban.resetAntibanSettings();
+        Rs2AntibanSettings.loadFromProfile();
+        validateAndSetBreakDurations();
     }
 
     @Subscribe
@@ -237,20 +258,7 @@ public class AntibanPlugin extends Plugin {
             idleTicks = 0;
         }
 
-        validateAndSetBreakDurations();
-
-        if (Rs2AntibanSettings.takeMicroBreaks && !Microbot.isPluginEnabled(BreakHandlerPlugin.class)) {
-            if (Rs2AntibanSettings.devDebug)
-                Microbot.showMessage("Micro breaks depend on the BreakHandlerPlugin, enabling it now.");
-
-            Microbot.log("BreakHandlerPlugin not enabled, enabling it now.");
-            String name = BreakHandlerPlugin.class.getName();
-            Plugin breakHandlerPlugin = Microbot.getPluginManager().getPlugins().stream()
-                    .filter(x -> x.getClass().getName().equals(name))
-                    .findFirst()
-                    .orElse(null);
-            Microbot.startPlugin(breakHandlerPlugin);
-        }
+        handleMicroBreakIntegration();
 
         if (Rs2Antiban.isMining()) {
             updateLastMiningAction();
@@ -269,6 +277,57 @@ public class AntibanPlugin extends Plugin {
                 Rs2Antiban.getPlayStyle().resetPlayStyle();
             }
         }
+    }
+
+    /**
+     * Micro-break / BreakHandler integration logic that respects the user's manual BreakHandler toggle.
+     *
+     * Behaviour:
+     * - If user has micro-breaks on and BreakHandler is disabled, we warn once and do NOT auto-start.
+     * - When micro-breaks end, we clear pause flags so scripts resume even if BreakHandler stays disabled.
+     */
+    private void handleMicroBreakIntegration() {
+        boolean microBreaksEnabled = Rs2AntibanSettings.takeMicroBreaks;
+
+        // Detect end of micro-break to clear flags even if BreakHandler stays enabled.
+        if (lastMicroBreakActive && !Rs2AntibanSettings.microBreakActive) {
+            clearPauseFlags();
+        }
+        lastMicroBreakActive = Rs2AntibanSettings.microBreakActive;
+
+        if (!microBreaksEnabled) {
+            // User turned off micro-breaks; ensure pause flags are released.
+            return;
+        }
+
+        // Micro-breaks enabled: ensure BreakHandler is available, but respect manual disable.
+        if (Microbot.isPluginEnabled(BreakHandlerPlugin.class)) {
+            // Already on (user or us). Nothing else to do.
+            return;
+        }
+
+        // BreakHandler is off. If user turned it off, warn once and skip auto-start.
+        if (warnedBreakHandlerDisabled) {
+            return;
+        }
+
+        // If a micro-break was triggered while BreakHandler is disabled, cancel it and unpause to avoid getting stuck.
+        if (Rs2AntibanSettings.microBreakActive) {
+            Rs2AntibanSettings.microBreakActive = false;
+            clearPauseFlags();
+        }
+
+        warnedBreakHandlerDisabled = true;
+        Microbot.showMessage("Micro breaks need BreakHandler. Enable it to use micro breaks.");
+        log.debug("Micro breaks requested but BreakHandler is disabled; respecting user choice.");
+    }
+
+    /**
+     * Clears global pause flags to guarantee scripts resume after micro-break.
+     */
+    private void clearPauseFlags() {
+        PluginPauseEvent.setPaused(false);
+        Microbot.pauseAllScripts.compareAndSet(true, false);
     }
 
     @Subscribe
@@ -371,4 +430,3 @@ public class AntibanPlugin extends Plugin {
         }
     }
 }
-

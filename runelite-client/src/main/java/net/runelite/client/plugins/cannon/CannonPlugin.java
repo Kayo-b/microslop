@@ -30,7 +30,6 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.inject.Inject;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -44,6 +43,7 @@ import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.Notifier;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -60,7 +60,6 @@ import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
 	description = "Show information about cannon placement and/or amount of cannonballs",
 	tags = {"combat", "notifications", "ranged", "overlay"}
 )
-@Slf4j
 public class CannonPlugin extends Plugin
 {
 	static final int MAX_OVERLAY_DISTANCE = 4100;
@@ -73,6 +72,9 @@ public class CannonPlugin extends Plugin
 
 	@Getter
 	private boolean cannonPlaced;
+
+	@Getter
+	private boolean cannonDecayed;
 
 	@Getter
 	private static WorldArea cannonPosition;
@@ -121,7 +123,20 @@ public class CannonPlugin extends Plugin
 	{
 		overlayManager.add(cannonOverlay);
 		overlayManager.add(cannonSpotOverlay);
-		clientThread.invoke(() -> cballsLeft = client.getVarpValue(VarPlayerID.ROCKTHROWER));
+		if (client.getGameState() == GameState.LOGGED_IN)
+		{
+			clientThread.invoke(() ->
+			{
+				cballsLeft = client.getVarpValue(VarPlayerID.ROCKTHROWER);
+				cannonPlaced = client.getVarpValue(VarPlayerID.DROPCANNON) == 4;
+				cannonDecayed = client.getVarbitValue(VarbitID.MCANNON_DECAYED) == 1;
+
+				if (cannonPlaced && !cannonDecayed)
+				{
+					addCounter();
+				}
+			});
+		}
 	}
 
 	@Override
@@ -131,6 +146,7 @@ public class CannonPlugin extends Plugin
 		overlayManager.remove(cannonOverlay);
 		overlayManager.remove(cannonSpotOverlay);
 		cannonPlaced = false;
+		cannonDecayed = false;
 		cannonWorld = -1;
 		cannonPosition = null;
 		cannonBallNotificationSent = false;
@@ -268,6 +284,19 @@ public class CannonPlugin extends Plugin
 				removeCounter();
 			}
 		}
+		else if (varbitChanged.getVarbitId() == VarbitID.MCANNON_DECAYED)
+		{
+			cannonDecayed = varbitChanged.getValue() == 1;
+
+			if (cannonDecayed)
+			{
+				removeCounter();
+			}
+			else if (cannonPlaced)
+			{
+				addCounter();
+			}
+		}
 	}
 
 	@Subscribe
@@ -304,7 +333,7 @@ public class CannonPlugin extends Plugin
 
 	private void addCounter()
 	{
-		if (!config.showInfobox() || counter != null)
+		if (!config.showInfobox() || cannonDecayed || counter != null)
 		{
 			return;
 		}

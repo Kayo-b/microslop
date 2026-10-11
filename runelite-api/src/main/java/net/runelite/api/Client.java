@@ -27,6 +27,7 @@ package net.runelite.api;
 import com.jagex.oldscape.pub.OAuthApi;
 import java.awt.Canvas;
 import java.awt.Dimension;
+import java.io.FileDescriptor;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -143,8 +144,7 @@ public interface Client extends OAuthApi, GameEngine
 	void setGameState(GameState gameState);
 
 	/**
-	 * Causes the client to shutdown. It is faster than
-	 * {@link java.applet.Applet#stop()} because it doesn't wait for 4000ms.
+	 * Causes the client to shutdown.
 	 * This will call {@link System#exit} when it is done
 	 */
 	void stopNow();
@@ -236,7 +236,7 @@ public interface Client extends OAuthApi, GameEngine
 	 * @see #getCameraX()
 	 * @return
 	 */
-	double getCameraFpX();
+	float getCameraFpX();
 
 	/**
 	 * Gets the y-axis coordinate of the camera.
@@ -253,7 +253,7 @@ public interface Client extends OAuthApi, GameEngine
 	 * @see #getCameraY()
 	 * @return
 	 */
-	double getCameraFpY();
+	float getCameraFpY();
 
 	/**
 	 * Gets the z-axis coordinate of the camera.
@@ -270,13 +270,13 @@ public interface Client extends OAuthApi, GameEngine
 	 * @see #getCameraZ()
 	 * @return
 	 */
-	double getCameraFpZ();
+	float getCameraFpZ();
 
 	/**
 	 * Gets the pitch of the camera.
 	 * <p>
-	 * The value returned by this method is measured in JAU, or Jagex
-	 * Angle Unit, which is 1/1024 of a revolution.
+	 * The value returned by this method is measured in JAU14, or Jagex
+	 * Angle Unit (14 bit), where each unit is equivalent to 2π/(2^14) radians.
 	 *
 	 * @return the camera pitch
 	 */
@@ -287,10 +287,13 @@ public interface Client extends OAuthApi, GameEngine
 	 * @see #getCameraPitch()
 	 * @return
 	 */
-	double getCameraFpPitch();
+	float getCameraFpPitch();
 
 	/**
 	 * Gets the yaw of the camera.
+	 * <p>
+	 * The value returned by this method is measured in JAU14, or Jagex
+	 * Angle Unit (14 bit), where each unit is equivalent to 2π/(2^14) radians.
 	 *
 	 * @return the camera yaw
 	 */
@@ -301,7 +304,7 @@ public interface Client extends OAuthApi, GameEngine
 	 * @see #getCameraYaw()
 	 * @return
 	 */
-	double getCameraFpYaw();
+	float getCameraFpYaw();
 
 	/**
 	 * Gets the current world number of the logged in player.
@@ -538,22 +541,6 @@ public interface Client extends OAuthApi, GameEngine
 	Widget getWidget(@Component int componentId);
 
 	/**
-	 * Gets an array containing the x-axis canvas positions
-	 * of all widgets.
-	 *
-	 * @return array of x-axis widget coordinates
-	 */
-	int[] getWidgetPositionsX();
-
-	/**
-	 * Gets an array containing the y-axis canvas positions
-	 * of all widgets.
-	 *
-	 * @return array of y-axis widget coordinates
-	 */
-	int[] getWidgetPositionsY();
-
-	/**
 	 * Gets the current run energy of the logged in player.
 	 *
 	 * @return the run energy in units of 1/100th of an percentage
@@ -639,6 +626,18 @@ public interface Client extends OAuthApi, GameEngine
 	void setMenuEntries(MenuEntry[] entries);
 
 	/**
+	 * Gets whether the mouse over text in top-left corner of the screen is enabled
+	 * @return
+	 */
+	boolean isMouseoverTextEnabled();
+
+	/**
+	 * Sets whether the mouse over text in top-left corner of the screen is enabled
+	 * @param enabled
+	 */
+	void setMouseoverTextEnabled(boolean enabled);
+
+	/**
 	 * Checks whether a right-click menu is currently open.
 	 *
 	 * @return true if a menu is open, false otherwise
@@ -700,15 +699,6 @@ public interface Client extends OAuthApi, GameEngine
 	int getMenuWidth();
 
 	/**
-	 * Gets the angle of the map, or target camera yaw.
-	 *
-	 * @return the map angle
-	 * @see #getCameraYawTarget()
-	 */
-	@Deprecated
-	int getMapAngle();
-
-	/**
 	 * Checks whether the client window is currently resized.
 	 *
 	 * @return true if resized, false otherwise
@@ -740,20 +730,27 @@ public interface Client extends OAuthApi, GameEngine
 	int[] getServerVarps();
 
 	/**
+	 * Gets an array of all client varplayers.
+	 *
+	 * @return local player variables
+	 */
+	@VisibleForDevtools
+	long[] getVarpsLong();
+
+	/**
+	 * Get an array of all server varplayers. These vars are only
+	 * modified by the server, and so represent the server's idea of
+	 * the varp values.
+	 * @return the server varps
+	 */
+	@VisibleForDevtools
+	long[] getServerVarpsLong();
+
+	/**
 	 * Gets an array of all client variables.
 	 */
 	@VisibleForDevtools
 	Map<Integer, Object> getVarcMap();
-
-	/**
-	 * Gets a value corresponding to the passed varbit.
-	 *
-	 * @param varbit the varbit id
-	 * @return the value
-	 * @see Client#getVarbitValue(int)
-	 */
-	@Deprecated
-	int getVar(@Varbit int varbit);
 
 	/**
 	 * Gets the value of the given varbit.
@@ -793,9 +790,42 @@ public interface Client extends OAuthApi, GameEngine
 	int getServerVarpValue(@Varp int varpId);
 
 	/**
+	 * Sets the value of a VarPlayer
+	 * @param varpId the VarPlayer id
+	 * @param value the value
+	 */
+	void setVarpValue(@Varp int varpId, int value);
+
+	/**
+	 * Gets the value of a given VarPlayer.
+	 *
+	 * @param varpId the VarPlayer id
+	 * @return the value
+	 */
+	long getVarpLongValue(@Varp int varpId);
+
+	/**
+	 * Gets the value of a given VarPlayer.
+	 * This returns the server's idea of the value, not the client's. This is
+	 * specifically the last value set by the server regardless of changes to
+	 * the var by the client.
+	 *
+	 * @param varpId the VarPlayer id
+	 * @return the value
+	 */
+	long getServerVarpLongValue(@Varp int varpId);
+
+	/**
+	 * Sets the value of a VarPlayer
+	 * @param varpId the VarPlayer id
+	 * @param value the value
+	 */
+	void setVarpLongValue(@Varp int varpId, long value);
+
+	/**
 	 * Gets the value of a given VarClientInt
 	 *
-	 * @param var the {@link VarClientInt}
+	 * @param var the {@link net.runelite.api.gameval.VarClientID}
 	 * @return the value
 	 */
 	int getVarcIntValue(@VarCInt int var);
@@ -803,7 +833,7 @@ public interface Client extends OAuthApi, GameEngine
 	/**
 	 * Gets the value of a given VarClientStr
 	 *
-	 * @param var the {@link VarClientStr}
+	 * @param var the {@link net.runelite.api.gameval.VarClientID}
 	 * @return the value
 	 */
 	String getVarcStrValue(@VarCStr int var);
@@ -811,7 +841,7 @@ public interface Client extends OAuthApi, GameEngine
 	/**
 	 * Sets a VarClientString to the passed value
 	 *
-	 * @param var the {@link VarClientStr}
+	 * @param var the {@link net.runelite.api.gameval.VarClientID}
 	 * @param value the new value
 	 */
 	void setVarcStrValue(@VarCStr int var, String value);
@@ -819,7 +849,7 @@ public interface Client extends OAuthApi, GameEngine
 	/**
 	 * Sets a VarClientInt to the passed value
 	 *
-	 * @param var the {@link VarClientInt}
+	 * @param var the {@link net.runelite.api.gameval.VarClientID}
 	 * @param value the new value
 	 */
 	void setVarcIntValue(@VarCInt int var, int value);
@@ -897,6 +927,14 @@ public interface Client extends OAuthApi, GameEngine
 	 * @return the widget flags table
 	 */
 	HashTable<WidgetConfigNode> getWidgetFlags();
+
+	/**
+	 * Get the widget config for a given widget
+	 * @param w
+	 * @return
+	 */
+	@Nullable
+	WidgetConfigNode getWidgetConfig(Widget w);
 
 	/**
 	 * Gets the widget node component table.
@@ -999,6 +1037,11 @@ public interface Client extends OAuthApi, GameEngine
 	 * An index must exist for this column.
 	 */
 	List<Integer> getDBRowsByValue(int table, int column, int tupleIndex, Object value);
+
+	/**
+	 * Gets all rows in a DBTable
+	 */
+	List<Integer> getDBTableRows(int table);
 
 	/**
 	 * Get a map element config by id
@@ -1113,9 +1156,6 @@ public interface Client extends OAuthApi, GameEngine
 
 	ModelData mergeModels(ModelData[] models, int length);
 	ModelData mergeModels(ModelData ...models);
-
-	Model mergeModels(Model[] models, int length);
-	Model mergeModels(Model... models);
 
 	/**
 	 * Loads and lights a model from the cache
@@ -1560,12 +1600,12 @@ public interface Client extends OAuthApi, GameEngine
 	void runScript(Object... args);
 
 	/**
-	 * Creates a blank ScriptEvent for executing a ClientScript2 script
+	 * Creates a blank ScriptEventBuilder for building a ScriptEvent to execute a ClientScript2 script
 	 *
 	 * @param args the script id, then any additional arguments to execute the script with
 	 * @see ScriptID
 	 */
-	ScriptEvent createScriptEvent(Object ...args);
+	ScriptEventBuilder createScriptEventBuilder(Object ...args);
 
 	/**
 	 * Checks whether or not there is any active hint arrow.
@@ -1731,39 +1771,39 @@ public interface Client extends OAuthApi, GameEngine
 	 * Typically this is the player position, but can be other points in cutscenes or in free camera mode.
 	 * @return
 	 */
-	double getCameraFocalPointX();
+	float getCameraFocalPointX();
 
 	/**
 	 * Sets the camera focus point x. Requires the {@link #getCameraMode()} to be free camera.
 	 * @param x
 	 */
-	void setCameraFocalPointX(double x);
+	void setCameraFocalPointX(float x);
 
 	/**
 	 * Get the camera focus point y
 	 * Typically this is the player position, but can be other points in cutscenes or in free camera mode.
 	 * @return
 	 */
-	double getCameraFocalPointY();
+	float getCameraFocalPointY();
 
 	/**
 	 * Sets the camera focus point y. Requires the {@link #getCameraMode()} to be free camera.
 	 * @param y
 	 */
-	void setCameraFocalPointY(double y);
+	void setCameraFocalPointY(float y);
 
 	/**
 	 * Get the camera focus point z
 	 * Typically this is the player position, but can be other points in cutscenes or in free camera mode.
 	 * @return
 	 */
-	double getCameraFocalPointZ();
+	float getCameraFocalPointZ();
 
 	/**
 	 * Sets the camera focus point z. Requires the {@link #getCameraMode()} to be free camera.
 	 * @param z
 	 */
-	void setCameraFocalPointZ(double z);
+	void setCameraFocalPointZ(float z);
 
 	/**
 	 * Sets the normal moving speed when using oculus orb (default value is 12)
@@ -1858,6 +1898,12 @@ public interface Client extends OAuthApi, GameEngine
 	 */
 	@Nullable
 	Widget getSelectedWidget();
+
+	/**
+	 * Gets the current active {@link net.runelite.api.widgets.WidgetType#INPUT_FIELD} Widget
+	 */
+	@Nullable
+	Widget getFocusedInputFieldWidget();
 
 	/**
 	 * Returns client item composition cache
@@ -2142,21 +2188,6 @@ public interface Client extends OAuthApi, GameEngine
 	int[][][] getInstanceTemplateChunks();
 
 	/**
-	 * Returns a 2D array containing XTEA encryption keys used to decrypt
-	 * map region files.
-	 * <p>
-	 * The array maps the region keys at index {@code n} to the region
-	 * ID held in {@link #getMapRegions()} at {@code n}.
-	 * <p>
-	 * The array of keys for the region make up a 128-bit encryption key
-	 * spread across 4 integers.
-	 *
-	 * @return the XTEA encryption keys
-	 */
-	@Deprecated
-	int[][] getXteaKeys();
-
-	/**
 	 * Checks whether the scene is in an instanced region.
 	 * @see WorldView#isInstance()
 	 */
@@ -2386,4 +2417,44 @@ public interface Client extends OAuthApi, GameEngine
 	 * animates transparency, otherwise it will share a reference. All other fields share a reference.
 	 */
 	Model applyTransformations(Model model, @Nullable Animation animA, int frameA, @Nullable Animation animB, int frameB);
+
+	/**
+	 * Creates a SceneTilePaint instance, which can be attached to a Tile to control its appearance.
+	 *
+	 * @see Tile#setSceneTilePaint(SceneTilePaint)
+	 *
+	 * @param swColor the color of the south-west corner of the tile
+	 * @param seColor the color of the south-east corner of the tile
+	 * @param neColor the color of the north-east corner of the tile
+	 * @param nwColor the color of the north-west corner of the tile
+	 * @param texture the texture to render for the tile, or -1 to use the colors
+	 * @param minimapRgb the color to use when rendering the minimap
+	 * @param flatShade whether the tile is flat
+	 * @return the newly created SceneTilePaint
+	 */
+	SceneTilePaint createSceneTilePaint(int swColor, int seColor, int neColor, int nwColor, int texture, int minimapRgb, boolean flatShade);
+
+	/**
+	 * Get the entity that the camera is focused on
+	 *
+	 * @return
+	 */
+	@Nullable
+	CameraFocusableEntity getCameraFocusEntity();
+
+	/**
+	 * Find the worldview a given worldpoint belongs in
+	 * @param point
+	 * @return
+	 */
+	@Nonnull
+	WorldView findWorldViewFromWorldPoint(WorldPoint point);
+
+	@Nullable
+	FileDescriptor getSocketFD();
+
+	/**
+	 * Expand macros such as @mes_hl_blu@, @blu@, etc. with their corresponding values, eg. &lt;col=0000ff&gt;
+	 */
+	String macroExpand(String s);
 }

@@ -360,6 +360,8 @@ public class CollisionMapDumper {
 
         ARDOUGNE_BASEMENT_CELL_DOOR_35795(35795),
 
+		BARROWS_BRICK_WALL(53256),
+		BURGH_DE_ROTT_FENCE(18411),
         BRIMHAVEN_DUNGEON_EXIT_20878(20878),
 
         CELL_DOOR_9562(9562),
@@ -372,6 +374,8 @@ public class CollisionMapDumper {
         CRANDOR_WALL_2606(2606),
 
         DARKMEYER_CELL_DOOR_38014(38014),
+
+		DEATH_PLATEAU_ROCKS(38848, FlagMap.TILE_DEFAULT),
 
         DESERT_MINING_CAMP_PRISON_DOOR_2689(2689),
 
@@ -453,6 +457,7 @@ public class CollisionMapDumper {
 
         FORTHOS_DUNGEON_WALL_34854(34854),
 
+		GARDEN_OF_TRANQUILITY_TRELLIS(2149),
         GOBLIN_TEMPLE_PRISON_DOOR_43457(43457),
 
         GRAND_EXCHANGE_BOOTH_10060(10060),
@@ -500,6 +505,8 @@ public class CollisionMapDumper {
         MELZARS_MAZE_ORANGE_DOOR_2597(2597),
         MELZARS_MAZE_RED_DOOR_2596(2596),
         MELZARS_MAZE_YELLOW_DOOR_2598(2598),
+
+        MINING_GUILD_DOOR_30364(30364),
 
         // MEMBERS_GATE_1727(1727), // Taverley, Falador, Brimhaven, Wilderness, Edgeville Dungeon
         // MEMBERS_GATE_1728(1728), // Taverley, Falador, Brimhaven, Wilderness, Edgeville Dungeon

@@ -3,7 +3,10 @@ package net.runelite.client.plugins.microbot.util.mouse;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Point;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
+import net.runelite.client.plugins.microbot.util.input.AwtEmitter;
+import net.runelite.client.plugins.microbot.util.input.InputArbiter;
+import net.runelite.client.plugins.microbot.util.input.InputLoop;
+import net.runelite.client.plugins.microbot.util.input.PointerState;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
@@ -11,7 +14,6 @@ import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import javax.inject.Inject;
 import java.awt.*;
 import java.awt.event.MouseEvent;
-import java.awt.event.MouseWheelEvent;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -22,13 +24,11 @@ import static net.runelite.client.plugins.microbot.util.Global.sleep;
 public class VirtualMouse extends Mouse {
 
     private final ScheduledExecutorService scheduledExecutorService;
-    private boolean exited = true;
 
     @Inject
     public VirtualMouse() {
         super();
-        this.scheduledExecutorService = Executors.newScheduledThreadPool(10);
-        //getCanvas().setFocusable(false);
+        this.scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
     }
 
     public void setLastClick(Point point) {
@@ -36,38 +36,55 @@ public class VirtualMouse extends Mouse {
         lastClick = point;
     }
 
-	public void setLastMove(Point point) {
-		lastMove = point;
-		points.add(point);
-		if (points.size() > MAX_POINTS) {
-			points.pollFirst();
-		}
-	}
+    // Feeds the debug overlay's fading trail only; position itself lives in PointerState.
+    private void recordTrailPoint(Point point) {
+        points.add(point);
+        if (points.size() > MAX_POINTS) {
+            points.pollFirst();
+        }
+    }
 
-    private void handleClick(Point point, boolean rightClick) {
-        entered(point);
-        exited(point);
-        moved(point);
-        pressed(point, rightClick ? MouseEvent.BUTTON3 : MouseEvent.BUTTON1);
-        released(point, rightClick ? MouseEvent.BUTTON3 : MouseEvent.BUTTON1);
-        clicked(point, rightClick ? MouseEvent.BUTTON3 : MouseEvent.BUTTON1);
+    private void handleClick(InputLoop.Emit emit, Point point, boolean rightClick) {
+        int button = rightClick ? MouseEvent.BUTTON3 : MouseEvent.BUTTON1;
+        // A human clicking where the pointer already is sends no fresh MOVED, so emit one only
+        // when it is not there, which happens when NaturalMouse was skipped. No ENTERED/EXITED:
+        // no human click sends those, and the EXITED wrote (-1,-1) into the tracked position.
+        if (!PointerState.isAt(point.getX(), point.getY())) {
+            emit.move(point.getX(), point.getY());
+        }
+        emit.press(point.getX(), point.getY(), button);
+        emit.release(point.getX(), point.getY(), button);
+        emit.click(point.getX(), point.getY(), button);
         setLastClick(point);
     }
+
+    private boolean shouldMoveNaturally(Point point) {
+        return point.getX() > 1
+                && point.getY() > 1
+                && Microbot.naturalMouse != null;
+    }
+
+    /**
+     * A gesture takes the {@link InputLoop} lock and sleeps while holding it, and neither may
+     * happen on the client thread. Every gesture goes through here so none can forget.
+     */
+    private void runGesture(Runnable gesture) {
+        if (Microbot.getClient().isClientThread()) {
+            scheduledExecutorService.schedule(gesture, 0, TimeUnit.MILLISECONDS);
+        } else {
+            gesture.run();
+        }
+    }
+
     public Mouse click(Point point, boolean rightClick) {
         if (point == null) return this;
 
-        Runnable clickAction = () -> {
-            if (Rs2AntibanSettings.naturalMouse && point.getX() > 1 && point.getY() > 1) {
+        runGesture(() -> InputLoop.run(emit -> {
+            if (shouldMoveNaturally(point)) {
                 Microbot.naturalMouse.moveTo(point.getX(), point.getY());
             }
-            handleClick(point, rightClick);
-        };
-
-        if (Microbot.getClient().isClientThread()) {
-            scheduledExecutorService.schedule(clickAction, 0, TimeUnit.MILLISECONDS);
-        } else {
-            clickAction.run();
-        }
+            handleClick(emit, point, rightClick);
+        }));
 
         return this;
     }
@@ -76,13 +93,12 @@ public class VirtualMouse extends Mouse {
     public Mouse click(Point point, boolean rightClick, NewMenuEntry entry) {
         if (point == null) return this;
 
-        Runnable clickAction = () -> {
+        runGesture(() -> InputLoop.run(emit -> {
             Point newPoint = point;
-            if (Rs2AntibanSettings.naturalMouse && point.getX() > 1 && point.getY() > 1) {
+            if (shouldMoveNaturally(point)) {
                 Microbot.naturalMouse.moveTo(point.getX(), point.getY());
 
                 if (Rs2UiHelper.hasActor(entry)) {
-                    log.info("Actor found: " + entry.getActor().getName());
                     Rectangle rectangle = Rs2UiHelper.getActorClickbox(entry.getActor());
                     if (!Rs2UiHelper.isMouseWithinRectangle(rectangle)) {
                         newPoint = Rs2UiHelper.getClickingPoint(rectangle, true);
@@ -91,7 +107,6 @@ public class VirtualMouse extends Mouse {
                 }
 
                 if (Rs2UiHelper.isGameObject(entry)) {
-                    log.info("Game Object found: " + entry.getGameObject().toString());
                     Rectangle rectangle = Rs2UiHelper.getObjectClickbox(entry.getGameObject());
                     if (!Rs2UiHelper.isMouseWithinRectangle(rectangle)) {
                         newPoint = Rs2UiHelper.getClickingPoint(rectangle, true);
@@ -102,14 +117,8 @@ public class VirtualMouse extends Mouse {
             }
 
             Microbot.targetMenu = entry;
-            handleClick(newPoint, rightClick);
-        };
-
-        if (Microbot.getClient().isClientThread()) {
-            scheduledExecutorService.schedule(clickAction, 0, TimeUnit.MILLISECONDS);
-        } else {
-            clickAction.run();
-        }
+            handleClick(emit, newPoint, rightClick);
+        }));
 
         return this;
     }
@@ -147,64 +156,55 @@ public class VirtualMouse extends Mouse {
         return click(Microbot.getClient().getMouseCanvasPosition());
     }
 
+    // NaturalMouse steps through here, so this one check also stops a trajectory mid-curve.
     public Mouse move(Point point) {
-        setLastMove(point);
-        MouseEvent mouseMove = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 0, false);
-        mouseMove.setSource("Microbot");
-        getCanvas().dispatchEvent(mouseMove);
-
+        if (InputArbiter.isHuman()) {
+            return this;
+        }
+        recordTrailPoint(point);
+        AwtEmitter.moved(point.getX(), point.getY());
         return this;
     }
 
     public Mouse move(Rectangle rect) {
-        MouseEvent mouseMove = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, (int) rect.getCenterX(), (int) rect.getCenterY(), 0, false);
-        mouseMove.setSource("Microbot");
-        getCanvas().dispatchEvent(mouseMove);
-
-        return this;
+        return move(new Point((int) rect.getCenterX(), (int) rect.getCenterY()));
     }
 
     public Mouse move(Polygon polygon) {
-        Point point = new Point((int) polygon.getBounds().getCenterX(), (int) polygon.getBounds().getCenterY());
-
-        MouseEvent mouseMove = new MouseEvent(getCanvas(), MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 0, false);
-        mouseMove.setSource("Microbot");
-        getCanvas().dispatchEvent(mouseMove);
-
-        return this;
+        return move(new Point((int) polygon.getBounds().getCenterX(), (int) polygon.getBounds().getCenterY()));
     }
 
     public Mouse scrollDown(Point point) {
-        long time = System.currentTimeMillis();
-
-        move(point);
-
-        scheduledExecutorService.schedule(() -> {
-            MouseEvent mouseScroll = new MouseWheelEvent(getCanvas(), MouseEvent.MOUSE_WHEEL, time, 0, point.getX(), point.getY(), 0, false,
-                    0, 10, 2);
-            mouseScroll.setSource("Microbot");
-            getCanvas().dispatchEvent(mouseScroll);
-        }, Rs2Random.between(40,100), TimeUnit.MILLISECONDS);
-        return this;
+        return scroll(point, 2, 10);
     }
 
     public Mouse scrollUp(Point point) {
-        long time = System.currentTimeMillis();
+        return scroll(point, -2, -10);
+    }
 
-        move(point);
+    /**
+     * One gesture covering both the move and the wheel, so another script's click cannot land
+     * between them and leave the wheel firing at a point the cursor has left.
+     *
+     * <p>The pause stays: a human turns the wheel a moment after arriving, not in the same
+     * instant. A takeover during it aborts at the wheel's checkpoint.
+     */
+    private Mouse scroll(Point point, int wheelRotation, int unitsToScroll) {
+        if (point == null) return this;
 
-        scheduledExecutorService.schedule(() -> {
-            MouseEvent mouseScroll = new MouseWheelEvent(getCanvas(), MouseEvent.MOUSE_WHEEL, time, 0, point.getX(), point.getY(), 0, false,
-                    0, -10, -2);
-            mouseScroll.setSource("Microbot");
-            getCanvas().dispatchEvent(mouseScroll);
-        }, Rs2Random.between(40,100), TimeUnit.MILLISECONDS);
+        runGesture(() -> InputLoop.run(emit -> {
+            emit.move(point.getX(), point.getY());
+            recordTrailPoint(point);
+            sleep(Rs2Random.logNormalBounded(40, 100));
+            emit.wheel(point.getX(), point.getY(), wheelRotation, unitsToScroll);
+        }));
+
         return this;
     }
 
     @Override
     public java.awt.Point getMousePosition() {
-        Point point = lastMove;
+        Point point = PointerState.get();
         return new java.awt.Point(point.getX(), point.getY());
     }
 
@@ -218,71 +218,32 @@ public class VirtualMouse extends Mouse {
         return move(new Point((int) x, (int) y));
     }
 
-    @Deprecated
-    private void mouseEvent(int id, Point point, boolean rightClick) {
-        int button = rightClick ? MouseEvent.BUTTON3 : MouseEvent.BUTTON1;
-        MouseEvent e = new MouseEvent(Microbot.getClient().getCanvas(), id, System.currentTimeMillis(), 0, point.getX(), point.getY(), 1, false, button);
-        getCanvas().dispatchEvent(e);
+    public void shutdown() {
+        scheduledExecutorService.shutdownNow();
     }
 
-    private synchronized void pressed(Point point, int button) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_PRESSED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 1, false, button);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
+    private void moveTowards(Point point) {
+        if (shouldMoveNaturally(point))
+            Microbot.naturalMouse.moveTo(point.getX(), point.getY());
+        else
+            move(point);
     }
 
-    private synchronized void released(Point point, int button) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_RELEASED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 1, false, button);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
-    }
-
-    private synchronized void clicked(Point point, int button) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_CLICKED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 1, false, button);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
-    }
-
-    private synchronized void exited(Point point) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_EXITED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 0, false);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
-        exited = true;
-    }
-
-    private synchronized void entered(Point point) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_ENTERED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 0, false);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
-        exited = false;
-    }
-
-    private synchronized void moved(Point point) {
-        MouseEvent event = new MouseEvent(Microbot.getClient().getCanvas(), MouseEvent.MOUSE_MOVED, System.currentTimeMillis(), 0, point.getX(), point.getY(), 0, false);
-        event.setSource("Microbot");
-        getCanvas().dispatchEvent(event);
-    }
-
-    // New drag method
+    // The one gesture holding a button across time, and the reason the held-button set exists.
+    // The sleeps return immediately under a takeover and the next emit aborts, releasing at the
+    // human's point rather than falling through to a RELEASED at the stale end point.
     public Mouse drag(Point startPoint, Point endPoint) {
         if (startPoint == null || endPoint == null) return this;
 
-        if (Rs2AntibanSettings.naturalMouse && (startPoint.getX() > 1 && startPoint.getY() > 1))
-            Microbot.naturalMouse.moveTo(startPoint.getX(), startPoint.getY());
-        else
-            move(startPoint);
-        sleep(50, 80);
-        // Press the mouse button at the start point
-        pressed(startPoint, MouseEvent.BUTTON1);
-        sleep(80, 120);
-        // Move to the end point while holding the button down
-        if (Rs2AntibanSettings.naturalMouse && (endPoint.getX() > 1 && endPoint.getY() > 1))
-            Microbot.naturalMouse.moveTo(endPoint.getX(), endPoint.getY());
-        else
-            move(endPoint);
-        sleep(80, 120);
-        // Release the mouse button at the end point
-        released(endPoint, MouseEvent.BUTTON1);
+        runGesture(() -> InputLoop.run(emit -> {
+            moveTowards(startPoint);
+            sleep(Rs2Random.logNormalBounded(50, 80));
+            emit.press(startPoint.getX(), startPoint.getY(), MouseEvent.BUTTON1);
+            sleep(Rs2Random.logNormalBounded(80, 120));
+            moveTowards(endPoint);
+            sleep(Rs2Random.logNormalBounded(80, 120));
+            emit.release(endPoint.getX(), endPoint.getY(), MouseEvent.BUTTON1);
+        }));
 
         return this;
     }

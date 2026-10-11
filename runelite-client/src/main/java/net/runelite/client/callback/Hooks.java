@@ -38,10 +38,11 @@ import java.awt.image.BufferedImage;
 import java.awt.image.VolatileImage;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -52,6 +53,8 @@ import net.runelite.api.MainBufferProvider;
 import net.runelite.api.Player;
 import net.runelite.api.Renderable;
 import net.runelite.api.Skill;
+import net.runelite.api.WorldView;
+import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.FakeXpDrop;
@@ -71,8 +74,10 @@ import net.runelite.client.TelemetryClient;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.externalplugins.ExternalPluginManager;
 import net.runelite.client.input.KeyManager;
 import net.runelite.client.input.MouseManager;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.task.Scheduler;
 import net.runelite.client.ui.ClientUI;
 import net.runelite.client.ui.DrawManager;
@@ -115,6 +120,8 @@ public class Hooks implements Callbacks
 	@Nullable
 	private final RuntimeConfig runtimeConfig;
 	private final boolean developerMode;
+	private final RenderCallbackManager renderCallbackManager;
+	private final PluginManager pluginManager;
 
 	private Dimension lastStretchedDimensions;
 	private VolatileImage stretchedImage;
@@ -130,13 +137,21 @@ public class Hooks implements Callbacks
 	private boolean rateLimitedError;
 	private int errorBackoff = 1;
 
+	/**
+	 * use {@link RenderCallbackManager} instead
+	 */
 	@FunctionalInterface
-	public interface RenderableDrawListener
+	@Deprecated
+	public interface RenderableDrawListener extends RenderCallback
 	{
 		boolean draw(Renderable renderable, boolean ui);
-	}
 
-	private final List<RenderableDrawListener> renderableDrawListeners = new ArrayList<>();
+		@Override
+		default boolean addEntity(Renderable renderable, boolean ui)
+		{
+			return draw(renderable, ui);
+		}
+	}
 
 	/**
 	 * Get the Graphics2D for the MainBufferProvider image
@@ -177,7 +192,9 @@ public class Hooks implements Callbacks
 		ClientUI clientUi,
 		@Nullable TelemetryClient telemetryClient,
 		@Nullable RuntimeConfig runtimeConfig,
-		@Named("developerMode") final boolean developerMode
+		@Named("developerMode") final boolean developerMode,
+		RenderCallbackManager renderCallbackManager,
+		PluginManager pluginManager
 	)
 	{
 		this.client = client;
@@ -196,6 +213,8 @@ public class Hooks implements Callbacks
 		this.telemetryClient = telemetryClient;
 		this.runtimeConfig = runtimeConfig;
 		this.developerMode = developerMode;
+		this.renderCallbackManager = renderCallbackManager;
+		this.pluginManager = pluginManager;
 		eventBus.register(this);
 	}
 
@@ -577,14 +596,22 @@ public class Hooks implements Callbacks
 		eventBus.post(fakeXpDrop);
 	}
 
+	/**
+	 * use {@link RenderCallbackManager#register(RenderCallback)} instead
+	 */
+	@Deprecated
 	public void registerRenderableDrawListener(RenderableDrawListener listener)
 	{
-		renderableDrawListeners.add(listener);
+		renderCallbackManager.register(listener);
 	}
 
+	/**
+	 * use {@link RenderCallbackManager#unregister(RenderCallback)} instead
+	 */
+	@Deprecated
 	public void unregisterRenderableDrawListener(RenderableDrawListener listener)
 	{
-		renderableDrawListeners.remove(listener);
+		renderCallbackManager.unregister(listener);
 	}
 
 	@Override
@@ -592,17 +619,11 @@ public class Hooks implements Callbacks
 	{
 		try
 		{
-			for (RenderableDrawListener renderableDrawListener : renderableDrawListeners)
-			{
-				if (!renderableDrawListener.draw(renderable, drawingUi))
-				{
-					return false;
-				}
-			}
+			return renderCallbackManager.addEntity(renderable, drawingUi);
 		}
 		catch (Exception ex)
 		{
-			log.error("exception from renderable draw listener", ex);
+			log.error("exception from render callback", ex);
 		}
 		return true;
 	}
@@ -631,12 +652,13 @@ public class Hooks implements Callbacks
 			}
 
 			String coord = "unk";
-			if (client.getClientThread() == Thread.currentThread())
+			Player player = client.getLocalPlayer();
+			if (player != null)
 			{
-				Player player = client.getLocalPlayer();
-				if (player != null)
+				LocalPoint lp = player.getLocalLocation();
+				if (lp.getWorldView() == WorldView.TOPLEVEL || client.getClientThread() == Thread.currentThread())
 				{
-					WorldPoint p = WorldPoint.fromLocalInstance(client, player.getLocalLocation());
+					WorldPoint p = WorldPoint.fromLocalInstance(client, lp);
 					coord = String.format("%d_%d_%d_%d_%d", p.getPlane(), p.getX() / 64, p.getY() / 64, p.getX() & 63, p.getY() & 63);
 				}
 			}
@@ -679,11 +701,47 @@ public class Hooks implements Callbacks
 		}
 
 		Set<String> outdatedClientVersions = runtimeConfig.getOutdatedClientVersions();
-		if (outdatedClientVersions == null)
+		if (outdatedClientVersions != null && outdatedClientVersions.contains(RuneLiteProperties.getVersion()))
 		{
-			return false;
+			log.info("Client is outdated due to outdated client version: {}", RuneLiteProperties.getVersion());
+			return true;
 		}
 
-		return outdatedClientVersions.contains(RuneLiteProperties.getVersion());
+		String[] outdatedPluginVersions = runtimeConfig.getOutdatedPluginVersions();
+		if (outdatedPluginVersions != null)
+		{
+			var plugins = pluginManager.getPlugins()
+				.stream()
+				.map(p -> ExternalPluginManager.getDisplayData(p.getClass()))
+				.filter(Objects::nonNull)
+				.collect(Collectors.toList());
+			for (String outdatedPlugin : outdatedPluginVersions)
+			{
+				int i = outdatedPlugin.indexOf("==");
+				String name, ver;
+				if (i != -1)
+				{
+					name = outdatedPlugin.substring(0, i);
+					ver = outdatedPlugin.substring(i + 2);
+				}
+				else
+				{
+					name = outdatedPlugin;
+					ver = null;
+				}
+
+				if (plugins.stream()
+					.filter(p -> p.getInternalName().equals(name))
+					.filter(p -> ver == null || p.getVersion().equals(ver))
+					.findAny()
+					.isPresent())
+				{
+					log.info("Client is outdated due to outdated plugin: {}", outdatedPlugin);
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 }

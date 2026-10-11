@@ -49,6 +49,9 @@ public class NaturalMouse {
             new Flow(FlowTemplates.random())
     );
 
+    private volatile MouseMotionFactory cachedFactory;
+    private volatile ActivityIntensity cachedIntensity;
+
     @Inject
     public NaturalMouse() {
         nature = new DefaultMouseMotionNature();
@@ -88,25 +91,33 @@ public class NaturalMouse {
     }
 
     public MouseMotionFactory getFactory() {
-        if (Rs2Antiban.getActivityIntensity() == ActivityIntensity.VERY_LOW) {
-            log.info("Creating average computer user motion factory");
-            return FactoryTemplates.createAverageComputerUserMotionFactory(nature);
-        } else if (Rs2Antiban.getActivityIntensity() == ActivityIntensity.LOW) {
-            log.info("Creating normal gamer motion factory");
-            return FactoryTemplates.createNormalGamerMotionFactory(nature);
-        } else if (Rs2Antiban.getActivityIntensity() == ActivityIntensity.MODERATE) {
-            log.info("Creating fast gamer motion factory");
-            return FactoryTemplates.createFastGamerMotionFactory(nature);
-        } else if (Rs2Antiban.getActivityIntensity() == ActivityIntensity.HIGH) {
-            log.info("Creating fast gamer motion factory");
-            return FactoryTemplates.createFastGamerMotionFactory(nature);
-        } else if (Rs2Antiban.getActivityIntensity() == ActivityIntensity.EXTREME) {
-            log.info("Creating super fast gamer motion factory");
-            return FactoryTemplates.createSuperFastGamerMotionFactory(nature);
-        } else {
-            log.info("Default: Creating super fast gamer motion factory");
-            return FactoryTemplates.createSuperFastGamerMotionFactory(nature);
+        ActivityIntensity intensity = Rs2Antiban.getActivityIntensity();
+        if (cachedFactory != null && intensity == cachedIntensity) {
+            return cachedFactory;
         }
+        MouseMotionFactory factory;
+        if (intensity == ActivityIntensity.VERY_LOW) {
+            log.debug("Creating average computer user motion factory");
+            factory = FactoryTemplates.createAverageComputerUserMotionFactory(nature);
+        } else if (intensity == ActivityIntensity.LOW) {
+            log.debug("Creating normal gamer motion factory");
+            factory = FactoryTemplates.createNormalGamerMotionFactory(nature);
+        } else if (intensity == ActivityIntensity.MODERATE) {
+            log.debug("Creating fast gamer motion factory");
+            factory = FactoryTemplates.createFastGamerMotionFactory(nature);
+        } else if (intensity == ActivityIntensity.HIGH) {
+            log.debug("Creating fast gamer motion factory");
+            factory = FactoryTemplates.createFastGamerMotionFactory(nature);
+        } else if (intensity == ActivityIntensity.EXTREME) {
+            log.debug("Creating super fast gamer motion factory");
+            factory = FactoryTemplates.createSuperFastGamerMotionFactory(nature);
+        } else {
+            log.debug("Default: Creating super fast gamer motion factory");
+            factory = FactoryTemplates.createSuperFastGamerMotionFactory(nature);
+        }
+        cachedIntensity = intensity;
+        cachedFactory = factory;
+        return factory;
 
 //		var factory = new MouseMotionFactory();
 //		factory.setNature(nature);
@@ -143,17 +154,28 @@ public class NaturalMouse {
      *                         0.0 and 0.99; use values representing a whole percentage (e.g., 25.0, 50.0).
      */
     public void moveOffScreen(double chancePercentage) {
-        if (chancePercentage >= 100 || Rs2Random.dicePercentage(chancePercentage)) {
-            // Move off screen if the chance is met
-            int horizontal = random.nextBoolean() ? -1 : client.getCanvasWidth() + 1;
-            int vertical = random.nextBoolean() ? -1 : client.getCanvasHeight() + 1;
+        if (chancePercentage < 100 && !Rs2Random.dicePercentage(chancePercentage)) {
+            return;
+        }
 
-            boolean exitHorizontally = random.nextBoolean();
-            if (exitHorizontally) {
-                moveTo(horizontal, random.nextInt(0, client.getCanvasHeight() + 1));
-            } else {
-                moveTo(random.nextInt(0, client.getCanvasWidth() + 1), vertical);
-            }
+        int horizontal = random.nextBoolean() ? -1 : client.getCanvasWidth() + 1;
+        int vertical = random.nextBoolean() ? -1 : client.getCanvasHeight() + 1;
+
+        boolean exitHorizontally = random.nextBoolean();
+        int targetX = exitHorizontally ? horizontal : random.nextInt(0, client.getCanvasWidth() + 1);
+        int targetY = exitHorizontally ? random.nextInt(0, client.getCanvasHeight() + 1) : vertical;
+
+        Runnable travelThenCross = () -> {
+            // MouseMotion clamps to the canvas, so this reaches the edge and the next call crosses.
+            move(targetX, targetY);
+            Microbot.getMouse().move(targetX, targetY);
+        };
+
+        // One task: moveTo is async on the client thread, where two calls would cross first.
+        if (Microbot.getClient().isClientThread()) {
+            executorService.submit(travelThenCross);
+        } else {
+            travelThenCross.run();
         }
     }
 

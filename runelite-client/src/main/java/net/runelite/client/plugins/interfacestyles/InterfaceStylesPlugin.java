@@ -160,7 +160,7 @@ public class InterfaceStylesPlugin extends Plugin
 			MenuAction type = menuEntry.getType();
 
 			Player player = menuEntry.getPlayer();
-			if (player != null && type != MenuAction.ITEM_USE_ON_PLAYER && type != MenuAction.WIDGET_TARGET_ON_PLAYER)
+			if (player != null && type != MenuAction.ITEM_USE_ON_PLAYER && type != MenuAction.WIDGET_TARGET_ON_PLAYER && type != MenuAction.WALK)
 			{
 				String option = menuEntry.getOption();
 				boolean deprioritized = menuEntry.isDeprioritized();
@@ -169,7 +169,7 @@ public class InterfaceStylesPlugin extends Plugin
 				{
 					// Change this menu to be the submenu parent
 					menuEntry.setOption("");
-					menuEntry.setType(MenuAction.RUNELITE);
+					menuEntry.setType(MenuAction.RUNELITE_PLAYER);
 					menuEntry.setDeprioritized(false);
 					submenu = menuEntry.createSubMenu();
 
@@ -185,6 +185,7 @@ public class InterfaceStylesPlugin extends Plugin
 					.setType(type)
 					.setParam0(menuEntry.getParam0())
 					.setParam1(menuEntry.getParam1())
+					.setWorldViewId(menuEntry.getWorldViewId())
 					.setDeprioritized(deprioritized);
 				changed = true;
 			}
@@ -380,8 +381,12 @@ public class InterfaceStylesPlugin extends Plugin
 			}
 
 			Widget widget = client.getWidget(widgetOffset.getComponent());
+			if (widget == null)
+			{
+				continue;
+			}
 
-			if (widget != null)
+			if (widgetOffset.getSpriteId() == null || widgetOffset.getSpriteId() == widget.getSpriteId())
 			{
 				if (widgetOffset.getOffsetX() != null)
 				{

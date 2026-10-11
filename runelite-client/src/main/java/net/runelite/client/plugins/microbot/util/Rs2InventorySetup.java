@@ -1,21 +1,13 @@
 package net.runelite.client.plugins.microbot.util;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Optional;
-import java.util.Set;
-import java.util.function.Predicate;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
-import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.Client;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.inventorysetups.InventorySetup;
 import net.runelite.client.plugins.microbot.inventorysetups.InventorySetupsItem;
+import net.runelite.client.plugins.microbot.inventorysetups.InventorySetupsStackCompareID;
 import net.runelite.client.plugins.microbot.inventorysetups.MInventorySetupsPlugin;
 import net.runelite.client.plugins.microbot.util.bank.Rs2Bank;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
@@ -27,15 +19,17 @@ import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Potion;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
+import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import org.slf4j.event.Level;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.ScheduledFuture;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleep;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -46,6 +40,159 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
  * the correct items are equipped and in the inventory.
  */
 public class Rs2InventorySetup {
+
+    /**
+     * When {@code -Dmicrobot.bank.validateInventorySetup=true}, {@link #loadInventory()} logs warnings for stale preset
+     * ids, id/name drift, and impossible non-stackable quantities on a single row.
+     */
+    private static final String PROP_VALIDATE_INVENTORY_SETUP = "microbot.bank.validateInventorySetup";
+    /** Inventory setup value meaning any spellbook is acceptable. */
+    private static final int SPELLBOOK_ANY = 4;
+
+	/**
+	 * {@link Client#getItemDefinition(int)} is client-thread-only; inventory setup runs from script executor threads.
+	 */
+	private static ItemComposition getItemDefinitionThreadSafe(int id) {
+		Client c = Microbot.getClient();
+		if (c == null) {
+			return null;
+		}
+		if (c.isClientThread()) {
+			return c.getItemDefinition(id);
+		}
+		return Microbot.getClientThread().runOnClientThreadOptional(() -> c.getItemDefinition(id)).orElse(null);
+	}
+
+	/**
+	 * Non-fuzzy rows: use cache definition so stackables (runes, bolts, etc.) always use total-quantity math,
+	 * not "missing slot count" ({@code matchingRows - invStacks}), which blows up for duplicate rows or bad heuristics.
+	 */
+	private static boolean setupRowIsStackableByDefinition(InventorySetupsItem setupItem) {
+		if (setupItem == null || setupItem.isFuzzy()) {
+			return false;
+		}
+		int id = setupItem.getId();
+		if (id <= 0) {
+			return false;
+		}
+		ItemComposition comp = getItemDefinitionThreadSafe(id);
+		return comp != null && comp.isStackable();
+	}
+
+	/**
+	 * Matches {@link #calculateWithdrawQuantity}: stack total vs stack count for unslotted checks.
+	 */
+	private static boolean inventoryMatchUseStackQuantity(InventorySetupsItem groupRep, int groupSize, int desiredSum) {
+		assert groupRep != null;
+		if (groupSize != 1) {
+			return false;
+		}
+		if (setupRowIsStackableByDefinition(groupRep)) {
+			return true;
+		}
+		return desiredSum > 1;
+	}
+
+	/**
+	 * Inventory Setups "&lt;" stack indicator: UI only highlights when current qty is below the saved qty.
+	 * For automation, treat saved qty as a soft target — withdraw up to bank max and accept inv under target after load.
+	 */
+	private static boolean setupSoftMinStackTarget(InventorySetupsItem setupItem) {
+		if (setupItem == null) {
+			return false;
+		}
+		InventorySetupsStackCompareID sc = setupItem.getStackCompare();
+		return sc == InventorySetupsStackCompareID.Less_Than;
+	}
+
+	/**
+	 * Withdraw up to bank holdings when short; do not pause for less-than-preset totals. Applies to
+	 * {@link InventorySetupsStackCompareID#Less_Than} and {@link InventorySetupsStackCompareID#Standard} ({@code !=}).
+	 */
+	private static boolean setupWithdrawIgnoresExactBankTotal(InventorySetupsItem setupItem) {
+		if (setupItem == null) {
+			return false;
+		}
+		InventorySetupsStackCompareID sc = stackCompareOf(setupItem);
+		return sc == InventorySetupsStackCompareID.Less_Than || sc == InventorySetupsStackCompareID.Standard;
+	}
+
+	private static InventorySetupsStackCompareID stackCompareOf(InventorySetupsItem setupItem) {
+		if (setupItem == null || setupItem.getStackCompare() == null) {
+			return InventorySetupsStackCompareID.None;
+		}
+		return setupItem.getStackCompare();
+	}
+
+	/**
+	 * Slotted row: stack indicator from Inventory Setups (None / != / &lt; / &gt;).
+	 * <p>{@link InventorySetupsStackCompareID#Standard} ({@code !=}): automation only requires the correct item in the
+	 * slot, not a matching stack size (withdraw also uses partial-bank semantics).
+	 * {@link InventorySetupsStackCompareID#None}: exact quantity. {@link InventorySetupsStackCompareID#Less_Than}:
+	 * same presence-only qty check as Standard here.
+	 */
+	private static boolean inventorySlotQuantityMatchesPreset(int invQty, InventorySetupsItem setupItem) {
+		assert setupItem != null;
+		int need = setupItem.getQuantity();
+		switch (stackCompareOf(setupItem)) {
+			case None:
+				return invQty == need;
+			case Standard:
+			case Less_Than:
+				return true;
+			case Greater_Than:
+				if (need <= 0) {
+					return true;
+				}
+				return invQty > 0 && invQty <= need;
+			default:
+				return invQty >= need;
+		}
+	}
+
+	/**
+	 * Unslotted pooled check aligned with {@link InventorySetupsSlot#shouldHighlightSlotBasedOnStack}.
+	 */
+	private boolean unslottedInventorySatisfiesPreset(InventorySetupsItem setupItem, int withdrawQuantity, boolean useStackQuantity) {
+		assert setupItem != null;
+		if (withdrawQuantity <= 0) {
+			return true;
+		}
+		int invStack = Rs2Inventory.itemQuantity(setupItem.getName());
+		int invCount = Rs2Inventory.count(setupItem.getName(), false);
+		switch (stackCompareOf(setupItem)) {
+			case Less_Than:
+				return useStackQuantity ? invStack > 0 : invCount > 0;
+			case Standard:
+				if (useStackQuantity) {
+					return invStack > 0;
+				}
+				return invCount == withdrawQuantity;
+			case Greater_Than:
+				if (useStackQuantity) {
+					return invStack > 0 && invStack <= withdrawQuantity;
+				}
+				return invCount > 0 && invCount <= withdrawQuantity;
+			case None:
+				if (useStackQuantity) {
+					return invStack == withdrawQuantity;
+				}
+				return invCount == withdrawQuantity;
+			default:
+				return Rs2Inventory.hasItemAmount(setupItem.getName(), withdrawQuantity, useStackQuantity);
+		}
+	}
+
+	private static void addRuneLikePouchRows(List<InventorySetupsItem> out, List<InventorySetupsItem> pouch) {
+		if (pouch == null) {
+			return;
+		}
+		for (InventorySetupsItem x : pouch) {
+			if (x != null && x.getId() != -1 && x.getQuantity() > 0 && !InventorySetupsItem.itemIsDummy(x)) {
+				out.add(x);
+			}
+		}
+	}
 
     InventorySetup inventorySetup;
 
@@ -59,11 +206,10 @@ public class Rs2InventorySetup {
      */
     public Rs2InventorySetup(String name, ScheduledFuture<?> mainScheduler) {
         inventorySetup = MInventorySetupsPlugin.getInventorySetups().stream().filter(Objects::nonNull).filter(x -> x.getName().equalsIgnoreCase(name)).findFirst().orElse(null);
-        _mainScheduler = mainScheduler;
         if (inventorySetup == null) {
-            Microbot.showMessage("Inventory load with name " + name + " not found!", 10);
-			Microbot.pauseAllScripts.compareAndSet(false, true);
-        }
+			inventorySetup = MInventorySetupsPlugin.getInventorySetups().stream().filter(Objects::nonNull).filter(x -> x.getName().equals("default")).findFirst().orElse(null);
+		}
+		_mainScheduler = mainScheduler;
     }
 
     /**
@@ -100,14 +246,69 @@ public class Rs2InventorySetup {
         return _mainScheduler != null && _mainScheduler.isCancelled();
     }
 
+	/**
+	 * Level-aware structured lines: {@code [InventorySetup:<preset>] message} via {@link Microbot#log(Level, String, Object...)}.
+	 */
+	private void logSetup(Level level, String format, Object... args) {
+		String prefix = "[InventorySetup:" + (inventorySetup != null ? inventorySetup.getName() : "?") + "] ";
+		if (args == null || args.length == 0) {
+			Microbot.log(prefix + format, level);
+		} else {
+			Microbot.log(level, prefix + format, args);
+		}
+	}
+
+	/**
+	 * Total quantity in bank mirror for a preset row (id total, with lowercase name fallback when id total is 0).
+	 */
+	private static int bankQtyForPresetRow(InventorySetupsItem item, String lowerCaseName, boolean isFuzzy) {
+		assert item != null;
+		assert lowerCaseName != null;
+		if (isFuzzy) {
+			return Rs2Bank.count(lowerCaseName);
+		}
+		int byId = Rs2Bank.count(item.getId());
+		if (byId > 0) {
+			return byId;
+		}
+		return Rs2Bank.count(lowerCaseName, false);
+	}
+
     /**
      * Loads the inventory setup from the bank.
      *
      * @return true if the inventory matches the setup after loading, false otherwise.
      */
 	public boolean loadInventory() {
+		return loadInventory(true);
+	}
+
+	/**
+	 * @param skipIfAlreadyMatching when {@code true}, skip bank open when inventory already matches the setup,
+	 *                              there are no foreign items, and quantities are not over setup limits.
+	 */
+	public boolean loadInventory(boolean skipIfAlreadyMatching) {
+		if (inventorySetup == null) {
+			return false;
+		}
+
+		validateInventorySetupAgainstDefsIfEnabled();
+
+		Set<Integer> retainIds = computeSetupRetainItemIds();
+		Map<String, Boolean> fuzzy = computeSetupFuzzyKeepNames();
+		if (skipIfAlreadyMatching && doesInventoryMatch() && !needsDepositCleanupBeforeBanking(retainIds, fuzzy)) {
+			return true;
+		}
+
+		boolean bankWasOpen = Rs2Bank.isOpen();
+		int bankEpochBeforeOpen = Rs2Bank.getBankLiveEpoch();
 		Rs2Bank.openBank();
 		if (!Rs2Bank.isOpen()) {
+			return false;
+		}
+		if (!Rs2Bank.verifyBankMirrorAfterOpen(bankWasOpen, bankEpochBeforeOpen)) {
+			logSetup(Level.WARN, "bank mirror not ready after open (epoch before=%d after=%d) — abort load",
+					bankEpochBeforeOpen, Rs2Bank.getBankLiveEpoch());
 			return false;
 		}
 
@@ -115,39 +316,113 @@ public class Rs2InventorySetup {
             Rs2Bank.toggleAllLocks();
         }
 
-		Rs2Bank.depositAllExcept(itemsToNotDeposit());
+		if (Rs2Inventory.isFull()) {
+			int epochBeforeDeposit = Rs2Bank.getBankLiveEpoch();
+			if (!Rs2Bank.depositAll()) {
+				logSetup(Level.WARN, "depositAll failed while preparing inventory load");
+				return false;
+			}
+			if (!Rs2Bank.syncBankInventoryAfterChange(epochBeforeDeposit)) {
+				logSetup(Level.WARN, "bank sync timeout after depositAll while preparing inventory load");
+				return false;
+			}
+		} else if (needsDepositCleanupBeforeBanking(retainIds, fuzzy)) {
+			int epochBeforeDeposit = Rs2Bank.getBankLiveEpoch();
+			if (!Rs2Bank.depositAllExcept(retainIds, fuzzy)) {
+				logSetup(Level.WARN, "depositAllExcept failed while preparing inventory load");
+				return false;
+			}
+			if (!Rs2Bank.syncBankInventoryAfterChange(epochBeforeDeposit)) {
+				logSetup(Level.WARN, "bank sync timeout after depositAllExcept while preparing inventory load");
+				return false;
+			}
+		}
 
-        List<InventorySetupsItem> setupItems = inventorySetup.getInventory();
-        Map<Integer, List<InventorySetupsItem>> groupedByItems = inventorySetup.getInventory().stream()
-			.collect(Collectors.groupingBy(InventorySetupsItem::getId));
+		List<InventorySetupsItem> setupItems = inventorySetup.getInventory();
+		Set<String> toleratedShortfallKeys = new HashSet<>();
 
-		for (Map.Entry<Integer, List<InventorySetupsItem>> entry : groupedByItems.entrySet()) {
+		Set<String> withdrewInventoryGroups = new HashSet<>();
+		for (InventorySetupsItem item : setupItems) {
 			if (isMainSchedulerCancelled()) break;
-
-			InventorySetupsItem item = entry.getValue().get(0);
-			int key = entry.getKey();
-
 			if (InventorySetupsItem.itemIsDummy(item)) continue;
 
-			int withdrawQuantity = calculateWithdrawQuantity(entry.getValue(), item, key);
-			if (withdrawQuantity == 0) continue;
-
-			String lowerCaseName = item.getName().toLowerCase();
-
-			boolean isBarrowsItem = isBarrowsItem(lowerCaseName);
-			if (isBarrowsItem) {
-				item.setName(lowerCaseName.replaceAll("\\s+[1-9]\\d*$", ""));
+			String withdrawGroupKey = item.isFuzzy()
+				? "f:" + item.getName().toLowerCase(Locale.ROOT)
+				: "i:" + item.getId();
+			if (!withdrewInventoryGroups.add(withdrawGroupKey)) {
+				continue;
 			}
 
-			boolean exact = !item.isFuzzy();
+			List<InventorySetupsItem> matchingItems = setupItems.stream()
+				.filter(i -> i.matches(item))
+				.collect(Collectors.toList());
 
-			if (!Rs2Bank.hasBankItem(lowerCaseName, withdrawQuantity, exact)) {
+			int desiredWithdraw = calculateWithdrawQuantity(matchingItems, item);
+			if (desiredWithdraw == 0) continue;
+
+			Rs2ItemModel existingItem = new Rs2ItemModel(item.getId(), desiredWithdraw, desiredWithdraw);
+			boolean isNoted = existingItem.isNoted(); //for noted items, we also need to use the name of the hasBankItem method, or the unnoted id
+			String lowerCaseName = item.getName().toLowerCase();
+			boolean isFuzzy = item.isFuzzy();
+			Object identifier = isFuzzy ? lowerCaseName : item.getId();
+
+			boolean partialBankWithdraw = matchingItems.stream().anyMatch(Rs2InventorySetup::setupWithdrawIgnoresExactBankTotal);
+			boolean stackableRow = setupRowIsStackableByDefinition(item);
+			int bankAvail = bankQtyForPresetRow(item, lowerCaseName, isFuzzy);
+			int withdrawQuantity = partialBankWithdraw ? Math.min(desiredWithdraw, bankAvail) : desiredWithdraw;
+			int setupTotal = matchingItems.stream().mapToInt(InventorySetupsItem::getQuantity).sum();
+			int invQty = isFuzzy ? Rs2Inventory.itemQuantity(lowerCaseName) : Rs2Inventory.itemQuantity(item.getId());
+			boolean canTolerateShortfall = invQty > 0 && (partialBankWithdraw || stackableRow);
+
+			if (withdrawQuantity == 0 && desiredWithdraw > 0) {
+				// Stack-compare rows (!= / <) may proceed with partial inventory when bank cannot top up.
+				if (canTolerateShortfall) {
+					logSetup(Level.INFO,
+							"bank short but continuing %s: bank=%d inv=%d setup_total=%d missing=%d (partial stack mode)",
+							item.getName(), bankAvail, invQty, setupTotal, desiredWithdraw);
+					toleratedShortfallKeys.add(inventoryShortfallKey(item));
+					continue;
+				}
 				Microbot.pauseAllScripts.compareAndSet(false, true);
-				Microbot.log("Bank is missing the following item: " + item.getName(), Level.WARN);
+				logSetup(Level.WARN,
+						"bank short: %s | bank=%d | inv=%d | setup_total=%d | withdraw=%d (id=%d fuzzy=%b noted=%b)",
+						item.getName(), bankAvail, invQty, setupTotal, desiredWithdraw,
+						item.getId(), isFuzzy, isNoted);
+				return false;
+			}
+			if (withdrawQuantity == 0) {
+				continue;
+			}
+
+			if (partialBankWithdraw && withdrawQuantity < desiredWithdraw) {
+				logSetup(Level.INFO, "partial withdraw %s: take=%d wanted=%d (!= or < stack mode)",
+						item.getName(), withdrawQuantity, desiredWithdraw);
+			}
+
+			boolean hasBankItem = isFuzzy || isNoted
+				? Rs2Bank.hasBankItem((String) identifier, withdrawQuantity, false)
+				: Rs2Bank.hasBankItem((int) identifier, withdrawQuantity);
+			if (!hasBankItem && !isFuzzy && !isNoted) {
+				hasBankItem = Rs2Bank.hasBankItem(lowerCaseName, withdrawQuantity, false);
+			}
+
+			if (!hasBankItem) {
+				if (canTolerateShortfall) {
+					logSetup(Level.INFO,
+							"bank verify short but continuing %s: bank=%d inv=%d setup_total=%d missing=%d (partial stack mode)",
+							item.getName(), bankAvail, invQty, setupTotal, withdrawQuantity);
+					toleratedShortfallKeys.add(inventoryShortfallKey(item));
+					continue;
+				}
+				Microbot.pauseAllScripts.compareAndSet(false, true);
+				logSetup(Level.WARN,
+						"bank short: %s | bank=%d | inv=%d | setup_total=%d | withdraw=%d (id=%d fuzzy=%b noted=%b)",
+						item.getName(), bankAvail, invQty, setupTotal, withdrawQuantity,
+						item.getId(), isFuzzy, isNoted);
 				return false;
 			}
 
-			withdrawItem(item, withdrawQuantity);
+			withdrawItem(item, withdrawQuantity,isNoted);
 		}
 
 		List<InventorySetupsItem> itemsWithSlots = setupItems.stream()
@@ -165,7 +440,7 @@ public class Rs2InventorySetup {
 				));
 
 			if (!Rs2RunePouch.loadFromInventorySetup(inventorySetupRunes)) {
-				Microbot.log("Failed to load rune pouch.", Level.WARN);
+				logSetup(Level.WARN, "rune pouch load failed");
 				return false;
 			}
 		}
@@ -173,51 +448,286 @@ public class Rs2InventorySetup {
 		sleep(800, 1200);
 
         lockLockedItemsFromSetup(inventorySetup);
-
-		return doesInventoryMatch();
+		return doesInventoryMatch(toleratedShortfallKeys);
 	}
 
-    private static boolean isBarrowsItem(String lowerCaseName) {
-        boolean isBarrowsItem = !lowerCaseName.endsWith(" 0") &&  (lowerCaseName.contains("dharok's")
-                || lowerCaseName.contains("ahrim's")
-                || lowerCaseName.contains("guthan's")
-                || lowerCaseName.contains("torag's")
-                || lowerCaseName.contains("verac's")
-				|| lowerCaseName.contains("karil's"));
-        return isBarrowsItem;
-    }
+	private static String firstNonEmptyCompositionName(ItemComposition comp)
+	{
+		if (comp == null)
+		{
+			return null;
+		}
+		String a = comp.getMembersName();
+		String b = comp.getName();
+		if (a != null && !a.isEmpty())
+		{
+			return a;
+		}
+		if (b != null && !b.isEmpty())
+		{
+			return b;
+		}
+		return null;
+	}
+
+	private void validateInventorySetupAgainstDefsIfEnabled()
+	{
+		if (!Boolean.parseBoolean(System.getProperty(PROP_VALIDATE_INVENTORY_SETUP, "false")))
+		{
+			return;
+		}
+		if (inventorySetup == null)
+		{
+			return;
+		}
+		List<InventorySetupsItem> inv = inventorySetup.getInventory();
+		List<InventorySetupsItem> equip = inventorySetup.getEquipment();
+		List<InventorySetupsItem> all = new ArrayList<>();
+		if (inv != null)
+		{
+			all.addAll(inv);
+		}
+		if (equip != null)
+		{
+			all.addAll(equip);
+		}
+		if (inventorySetup.getAdditionalFilteredItems() != null)
+		{
+			all.addAll(inventorySetup.getAdditionalFilteredItems().values());
+		}
+		addRuneLikePouchRows(all, inventorySetup.getRune_pouch());
+		addRuneLikePouchRows(all, inventorySetup.getBoltPouch());
+		addRuneLikePouchRows(all, inventorySetup.getQuiver());
+
+		Set<Integer> loggedIdNameDrift = new HashSet<>();
+
+		for (InventorySetupsItem item : all)
+		{
+			if (item == null || InventorySetupsItem.itemIsDummy(item))
+			{
+				continue;
+			}
+			if (item.isFuzzy())
+			{
+				continue;
+			}
+			int id = item.getId();
+			if (id <= 0)
+			{
+				logSetup(Level.WARN, "validate: non-fuzzy row invalid id for \"%s\"", item.getName());
+				continue;
+			}
+			ItemComposition comp = getItemDefinitionThreadSafe(id);
+			if (comp == null)
+			{
+				logSetup(Level.WARN, "validate: no ItemComposition id=%d name=\"%s\"", id, item.getName());
+				continue;
+			}
+			String defName = firstNonEmptyCompositionName(comp);
+			String setupName = item.getName();
+			if (defName != null && setupName != null && loggedIdNameDrift.add(id)
+					&& !defName.equalsIgnoreCase(setupName)
+					&& !defName.toLowerCase(Locale.ROOT).contains(setupName.toLowerCase(Locale.ROOT))
+					&& !setupName.toLowerCase(Locale.ROOT).contains(defName.toLowerCase(Locale.ROOT)))
+			{
+				logSetup(Level.WARN, "validate: id/name drift id=%d setup=\"%s\" def=\"%s\"", id, setupName, defName);
+			}
+		}
+
+		if (inv == null)
+		{
+			return;
+		}
+
+		Set<Integer> warnedNonStackableQty = new HashSet<>();
+		for (InventorySetupsItem item : inv)
+		{
+			if (InventorySetupsItem.itemIsDummy(item) || item.isFuzzy())
+			{
+				continue;
+			}
+			List<InventorySetupsItem> matchingItems = inv.stream().filter(i -> i.matches(item)).collect(Collectors.toList());
+			int desiredQuantity = matchingItems.stream().mapToInt(InventorySetupsItem::getQuantity).sum();
+			if (matchingItems.size() != 1 || desiredQuantity <= 1)
+			{
+				continue;
+			}
+			int itemId = item.getId();
+			if (itemId <= 0)
+			{
+				continue;
+			}
+			ItemComposition comp = getItemDefinitionThreadSafe(itemId);
+			if (comp == null || comp.isStackable())
+			{
+				continue;
+			}
+			if (warnedNonStackableQty.add(itemId))
+			{
+				logSetup(Level.WARN,
+						"validate: non-stackable \"%s\" (id=%d) qty=%d on one row — split rows or use fuzzy",
+						item.getName(), itemId, desiredQuantity);
+			}
+		}
+	}
+
+	private List<InventorySetupsItem> allNonDummySetupItemsForDepositRules() {
+		List<InventorySetupsItem> out = new ArrayList<>();
+		if (inventorySetup == null) {
+			return out;
+		}
+		if (inventorySetup.getInventory() != null) {
+			for (InventorySetupsItem x : inventorySetup.getInventory()) {
+				if (x != null && !InventorySetupsItem.itemIsDummy(x)) {
+					out.add(x);
+				}
+			}
+		}
+		if (inventorySetup.getEquipment() != null) {
+			for (InventorySetupsItem x : inventorySetup.getEquipment()) {
+				if (x != null && !InventorySetupsItem.itemIsDummy(x)) {
+					out.add(x);
+				}
+			}
+		}
+		if (inventorySetup.getAdditionalFilteredItems() != null) {
+			for (InventorySetupsItem x : inventorySetup.getAdditionalFilteredItems().values()) {
+				if (x != null && !InventorySetupsItem.itemIsDummy(x)) {
+					out.add(x);
+				}
+			}
+		}
+		addRuneLikePouchRows(out, inventorySetup.getRune_pouch());
+		addRuneLikePouchRows(out, inventorySetup.getBoltPouch());
+		addRuneLikePouchRows(out, inventorySetup.getQuiver());
+		return out;
+	}
+
+	private Set<Integer> computeSetupRetainItemIds() {
+		Set<Integer> ids = new HashSet<>();
+		for (InventorySetupsItem item : allNonDummySetupItemsForDepositRules()) {
+			if (item.isFuzzy()) {
+				continue;
+			}
+			int id = item.getId();
+			if (id <= 0) {
+				continue;
+			}
+			ids.add(id);
+			ItemComposition comp = getItemDefinitionThreadSafe(id);
+			if (comp != null) {
+				int linked = comp.getLinkedNoteId();
+				if (linked > 0 && linked != id) {
+					ids.add(linked);
+				}
+			}
+		}
+		return ids;
+	}
+
+	private Map<String, Boolean> computeSetupFuzzyKeepNames() {
+		Map<String, Boolean> map = new LinkedHashMap<>();
+		for (InventorySetupsItem item : allNonDummySetupItemsForDepositRules()) {
+			String name = item.getName();
+			if (name == null || name.isEmpty()) {
+				continue;
+			}
+			map.merge(name, item.isFuzzy(), (a, b) -> a || b);
+		}
+		return map;
+	}
+
+	private boolean needsDepositCleanupBeforeBanking(Set<Integer> retainIds, Map<String, Boolean> fuzzy) {
+		if (retainIds == null || fuzzy == null) {
+			return true;
+		}
+
+		boolean foreign = Rs2Inventory.items()
+				.anyMatch(inv -> !Rs2Bank.isInventoryItemRetainedForSetupDeposit(inv, retainIds, fuzzy));
+		return foreign || inventoryExceedsSetupQuantities();
+	}
+
+	private boolean inventoryExceedsSetupQuantities() {
+		if (inventorySetup == null || inventorySetup.getInventory() == null) {
+			return false;
+		}
+		List<InventorySetupsItem> setupItems = inventorySetup.getInventory();
+		Set<String> seenGroup = new HashSet<>();
+		for (InventorySetupsItem item : setupItems) {
+			if (InventorySetupsItem.itemIsDummy(item)) {
+				continue;
+			}
+			String key = item.isFuzzy()
+					? "f:" + item.getName().toLowerCase(Locale.ROOT)
+					: "i:" + item.getId();
+			if (!seenGroup.add(key)) {
+				continue;
+			}
+			List<InventorySetupsItem> matching = setupItems.stream().filter(i -> i.matches(item)).collect(Collectors.toList());
+			int desiredQuantity = matching.stream().mapToInt(InventorySetupsItem::getQuantity).sum();
+			boolean isFuzzy = item.isFuzzy();
+			int itemId = item.getId();
+			String itemName = item.getName().toLowerCase(Locale.ROOT);
+			boolean singleStackRow = matching.size() == 1 && desiredQuantity > 1;
+			if (singleStackRow) {
+				int currentQuantity = isFuzzy ? Rs2Inventory.itemQuantity(itemName) : Rs2Inventory.itemQuantity(itemId);
+				boolean allowExcess = matching.stream().anyMatch(Rs2InventorySetup::setupWithdrawIgnoresExactBankTotal);
+				if (currentQuantity > desiredQuantity && !allowExcess) {
+					return true;
+				}
+			} else {
+				long alreadyPresent = isFuzzy
+						? Rs2Inventory.items(i -> i.getName().toLowerCase(Locale.ROOT).contains(itemName)).count()
+						: Rs2Inventory.items(i -> i.getId() == itemId).count();
+				if (alreadyPresent > matching.size()) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
 
     /**
      * Calculates the quantity of an item to withdraw based on the current inventory state.
      *
-     * @param items              List of items to consider.
-     * @param inventorySetupsItem The inventory setup item.
-     * @param key                The item ID.
+     * @param setupItems              List of items to consider.
+     * @param setupItem The inventory setup item.
      * @return The quantity to withdraw.
      */
-    private int calculateWithdrawQuantity(List<InventorySetupsItem> items, InventorySetupsItem inventorySetupsItem, int key) {
-        int withdrawQuantity;
-        if (items.size() == 1) {
-            Rs2ItemModel rs2Item = Rs2Inventory.get(key);
-            if (rs2Item != null && rs2Item.isStackable()) {
-                withdrawQuantity = inventorySetupsItem.getQuantity() - rs2Item.getQuantity();
-                if (Rs2Inventory.hasItemAmount(inventorySetupsItem.getName(), inventorySetupsItem.getQuantity())) {
-                    return 0;
-                }
-            } else {
-                withdrawQuantity = items.get(0).getQuantity();
-                if (Rs2Inventory.hasItemAmount(inventorySetupsItem.getName(), withdrawQuantity)) {
-                    return 0;
-                }
-            }
-        } else {
-            withdrawQuantity = items.size() - (int) Rs2Inventory.items(x -> x.getId() == key).count();
-            if (Rs2Inventory.hasItemAmount(inventorySetupsItem.getName(), items.size())) {
-                return 0;
-            }
-        }
-        return withdrawQuantity;
-    }
+	private int calculateWithdrawQuantity(List<InventorySetupsItem> setupItems, InventorySetupsItem setupItem) {
+		int itemId = setupItem.getId();
+		String itemName = setupItem.getName().toLowerCase(Locale.ROOT);
+		boolean isFuzzy = setupItem.isFuzzy();
+
+		int desiredQuantity = setupItems.stream()
+			.mapToInt(InventorySetupsItem::getQuantity)
+			.sum();
+
+		int currentQuantity = isFuzzy
+			? Rs2Inventory.itemQuantity(itemName)
+			: Rs2Inventory.itemQuantity(itemId);
+
+		if (currentQuantity >= desiredQuantity) {
+			return 0;
+		}
+
+		if (setupRowIsStackableByDefinition(setupItem)) {
+			return desiredQuantity - currentQuantity;
+		}
+
+		boolean legacyStackableHeuristic = (setupItems.size() == 1) && (desiredQuantity > 1);
+
+		if (!legacyStackableHeuristic) {
+			long alreadyPresent = isFuzzy
+				? Rs2Inventory.items(i -> i.getName().toLowerCase(Locale.ROOT).contains(itemName)).count()
+				: Rs2Inventory.items(i -> i.getId() == itemId).count();
+
+			int missing = setupItems.size() - (int) alreadyPresent;
+			return Math.max(missing, 0);
+		}
+
+		return desiredQuantity - currentQuantity;
+	}
 
     /**
      * Withdraws an item from the bank.
@@ -225,10 +735,13 @@ public class Rs2InventorySetup {
      * @param item     The item to withdraw.
      * @param quantity The quantity to withdraw.
      */
-    private void withdrawItem(InventorySetupsItem item, int quantity) {
-		boolean useName = item.isFuzzy();
+    private void withdrawItem(InventorySetupsItem item, int quantity,  boolean isNoted) {
+		boolean useName = item.isFuzzy() || isNoted; // when notded we must use the name to withdraw or we must use the unnoted id
 		Object identifier = useName ? item.getName().toLowerCase() : item.getId();
-
+		boolean isWithdrawAs= Rs2Bank.isWithdrawAs(isNoted);
+		if(!isWithdrawAs){
+			Rs2Bank.setWithdrawAs(isNoted);
+		}
 		if (quantity > 1) {
 			if (useName) {
 				Rs2Bank.withdrawX((String) identifier, quantity);
@@ -242,7 +755,8 @@ public class Rs2InventorySetup {
 				Rs2Bank.withdrawItem((int) identifier);
 			}
 		}
-		sleepUntil(() -> Rs2Inventory.hasItemAmount(item.getName(), item.getQuantity()));
+		// Using wait for inventory changes here makes sure the inventory is updated more reliably to avoid withdrawing excess items.
+		Rs2Inventory.waitForInventoryChanges(5000);
     }
 
     /**
@@ -251,17 +765,56 @@ public class Rs2InventorySetup {
      * @return true if the equipment matches the setup after loading, false otherwise.
      */
     public boolean loadEquipment() {
+        return loadEquipment(true);
+    }
+
+	/**
+	 * @param skipIfAlreadyMatching when {@code true}, skip bank if equipment matches and inventory needs no deposit cleanup.
+	 */
+	public boolean loadEquipment(boolean skipIfAlreadyMatching) {
+		if (inventorySetup == null) {
+			return false;
+		}
+
+		Set<Integer> retainIds = computeSetupRetainItemIds();
+		Map<String, Boolean> fuzzy = computeSetupFuzzyKeepNames();
+		if (skipIfAlreadyMatching && doesEquipmentMatch() && !needsDepositCleanupBeforeBanking(retainIds, fuzzy)) {
+			return true;
+		}
+
+		boolean bankWasOpen = Rs2Bank.isOpen();
+		int bankEpochBeforeOpen = Rs2Bank.getBankLiveEpoch();
         Rs2Bank.openBank();
         if (!Rs2Bank.isOpen()) {
             return false;
         }
+		if (!Rs2Bank.verifyBankMirrorAfterOpen(bankWasOpen, bankEpochBeforeOpen)) {
+			logSetup(Level.WARN, "bank mirror not ready after open (epoch before=%d after=%d) — abort equipment load",
+					bankEpochBeforeOpen, Rs2Bank.getBankLiveEpoch());
+			return false;
+		}
 
         //Clear inventory if full
         if (Rs2Inventory.isFull()) {
-            Rs2Bank.depositAll();
-        } else {
-            //only deposit the items we don't need
-            Rs2Bank.depositAllExcept(itemsToNotDeposit());
+            int epochBeforeDeposit = Rs2Bank.getBankLiveEpoch();
+            if (!Rs2Bank.depositAll()) {
+				logSetup(Level.WARN, "depositAll failed while preparing equipment load");
+				return false;
+            }
+            if (!Rs2Bank.syncBankInventoryAfterChange(epochBeforeDeposit)) {
+				logSetup(Level.WARN, "bank sync timeout after depositAll while preparing equipment load");
+				return false;
+            }
+        } else if (needsDepositCleanupBeforeBanking(retainIds, fuzzy)) {
+            int epochBeforeDeposit = Rs2Bank.getBankLiveEpoch();
+            if (!Rs2Bank.depositAllExcept(retainIds, fuzzy)) {
+				logSetup(Level.WARN, "depositAllExcept failed while preparing equipment load");
+				return false;
+            }
+            if (!Rs2Bank.syncBankInventoryAfterChange(epochBeforeDeposit)) {
+				logSetup(Level.WARN, "bank sync timeout after depositAllExcept while preparing equipment load");
+				return false;
+            }
         }
 
 
@@ -276,65 +829,72 @@ public class Rs2InventorySetup {
         );
 
         if (hasExtraGearEquipped) {
-            Microbot.log("Found Extra Gear that is not contained within the setup", Level.DEBUG);
+            logSetup(Level.DEBUG, "extra gear not in setup — deposit equipment");
             Rs2Bank.depositEquipment();
             sleepUntil(() -> Rs2Equipment.items().stream().noneMatch(Objects::nonNull));
         }
 
-        for (InventorySetupsItem inventorySetupsItem : inventorySetup.getEquipment()) {
-            if (isMainSchedulerCancelled()) break;
-            if (InventorySetupsItem.itemIsDummy(inventorySetupsItem)) continue;
+		for (InventorySetupsItem item : inventorySetup.getEquipment()) {
+			if (isMainSchedulerCancelled()) break;
+			if (InventorySetupsItem.itemIsDummy(item)) continue;
 
-            String lowerCaseName = inventorySetupsItem.getName().toLowerCase();
+			String lowerCaseName = item.getName().toLowerCase();
 
-            boolean isBarrowsItem = isBarrowsItem(lowerCaseName);
+			boolean isFuzzy = item.isFuzzy();
+			Object identifier = isFuzzy ? item.getName().toLowerCase() : item.getId();
 
-            if (isBarrowsItem) {
-                inventorySetupsItem.setName(lowerCaseName.replaceAll("\\s+[1-9]\\d*$", ""));
-            }
+			// Check if already equipped
+			if (Rs2Equipment.isWearing(item.getName())) continue;
 
-            if (inventorySetupsItem.isFuzzy()) {
-				if (Rs2Equipment.isWearing(inventorySetupsItem.getName()))
-					continue;
+			// Check in inventory
+			boolean inInventory = isFuzzy
+				? Rs2Inventory.hasItem((String) identifier) || Rs2Inventory.hasItemAmount((String) identifier, item.getQuantity())
+				: Rs2Inventory.hasItem((int) identifier) || Rs2Inventory.hasItemAmount((int) identifier, item.getQuantity());
 
-                if (Rs2Inventory.hasItem(inventorySetupsItem.getName()) || Rs2Inventory.hasItemAmount(inventorySetupsItem.getName(), (int) inventorySetup.getInventory().stream().filter(x -> x.getId() == inventorySetupsItem.getId()).count())) {
-                    Rs2Bank.wearItem(inventorySetupsItem.getName());
-                    continue;
-                }
+			// Check in bank (name fallback covers stale preset ids vs live bank row ids)
+			boolean inBank = isFuzzy
+				? Rs2Bank.hasItem((String) identifier) || Rs2Bank.hasBankItem((String) identifier, item.getQuantity(), false)
+				: Rs2Bank.hasItem((int) identifier) || Rs2Bank.hasBankItem((int) identifier, item.getQuantity());
+			if (!inBank && !isFuzzy) {
+				inBank = Rs2Bank.hasBankItem(lowerCaseName, item.getQuantity(), false);
+			}
 
-				if (!Rs2Bank.hasItem(inventorySetupsItem.getName()) && !Rs2Inventory.hasItem(inventorySetupsItem.getName())){
-					Microbot.log("Missing "+inventorySetupsItem.getName() +"in the bank and inventory. Shutting down");
-					Microbot.pauseAllScripts.compareAndSet(false, true);
+			if (!inInventory && !inBank) {
+				int bankGear = bankQtyForPresetRow(item, lowerCaseName, isFuzzy);
+				int invGear = isFuzzy ? Rs2Inventory.itemQuantity((String) identifier) : Rs2Inventory.itemQuantity((int) identifier);
+				logSetup(Level.WARN,
+						"missing gear %s | bank=%d | inv=%d | need=%d — pausing",
+						item.getName(), bankGear, invGear, item.getQuantity());
+				Microbot.pauseAllScripts.compareAndSet(false, true);
+				continue;
+			}
+
+			if (inInventory) {
+				if (isFuzzy) {
+					Rs2Bank.wearItem((String) identifier);
+				} else {
+					Rs2Bank.wearItem((int) identifier);
 				}
+				sleepUntil(() -> Rs2Equipment.isWearing(item.getName()));
+				continue;
+			}
 
-                if (inventorySetupsItem.getQuantity() > 1) {
-                    Rs2Bank.withdrawAllAndEquip(inventorySetupsItem.getName());
-                } else {
-                    Rs2Bank.withdrawAndEquip(inventorySetupsItem.getName());
-                }
-
-				sleepUntil(() -> Rs2Equipment.isWearing(inventorySetupsItem.getName()));
-            } else {
-                if (!Rs2Bank.hasItem(inventorySetupsItem.getName()) && !Rs2Inventory.hasItem(inventorySetupsItem.getName())){
-					Microbot.log("Missing "+inventorySetupsItem.getName() +"in the bank and inventory. Shutting down");
-					Microbot.pauseAllScripts.compareAndSet(false, true);
+			if (item.getQuantity() > 1) {
+				if (isFuzzy) {
+					Rs2Bank.withdrawXAndEquip((String) identifier, item.getQuantity());
+				} else {
+					Rs2Bank.withdrawXAndEquip((int) identifier, item.getQuantity());
 				}
+			} else {
+				if (isFuzzy) {
+					Rs2Bank.withdrawAndEquip((String) identifier);
+				} else {
+					Rs2Bank.withdrawAndEquip((int) identifier);
+				}
+			}
 
-                if (Rs2Inventory.hasItem(inventorySetupsItem.getName())) {
-                    Rs2Bank.wearItem(inventorySetupsItem.getName());
-					sleepUntil(() -> Rs2Equipment.isWearing(inventorySetupsItem.getName()));
-                    continue;
-                }
-
-                if (inventorySetupsItem.getQuantity() > 1) {
-                    Rs2Bank.withdrawAllAndEquip(inventorySetupsItem.getName());
-                } else {
-                    Rs2Bank.withdrawAndEquip(inventorySetupsItem.getName());
-                }
-
-				sleepUntil(() -> Rs2Equipment.isWearing(inventorySetupsItem.getName()));
-            }
-        }
+			sleepUntil(() -> Rs2Equipment.isWearing(item.getName()));
+		}
 
         sleep(800, 1200);
 
@@ -354,14 +914,53 @@ public class Rs2InventorySetup {
         return doesEquipmentMatch();
     }
 
-    /**
-     * Checks if the current inventory matches the setup defined in the inventory setup.
-     * It compares the quantity and stackability of items in the current inventory
-     * against the quantities required by the inventory setup.
-     *
-     * @return true if the inventory matches the setup, false otherwise.
-     */
+	/**
+	 * Normalizes names like {@code Prayer potion(4)} so dose-only differences still match strict slots.
+	 */
+	private static String inventorySetupBaseItemName(String name) {
+		if (name == null) {
+			return "";
+		}
+		return name.replaceAll("(?i)\\s*\\(\\d\\)\\s*$", "").trim().toLowerCase();
+	}
+
+	/**
+	 * True when the inventory item satisfies the setup row (fuzzy, exact id, or same base name with different dose id).
+	 */
+	private static boolean slotItemMatchesPreset(InventorySetupsItem setupItem, Rs2ItemModel invItem) {
+		assert setupItem != null;
+		assert invItem != null;
+		if (setupItem.isFuzzy()) {
+			return invItem.getName().toLowerCase().contains(setupItem.getName().toLowerCase());
+		}
+		if (invItem.getId() == setupItem.getId()) {
+			return true;
+		}
+		String baseSetup = inventorySetupBaseItemName(setupItem.getName());
+		String baseInv = inventorySetupBaseItemName(invItem.getName());
+		return !baseSetup.isEmpty() && baseSetup.equals(baseInv);
+	}
+
+	/**
+	 * Checks if the current inventory matches the setup defined in the inventory setup.
+	 * It compares the quantity and stackability of items in the current inventory
+	 * against the quantities required by the inventory setup.
+	 *
+	 * @return true if the inventory matches the setup, false otherwise.
+	 */
 	public boolean doesInventoryMatch() {
+		return doesInventoryMatch(Collections.emptySet());
+	}
+
+	private static String inventoryShortfallKey(InventorySetupsItem setupItem) {
+		assert setupItem != null;
+		if (setupItem.isFuzzy()) {
+			return "f:" + setupItem.getName().toLowerCase(Locale.ROOT);
+		}
+		return "i:" + setupItem.getId();
+	}
+
+	private boolean doesInventoryMatch(Set<String> toleratedShortfallKeys) {
 		if (inventorySetup == null || inventorySetup.getInventory() == null) {
 			return false;
 		}
@@ -375,13 +974,15 @@ public class Rs2InventorySetup {
 			InventorySetupsItem item = entry.getValue().get(0);
 			if (item.getId() == -1) continue;
 
+			int groupSize = entry.getValue().size();
+			int desiredSum = entry.getValue().stream().mapToInt(InventorySetupsItem::getQuantity).sum();
 			int withdrawQuantity;
-			boolean isStackable = false;
-			if (entry.getValue().size() == 1) {
+			boolean useStackQuantity = inventoryMatchUseStackQuantity(item, groupSize, desiredSum);
+
+			if (groupSize == 1) {
 				withdrawQuantity = item.getQuantity();
-				isStackable = withdrawQuantity > 1;
 			} else {
-				withdrawQuantity = entry.getValue().size();
+				withdrawQuantity = groupSize;
 			}
 
 			for (InventorySetupsItem setupItem : entry.getValue()) {
@@ -391,23 +992,36 @@ public class Rs2InventorySetup {
 					Rs2ItemModel invItem = Rs2Inventory.getItemInSlot(expectedSlot);
 
 					boolean itemDoesntExist = invItem == null;
-					boolean itemDoesntMatch = invItem != null && (setupItem.isFuzzy()
-						? !invItem.getName().toLowerCase().contains(setupItem.getName().toLowerCase())
-						: invItem.getId() != setupItem.getId());
+					boolean itemDoesntMatch = invItem != null && !slotItemMatchesPreset(setupItem, invItem);
 
 					if (itemDoesntExist || itemDoesntMatch) {
-						Microbot.log("Slot mismatch: expected " + setupItem.getName() + " in slot " + expectedSlot, Level.WARN);
+						int inSlotQty = invItem != null ? invItem.getQuantity() : 0;
+						logSetup(Level.WARN,
+								"slot mismatch: want %s x%d in slot %d%s | in_slot_qty=%d (wrong or empty slot)",
+								setupItem.getName(), setupItem.getQuantity(), expectedSlot,
+								invItem != null ? " found " + invItem.getName() : " empty",
+								inSlotQty);
 						found = false;
 						continue;
 					}
 
-					if (invItem.getQuantity() < setupItem.getQuantity()) {
-						Microbot.log("Wrong quantity in slot " + expectedSlot + " for " + setupItem.getName(), Level.WARN);
+					if (!inventorySlotQuantityMatchesPreset(invItem.getQuantity(), setupItem)) {
+						logSetup(Level.WARN, "wrong qty slot %d %s | inv=%d | need=%d | stack=%s",
+								expectedSlot, setupItem.getName(), invItem.getQuantity(), setupItem.getQuantity(),
+								stackCompareOf(setupItem));
 						found = false;
 					}
 				} else {
-					if (!Rs2Inventory.hasItemAmount(setupItem.getName(), withdrawQuantity, isStackable)) {
-						Microbot.log("Missing item: " + setupItem.getName() + " with amount " + setupItem.getQuantity(), Level.WARN);
+					if (!unslottedInventorySatisfiesPreset(setupItem, withdrawQuantity, useStackQuantity)) {
+						if (toleratedShortfallKeys.contains(inventoryShortfallKey(setupItem))) {
+							continue;
+						}
+						int invHave = useStackQuantity
+								? Rs2Inventory.itemQuantity(setupItem.getName())
+								: Rs2Inventory.count(setupItem.getName(), false);
+						logSetup(Level.WARN, "missing item: %s | inv=%d | need=%d (use_stack_qty=%b stack=%s)",
+								setupItem.getName(), invHave, withdrawQuantity, useStackQuantity,
+								stackCompareOf(setupItem));
 						found = false;
 					}
 				}
@@ -435,7 +1049,7 @@ public class Rs2InventorySetup {
 				));
 
 			if (!Rs2RunePouch.contains(requiredRunes, false)) {
-				Microbot.log("Rune pouch contents do not match expected setup.", Level.WARN);
+				logSetup(Level.WARN, "rune pouch contents do not match expected setup");
 				found = false;
 			}
 		}
@@ -450,22 +1064,29 @@ public class Rs2InventorySetup {
      * @return true if all equipment items match the setup, false otherwise.
      */
     public boolean doesEquipmentMatch() {
-        if(inventorySetup ==null || inventorySetup.getEquipment() == null) {
+        if (inventorySetup ==null || inventorySetup.getEquipment() == null) {
             return false;
         }
         for (InventorySetupsItem inventorySetupsItem : inventorySetup.getEquipment()) {
-            if (inventorySetupsItem.getId() == -1) continue;
-            if (inventorySetupsItem.isFuzzy() || isBarrowsItem(inventorySetupsItem.getName())) {
-                if (!Rs2Equipment.isWearing(inventorySetupsItem.getName(), false)) {
-                    Microbot.log("Missing item " + inventorySetupsItem.getName(), Level.WARN);
-                    return false;
-                }
-            } else {
-				if (!Rs2Equipment.isWearing(inventorySetupsItem.getName(), true)) {
-					Microbot.log("Missing item " + inventorySetupsItem.getName(), Level.WARN);
-					return false;
+            if (InventorySetupsItem.itemIsDummy(inventorySetupsItem)) continue;
+
+			boolean exact = !inventorySetupsItem.isFuzzy() && !InventorySetupsItem.isBarrowsItem(inventorySetupsItem.getName().toLowerCase());
+
+			if (!Rs2Equipment.isWearing(inventorySetupsItem.getName(), exact)) {
+				int needEq = Math.max(1, inventorySetupsItem.getQuantity());
+				boolean fuzzyEq = inventorySetupsItem.isFuzzy();
+				String lowEq = inventorySetupsItem.getName().toLowerCase(Locale.ROOT);
+				int invEq = fuzzyEq ? Rs2Inventory.itemQuantity(lowEq) : Rs2Inventory.itemQuantity(inventorySetupsItem.getId());
+				if (Rs2Bank.isOpen()) {
+					int bankEq = bankQtyForPresetRow(inventorySetupsItem, lowEq, fuzzyEq);
+					logSetup(Level.WARN, "missing equipment: %s | bank=%d | inv=%d | need=%d",
+							inventorySetupsItem.getName(), bankEq, invEq, needEq);
+				} else {
+					logSetup(Level.WARN, "missing equipment: %s | inv=%d | need=%d (bank closed)",
+							inventorySetupsItem.getName(), invEq, needEq);
 				}
-            }
+				return false;
+			}
         }
         return true;
     }
@@ -475,7 +1096,7 @@ public class Rs2InventorySetup {
      * @return A list of valid inventory items.
      */
     public List<InventorySetupsItem> getInventoryItems() {
-        return inventorySetup.getInventory().stream().filter(x -> x.getId() != -1).collect(Collectors.toList());
+        return inventorySetup.getInventory().stream().filter(x ->  x != null && x.getId() != -1).collect(Collectors.toList());
     }
 
     /**
@@ -484,7 +1105,7 @@ public class Rs2InventorySetup {
      * @return A list of valid equipment items.
      */
     public List<InventorySetupsItem> getEquipmentItems() {
-        return inventorySetup.getEquipment().stream().filter(x -> x.getId() != -1).collect(Collectors.toList());
+        return inventorySetup.getEquipment().stream().filter(x -> x != null && x.getId() != -1).collect(Collectors.toList());
     }
 
     /**
@@ -493,30 +1114,23 @@ public class Rs2InventorySetup {
      * @return A list of valid additional filtered items.
      */
     public List<InventorySetupsItem> getAdditionalItems() {
-        return inventorySetup.getAdditionalFilteredItems().values().stream().filter(x -> x.getId() != -1).collect(Collectors.toList());
+		if (inventorySetup.getAdditionalFilteredItems() == null) {
+			return Collections.emptyList();
+		}
+        return inventorySetup.getAdditionalFilteredItems().values().stream()
+				.filter(Objects::nonNull)
+				.filter(x -> x.getId() != -1)
+				.collect(Collectors.toList());
     }
 
     /**
-     * Creates a list of item names that should not be deposited into the bank.
-     * Combines items from both the inventory setup and the equipment setup.
+     * Names that should not be deposited (exact vs fuzzy), derived from inventory, equipment, additional items, and rune pouch.
+     * For automation, prefer {@link Rs2Bank#depositAllExcept(Set, Map)} with ids from non-fuzzy rows plus linked noted/unnoted ids.
      *
-     * @return A list of item names that should not be deposited.
+     * @return map suitable for {@link Rs2Bank#depositAllExcept(Map)}
      */
     public Map<String, Boolean> itemsToNotDeposit() {
-        List<InventorySetupsItem> inventorySetupItems = getInventoryItems();
-        List<InventorySetupsItem> equipmentSetupItems = getEquipmentItems();
-
-        List<InventorySetupsItem> combined = new ArrayList<>();
-
-        combined.addAll(inventorySetupItems);
-        combined.addAll(equipmentSetupItems);
-
-        return combined.stream()
-                .collect(Collectors.toMap(
-                        InventorySetupsItem::getName,
-                        InventorySetupsItem::isFuzzy,
-                        (existing, replacement) -> existing)
-                );
+        return new LinkedHashMap<>(computeSetupFuzzyKeepNames());
     }
 
     /**
@@ -525,7 +1139,11 @@ public class Rs2InventorySetup {
      * @return true if the current spellbook matches the setup, false otherwise.
      */
     public boolean hasSpellBook() {
-        return inventorySetup.getSpellBook() == Microbot.getVarbitValue(VarbitID.SPELLBOOK);
+		int setupBook = inventorySetup.getSpellBook();
+		if (setupBook == SPELLBOOK_ANY) {
+			return true;
+		}
+        return setupBook == Microbot.getVarbitValue(VarbitID.SPELLBOOK);
     }
 
 	/**
@@ -585,17 +1203,17 @@ public class Rs2InventorySetup {
 
 			if (itemToMove != null) {
 				int sourceSlot = itemToMove.getSlot();
-				Microbot.log("Moving " + itemToMove.getName() + " from slot " + sourceSlot + " to slot " + targetSlot, Level.DEBUG);
+				logSetup(Level.DEBUG, "moving %s from slot %d to slot %d", itemToMove.getName(), sourceSlot, targetSlot);
 
 				if (Rs2Inventory.moveItemToSlot(itemToMove, targetSlot)) {
 					Rs2Inventory.waitForInventoryChanges(2000);
 				}
 			} else {
-				Microbot.log("No available item found for " + setupItem.getName() + " to place in slot " + targetSlot, Level.DEBUG);
+				logSetup(Level.DEBUG, "no inv item for %s to place in slot %d", setupItem.getName(), targetSlot);
 			}
 		}
 
-		Microbot.log("Inventory sorting complete", Level.DEBUG);
+		logSetup(Level.DEBUG, "inventory sorting complete");
 	}
 
     /**
@@ -651,7 +1269,7 @@ public class Rs2InventorySetup {
 
 		if (additionalItems.isEmpty())
 		{
-			Microbot.log("No additional items to pre-pot.", Level.WARN);
+			logSetup(Level.WARN, "no additional items to pre-pot");
 			return false;
 		}
 
@@ -659,7 +1277,7 @@ public class Rs2InventorySetup {
 
 		if (Rs2Inventory.isFull())
 		{
-			Microbot.log("Inventory is full, temporarily storing items to make space", Level.INFO);
+			logSetup(Level.INFO, "inventory full — temporarily storing items for space");
 			Rs2Inventory.items()
 				.sorted(Comparator.comparing(Rs2ItemModel::isStackable))
 				.limit(3)
@@ -754,7 +1372,7 @@ public class Rs2InventorySetup {
 
 		if (!storedItems.isEmpty())
 		{
-			Microbot.log("Restoring temporarily stored items", Level.INFO);
+			logSetup(Level.INFO, "restoring temporarily stored items");
 
 			for (Rs2ItemModel storedItem : storedItems)
 			{
@@ -765,7 +1383,7 @@ public class Rs2InventorySetup {
 
 				if (Rs2Inventory.isFull())
 				{
-					Microbot.log("Inventory full, cannot restore all stored items", Level.WARN);
+					logSetup(Level.WARN, "inventory full — cannot restore all stored items");
 					return false;
 				}
 
@@ -793,7 +1411,7 @@ public class Rs2InventorySetup {
 	 */
 	private boolean handleChugBarrel() {
 		if (!Rs2Bank.hasItem(ItemID.MM_PREPOT_DEVICE)) {
-			Microbot.log("Chugging barrel found in Inventory Setup, but not in bank", Level.WARN);
+			logSetup(Level.WARN, "chug barrel in setup but not in bank");
 			return false;
 		}
 		Rs2Bank.withdrawItem(ItemID.MM_PREPOT_DEVICE);
@@ -917,7 +1535,7 @@ public class Rs2InventorySetup {
 			);
 
 		if (healingFood == null) {
-			Microbot.log("Unable to find highest healing food in bank", Level.WARN);
+			logSetup(Level.WARN, "no healing food found in bank");
 			return;
 		}
 
@@ -963,4 +1581,216 @@ public class Rs2InventorySetup {
 			.collect(Collectors.toList());
 		return prePot(boostingPotionNames);
 	}
+
+	/**
+	 * Detects items in the player's inventory that are not part of the inventory setup.
+	 * Optionally excludes teleportation items from detection.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from detection
+	 * @return List of items in inventory that are not in the setup
+	 */
+	public List<Rs2ItemModel> getItemsNotInInventorySetup(boolean excludeTeleportItems) {
+		if (inventorySetup == null || inventorySetup.getInventory() == null) {
+			return Rs2Inventory.all(); // Return all items if no setup defined
+		}
+
+		// Get all setup item IDs and names for comparison
+		Set<Integer> setupItemIds = inventorySetup.getInventory().stream()
+			.filter(item -> !InventorySetupsItem.itemIsDummy(item))
+			.map(InventorySetupsItem::getId)
+			.collect(Collectors.toSet());
+
+		Set<String> setupItemNames = inventorySetup.getInventory().stream()
+			.filter(item -> !InventorySetupsItem.itemIsDummy(item) && item.isFuzzy())
+			.map(item -> item.getName().toLowerCase())
+			.collect(Collectors.toSet());
+
+		return Rs2Inventory.all().stream()
+			.filter(item -> {
+				// Check if item is excluded due to teleport filter
+				if (excludeTeleportItems && Rs2Walker.isTeleportItem(item.getId())) {
+					return false;
+				}
+
+				// Check if item matches any setup item by ID
+				if (setupItemIds.contains(item.getId())) {
+					return false;
+				}
+
+				// Check if item matches any fuzzy setup item by name
+				String itemName = item.getName().toLowerCase();
+				for (String setupName : setupItemNames) {
+					if (itemName.contains(setupName)) {
+						return false;
+					}
+				}
+
+				return true; // Item is not in setup
+			})
+			.collect(Collectors.toList());
+	}
+
+	/**
+	 * Detects items in the player's equipment that are not part of the equipment setup.
+	 * Optionally excludes teleportation items from detection.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from detection
+	 * @return List of equipment items that are not in the setup
+	 */
+	public List<Rs2ItemModel> getEquipmentNotInSetup(boolean excludeTeleportItems) {
+		if (inventorySetup == null || inventorySetup.getEquipment() == null) {
+			return Rs2Equipment.all().collect(Collectors.toList()); // Return all equipment if no setup defined
+		}
+
+		// Get all setup equipment IDs and names for comparison
+		Set<Integer> setupEquipmentIds = inventorySetup.getEquipment().stream()
+			.filter(item -> !InventorySetupsItem.itemIsDummy(item))
+			.map(InventorySetupsItem::getId)
+			.collect(Collectors.toSet());
+
+		Set<String> setupEquipmentNames = inventorySetup.getEquipment().stream()
+			.filter(item -> !InventorySetupsItem.itemIsDummy(item) && item.isFuzzy())
+			.map(item -> item.getName().toLowerCase())
+			.collect(Collectors.toSet());
+
+		return Rs2Equipment.all()
+			.filter(Objects::nonNull)
+			.filter(item -> {
+				// Check if item is excluded due to teleport filter
+				if (excludeTeleportItems && Rs2Walker.isTeleportItem(item.getId())) {
+					return false;
+				}
+
+				// Check if item matches any setup item by ID
+				if (setupEquipmentIds.contains(item.getId())) {
+					return false;
+				}
+
+				// Check if item matches any fuzzy setup item by name
+				String itemName = item.getName().toLowerCase();
+				for (String setupName : setupEquipmentNames) {
+					if (itemName.contains(setupName)) {
+						return false;
+					}
+				}
+
+				return true; // Equipment is not in setup
+			})
+			.collect(Collectors.toList());
+	}
+
+	/**
+	 * Banks all items in the inventory that are not part of the inventory setup.
+	 * Optionally excludes teleportation items from banking.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from banking
+	 * @return true if banking was successful, false otherwise
+	 */
+	public boolean bankItemsNotInInventorySetup(boolean excludeTeleportItems) {
+		List<Rs2ItemModel> itemsToBank = getItemsNotInInventorySetup(excludeTeleportItems);
+		
+		if (itemsToBank.isEmpty()) {
+			logSetup(Level.DEBUG, "no inv items to bank — matches setup");
+			return true;
+		}
+
+		// Ensure bank is open
+		if (!Rs2Bank.isOpen()) {
+			logSetup(Level.WARN, "bank must be open to deposit inv items not in setup");
+			return false;
+		}
+
+		logSetup(Level.INFO, "banking %d inv items not in setup (teleport exclude=%s)",
+				itemsToBank.size(), excludeTeleportItems);
+
+		for (Rs2ItemModel item : itemsToBank) {
+			if (isMainSchedulerCancelled()) {
+				return false;
+			}
+
+			try {
+				logSetup(Level.DEBUG, "deposit inv not in setup: %s", item.getName());
+				Rs2Bank.depositAll(item.getId());
+				sleep(Rs2Random.between(200, 400));
+			} catch (Exception e) {
+				logSetup(Level.WARN, "deposit inv failed %s: %s", item.getName(), e.getMessage());
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Banks all equipped items that are not part of the equipment setup.
+	 * Optionally excludes teleportation items from banking.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from banking
+	 * @return true if banking was successful, false otherwise
+	 */
+	public boolean bankEquipmentNotInSetup(boolean excludeTeleportItems) {
+		List<Rs2ItemModel> equipmentToBank = getEquipmentNotInSetup(excludeTeleportItems);
+		
+		if (equipmentToBank.isEmpty()) {
+			logSetup(Level.DEBUG, "no equipment to bank — matches setup");
+			return true;
+		}
+
+		// Ensure bank is open
+		if (!Rs2Bank.isOpen()) {
+			logSetup(Level.WARN, "bank must be open to deposit equipment not in setup");
+			return false;
+		}
+
+		logSetup(Level.INFO, "banking %d equipment slots not in setup (teleport exclude=%s)",
+				equipmentToBank.size(), excludeTeleportItems);
+
+		for (Rs2ItemModel item : equipmentToBank) {
+			if (isMainSchedulerCancelled()) {
+				return false;
+			}
+
+			try {
+				logSetup(Level.DEBUG, "deposit equipment not in setup: %s", item.getName());
+				// Remove equipment first, then deposit
+				Rs2Equipment.unEquip(item.getId());
+				sleep(Rs2Random.between(300, 500));
+				if (Rs2Inventory.hasItem(item.getId())) {
+					Rs2Bank.depositAll(item.getId());
+					sleep(Rs2Random.between(200, 400));
+				}
+			} catch (Exception e) {
+				logSetup(Level.WARN, "deposit equipment failed %s: %s", item.getName(), e.getMessage());
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Banks all items (both inventory and equipment) that are not part of the setup.
+	 * Convenience method that calls both banking functions.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from banking
+	 * @return true if both inventory and equipment banking was successful, false otherwise
+	 */
+	public boolean bankAllItemsNotInSetup(boolean excludeTeleportItems) {
+		boolean inventorySuccess = bankItemsNotInInventorySetup(excludeTeleportItems);
+		boolean equipmentSuccess = bankEquipmentNotInSetup(excludeTeleportItems);
+		return inventorySuccess && equipmentSuccess;
+	}
+
+	/**
+	 * Checks if there are any items in inventory or equipment that are not part of the setup.
+	 * This is useful for validating if the current state matches the desired setup.
+	 * 
+	 * @param excludeTeleportItems Whether to exclude teleportation items from the check
+	 * @return true if there are items not in the setup, false if everything matches the setup
+	 */
+	public boolean hasNotInventorySetup(boolean excludeTeleportItems) {
+		List<Rs2ItemModel> inventoryNotInSetup = getItemsNotInInventorySetup(excludeTeleportItems);
+		List<Rs2ItemModel> equipmentNotInSetup = getEquipmentNotInSetup(excludeTeleportItems);
+		
+		return !inventoryNotInSetup.isEmpty() || !equipmentNotInSetup.isEmpty();
+	}
+
 }

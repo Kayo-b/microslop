@@ -196,7 +196,6 @@ public class TimersAndBuffsPluginTest
 		when(timersAndBuffsConfig.showStamina()).thenReturn(true);
 		when(client.getVarbitValue(VarbitID.STAMINA_ACTIVE)).thenReturn(1);
 		when(client.getVarbitValue(VarbitID.STAMINA_DURATION)).thenReturn(20);
-		when(client.getVarbitValue(VarbitID.STAMINA_DURATION_EXTRA)).thenReturn(0);
 
 		VarbitChanged varbitChanged = new VarbitChanged();
 		varbitChanged.setVarbitId(VarbitID.STAMINA_ACTIVE); // just has to be one of the vars
@@ -224,28 +223,29 @@ public class TimersAndBuffsPluginTest
 	}
 
 	@Test
-	public void testEndurance()
+	public void testFreezeTimerOldFormat()
 	{
-		when(timersAndBuffsConfig.showStamina()).thenReturn(true);
-		when(client.getVarbitValue(VarbitID.STAMINA_ACTIVE)).thenReturn(1);
-		when(client.getVarbitValue(VarbitID.STAMINA_DURATION)).thenReturn(20);
-		when(client.getVarbitValue(VarbitID.STAMINA_DURATION_EXTRA)).thenReturn(20);
-
-		VarbitChanged varbitChanged = new VarbitChanged();
-		varbitChanged.setVarbitId(VarbitID.STAMINA_ACTIVE); // just has to be one of the vars
-		timersAndBuffsPlugin.onVarbitChanged(varbitChanged);
+		when(timersAndBuffsConfig.showFreezes()).thenReturn(true);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "<col=ef1020>You have been frozen!</col>", "", 0);
+		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);
 		verify(infoBoxManager).addInfoBox(captor.capture());
 		TimerTimer infoBox = (TimerTimer) captor.getValue();
-		assertEquals(GameTimer.STAMINA, infoBox.getTimer());
-		assertEquals(Duration.ofMinutes(4), infoBox.getDuration());
+		assertEquals(GameTimer.ICEBARRAGE, infoBox.getTimer());
+	}
 
-		// unwield ring
-		when(client.getVarbitValue(VarbitID.STAMINA_DURATION_EXTRA)).thenReturn(0);
-		timersAndBuffsPlugin.onVarbitChanged(varbitChanged);
-		int mins = (int) infoBox.getDuration().toMinutes();
-		assertEquals(2, mins);
+	@Test
+	public void testFreezeTimerNewFormat()
+	{
+		when(timersAndBuffsConfig.showFreezes()).thenReturn(true);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_red@You have been frozen!</col>", "", 0);
+		timersAndBuffsPlugin.onChatMessage(chatMessage);
+
+		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);
+		verify(infoBoxManager).addInfoBox(captor.capture());
+		TimerTimer infoBox = (TimerTimer) captor.getValue();
+		assertEquals(GameTimer.ICEBARRAGE, infoBox.getTimer());
 	}
 
 	@Test
@@ -396,7 +396,7 @@ public class TimersAndBuffsPluginTest
 	{
 		when(timersAndBuffsConfig.showArceuus()).thenReturn(true);
 		when(client.getRealSkillLevel(Skill.MAGIC)).thenReturn(57);
-		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "<col=0000b2>Your defence against Arceuus magic has been strengthened.</col>", "", 0);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_blu@Your defence against Arceuus magic has been strengthened.</col>", "", 0);
 		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);
@@ -444,7 +444,7 @@ public class TimersAndBuffsPluginTest
 		when(timersAndBuffsConfig.showArceuus()).thenReturn(true);
 		when(client.getRealSkillLevel(Skill.MAGIC)).thenReturn(57);
 
-		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "<col=6800bf>Your thieving abilities have been enhanced.</col>", "", 0);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_pur@Your thieving abilities have been enhanced.</col>", "", 0);
 		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);
@@ -475,7 +475,7 @@ public class TimersAndBuffsPluginTest
 		when(timersAndBuffsConfig.showArceuus()).thenReturn(true);
 		when(client.getBoostedSkillLevel(Skill.MAGIC)).thenReturn(60);
 
-		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "<col=ef0083>You resurrect a greater zombified thrall.</col>", "", 0);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_mag@You resurrect a greater zombified thrall.</col>", "", 0);
 		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> ibcaptor = ArgumentCaptor.forClass(InfoBox.class);
@@ -506,21 +506,21 @@ public class TimersAndBuffsPluginTest
 	{
 		when(timersAndBuffsConfig.showArceuus()).thenReturn(true);
 		when(client.getRealSkillLevel(Skill.MAGIC)).thenReturn(61);
-		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "You have placed a Mark of Darkness upon yourself.</col>", "", 0);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_pur@You have placed a Mark of Darkness upon yourself.</col>", "", 0);
 		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);
 		verify(infoBoxManager).addInfoBox(captor.capture());
 		TimerTimer infoBox = (TimerTimer) captor.getValue();
 		assertEquals(GameTimer.MARK_OF_DARKNESS, infoBox.getTimer());
-		assertEquals(Duration.of(61, RSTimeUnit.GAME_TICKS), infoBox.getDuration());
+		assertEquals(Duration.of(183, RSTimeUnit.GAME_TICKS), infoBox.getDuration());
 	}
 
 	@Test
 	public void testMarkOfDarknessCooldown()
 	{
 		when(timersAndBuffsConfig.showArceuusCooldown()).thenReturn(true);
-		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "You have placed a Mark of Darkness upon yourself.</col>", "", 0);
+		ChatMessage chatMessage = new ChatMessage(null, ChatMessageType.GAMEMESSAGE, "", "@mes_hl_pur@You have placed a Mark of Darkness upon yourself.</col>", "", 0);
 		timersAndBuffsPlugin.onChatMessage(chatMessage);
 
 		ArgumentCaptor<InfoBox> captor = ArgumentCaptor.forClass(InfoBox.class);

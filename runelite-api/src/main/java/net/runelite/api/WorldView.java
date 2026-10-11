@@ -25,14 +25,17 @@
 package net.runelite.api;
 
 import javax.annotation.Nullable;
+import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.coords.WorldPoint;
+import org.intellij.lang.annotations.MagicConstant;
 
 public interface WorldView
 {
-	int TOPLEVEL = -1;
+	int TOPLEVEL = 0;
 
 	/**
 	 * Get the world view id
-	 * @return the id, or -1 if this is the top level worldview
+	 * @return the id
 	 */
 	int getId();
 
@@ -61,6 +64,12 @@ public interface WorldView
 	 * Gets all the WorldEntities in this view
 	 */
 	IndexedObjectSet<? extends WorldEntity> worldEntities();
+
+	/**
+	 * Get the worldviews of each worldentity in this worldview.
+	 * @return
+	 */
+	IndexedObjectSet<? extends WorldView> worldViews();
 
 	/**
 	 * Gets an array of tile collision data.
@@ -205,4 +214,46 @@ public interface WorldView
 	 * @return the map regions
 	 */
 	int[] getMapRegions();
+
+	/**
+	 * Test if this worldview contains the given point
+	 * @param point
+	 * @return
+	 */
+	boolean contains(WorldPoint point);
+
+	/**
+	 * Test if this worldview contains the given point
+	 * @param point
+	 * @return
+	 */
+	boolean contains(LocalPoint point);
+
+	/**
+	 * Returns a {@link Projection} to translate from this world view to the main world
+	 * @return
+	 */
+	@Nullable
+	Projection getMainWorldProjection();
+
+	/**
+	 * Returns a {@link Projection} to translate from this world view to the canvas
+	 * @return
+	 */
+	@Nullable
+	Projection getCanvasProjection();
+
+	/**
+	 * Returns how clicking on tiles should behave for this WorldView.
+	 *
+	 * @return one of {@link Constants#CLICK_ACTION_NONE}, {@link Constants#CLICK_ACTION_WALK}, {@link Constants#CLICK_ACTION_SET_HEADING}
+	 */
+	@MagicConstant(intValues = {Constants.CLICK_ACTION_NONE, Constants.CLICK_ACTION_WALK, Constants.CLICK_ACTION_SET_HEADING})
+	int getYellowClickAction();
+
+	/**
+	 * Gets the tile height at the given coordinates, interpolating the height from adjacent tiles.
+	 * @return
+	 */
+	int getTileHeight(int x, int y, int maplevel);
 }

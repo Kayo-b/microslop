@@ -36,6 +36,7 @@ import java.util.List;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import net.runelite.api.Actor;
 import net.runelite.api.Client;
 import net.runelite.api.DecorativeObject;
 import net.runelite.api.GameObject;
@@ -44,13 +45,13 @@ import net.runelite.api.GroundObject;
 import net.runelite.api.ItemLayer;
 import net.runelite.api.MainBufferProvider;
 import net.runelite.api.Model;
-import net.runelite.api.NPC;
 import net.runelite.api.Perspective;
-import net.runelite.api.Player;
 import net.runelite.api.Renderable;
 import net.runelite.api.RuneLiteObject;
+import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
+import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 
 @Singleton
@@ -521,10 +522,10 @@ public class ModelOutlineRenderer
 	 * @param vertexOrientation The orientation of the vertices.
 	 * @return Returns true if any of them are inside the clip area, otherwise false.
 	 */
-	private boolean projectVertices(Model model, int localX, int localY, int localZ, final int vertexOrientation)
+	private boolean projectVertices(WorldView wv, Model model, int localX, int localY, int localZ, final int vertexOrientation)
 	{
 		final int vertexCount = model.getVerticesCount();
-		Perspective.modelToCanvas(client,
+		Perspective.modelToCanvas(client, wv,
 			vertexCount,
 			localX, localY, localZ,
 			vertexOrientation,
@@ -894,7 +895,7 @@ public class ModelOutlineRenderer
 	 * @param outlineWidth The width of the outline
 	 * @param color The color of the outline
 	 */
-	private void drawModelOutline(Model model,
+	private void drawModelOutline(WorldView wv, Model model,
 		int localX, int localY, int localZ, int orientation,
 		int outlineWidth, Color color, int feather)
 	{
@@ -927,7 +928,7 @@ public class ModelOutlineRenderer
 		clipX2 = client.getViewportWidth() + clipX1;
 		clipY2 = client.getViewportHeight() + clipY1;
 
-		if (!projectVertices(model, localX, localY, localZ, orientation))
+		if (!projectVertices(wv, model, localX, localY, localZ, orientation))
 		{
 			// No vertex of the model is visible on the screen, so we can
 			// assume there are no parts of the model to outline.
@@ -980,25 +981,15 @@ public class ModelOutlineRenderer
 		}
 	}
 
-	public void drawOutline(NPC npc, int outlineWidth, Color color, int feather)
+	public void drawOutline(Actor actor, int outlineWidth, Color color, int feather)
 	{
-		LocalPoint lp = npc.getLocalLocation();
+		LocalPoint lp = actor.getLocalLocation();
 		if (lp != null)
 		{
-			drawModelOutline(npc.getModel(), lp.getX(), lp.getY(),
-				Perspective.getFootprintTileHeight(client, lp, client.getPlane(), npc.getComposition().getFootprintSize()),
-				npc.getCurrentOrientation(), outlineWidth, color, feather);
-		}
-	}
-
-	public void drawOutline(Player player, int outlineWidth, Color color, int feather)
-	{
-		LocalPoint lp = player.getLocalLocation();
-		if (lp != null)
-		{
-			drawModelOutline(player.getModel(), lp.getX(), lp.getY(),
-				Perspective.getFootprintTileHeight(client, lp, client.getPlane(), player.getFootprintSize()),
-				player.getCurrentOrientation(), outlineWidth, color, feather);
+			WorldView wv = actor.getWorldView();
+			drawModelOutline(wv, actor.getModel(), lp.getX(), lp.getY(),
+				Perspective.getFootprintTileHeight(client, lp, wv.getPlane(), actor.getFootprintSize()) - actor.getAnimationHeightOffset(),
+				actor.getCurrentOrientation(), outlineWidth, color, feather);
 		}
 	}
 
@@ -1010,7 +1001,7 @@ public class ModelOutlineRenderer
 			Model model = renderable instanceof Model ? (Model) renderable : renderable.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, gameObject.getX(), gameObject.getY(), gameObject.getZ(),
+				drawModelOutline(gameObject.getWorldView(), model, gameObject.getX(), gameObject.getY(), gameObject.getZ() - renderable.getAnimationHeightOffset(),
 					gameObject.getModelOrientation(), outlineWidth, color, feather);
 			}
 		}
@@ -1024,7 +1015,7 @@ public class ModelOutlineRenderer
 			Model model = renderable instanceof Model ? (Model) renderable : renderable.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, groundObject.getX(), groundObject.getY(), groundObject.getZ(),
+				drawModelOutline(groundObject.getWorldView(), model, groundObject.getX(), groundObject.getY(), groundObject.getZ() - renderable.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1038,7 +1029,7 @@ public class ModelOutlineRenderer
 			Model model = bottomRenderable instanceof Model ? (Model) bottomRenderable : bottomRenderable.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
+				drawModelOutline(itemLayer.getWorldView(), model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1049,7 +1040,7 @@ public class ModelOutlineRenderer
 			Model model = middleRenderable instanceof Model ? (Model) middleRenderable : middleRenderable.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
+				drawModelOutline(itemLayer.getWorldView(), model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1060,7 +1051,7 @@ public class ModelOutlineRenderer
 			Model model = topRenderable instanceof Model ? (Model) topRenderable : topRenderable.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
+				drawModelOutline(itemLayer.getWorldView(), model, itemLayer.getX(), itemLayer.getY(), itemLayer.getZ() - itemLayer.getHeight(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1074,10 +1065,10 @@ public class ModelOutlineRenderer
 			Model model = renderable1 instanceof Model ? (Model) renderable1 : renderable1.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model,
+				drawModelOutline(decorativeObject.getWorldView(), model,
 					decorativeObject.getX() + decorativeObject.getXOffset(),
 					decorativeObject.getY() + decorativeObject.getYOffset(),
-					decorativeObject.getZ(),
+					decorativeObject.getZ() - renderable1.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1089,7 +1080,10 @@ public class ModelOutlineRenderer
 			if (model != null)
 			{
 				// Offset is not used for the second model
-				drawModelOutline(model, decorativeObject.getX(), decorativeObject.getY(), decorativeObject.getZ(),
+				drawModelOutline(decorativeObject.getWorldView(), model,
+					decorativeObject.getX() + decorativeObject.getXOffset2(),
+					decorativeObject.getY() + decorativeObject.getYOffset2(),
+					decorativeObject.getZ() - renderable2.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1103,7 +1097,7 @@ public class ModelOutlineRenderer
 			Model model = renderable1 instanceof Model ? (Model) renderable1 : renderable1.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, wallObject.getX(), wallObject.getY(), wallObject.getZ(),
+				drawModelOutline(wallObject.getWorldView(), model, wallObject.getX(), wallObject.getY(), wallObject.getZ() - renderable1.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1114,7 +1108,7 @@ public class ModelOutlineRenderer
 			Model model = renderable2 instanceof Model ? (Model) renderable2 : renderable2.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, wallObject.getX(), wallObject.getY(), wallObject.getZ(),
+				drawModelOutline(wallObject.getWorldView(), model, wallObject.getX(), wallObject.getY(), wallObject.getZ() - renderable2.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1144,6 +1138,16 @@ public class ModelOutlineRenderer
 		}
 	}
 
+	public void drawOutline(ItemLayer layer, TileItem item, int outlineWidth, Color color, int feather)
+	{
+		Model model = item.getModel();
+		if (model != null)
+		{
+			drawModelOutline(layer.getWorldView(), model, layer.getX(), layer.getY(), layer.getZ() - layer.getHeight(),
+				0, outlineWidth, color, feather);
+		}
+	}
+
 	public void drawOutline(GraphicsObject graphicsObject, int outlineWidth, Color color, int feather)
 	{
 		LocalPoint lp = graphicsObject.getLocation();
@@ -1152,7 +1156,7 @@ public class ModelOutlineRenderer
 			Model model = graphicsObject.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, lp.getX(), lp.getY(), graphicsObject.getZ(),
+				drawModelOutline(graphicsObject.getWorldView(), model, lp.getX(), lp.getY(), graphicsObject.getZ() - graphicsObject.getAnimationHeightOffset(),
 					0, outlineWidth, color, feather);
 			}
 		}
@@ -1166,8 +1170,13 @@ public class ModelOutlineRenderer
 			Model model = runeLiteObject.getModel();
 			if (model != null)
 			{
-				drawModelOutline(model, lp.getX(), lp.getY(), runeLiteObject.getZ(),
-					runeLiteObject.getOrientation(), outlineWidth, color, feather);
+				int worldView = runeLiteObject.getWorldView();
+				WorldView wv = client.getWorldView(worldView);
+				if (wv != null)
+				{
+					drawModelOutline(wv, model, lp.getX(), lp.getY(), runeLiteObject.getZ(),
+						runeLiteObject.getOrientation(), outlineWidth, color, feather);
+				}
 			}
 		}
 	}

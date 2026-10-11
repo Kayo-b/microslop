@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# Runs Microbot from source (this checkout's branch) logged into a Jagex account character.
+#
+# The Jagex game session (JX_SESSION_ID) is the long-lived token Bolt keeps in its creds file
+# (~/.local/share/bolt-launcher/creds) after you sign in once through Bolt's window. Before each
+# launch this script re-reads that file, asks Jagex for the account's characters (the same call
+# Bolt makes on startup) and writes ~/.config/microbot-jx/session.env (mode 600). No Bolt window,
+# character dropdown or Play button is involved.
+#
+#   microbot-run              refresh the session, then start the client
+#   microbot-run --refresh    only refresh the session (exit 3: signed out / expired -> sign in with bolt-microbot)
+#   microbot-run --capture    fallback: copy the session from a RuneLite window Bolt launched
+#
+# MICROBOT_CHARACTER=<display name> picks the character when the account has several; otherwise
+# the previously used character is kept, or the first one is taken.
+set -euo pipefail
+SESSION_FILE="$HOME/.config/microbot-jx/session.env"
+BOLT_CREDS="${BOLT_CREDS:-$HOME/.local/share/bolt-launcher/creds}"
+
+refresh_session() {
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  umask 077
+  python3 - "$BOLT_CREDS" "$SESSION_FILE" <<'EOF'
+import json, os, re, sys, urllib.error, urllib.request
+creds_path, out_path = sys.argv[1], sys.argv[2]
+try:
+    creds = json.load(open(creds_path))
+except (OSError, ValueError):
+    sys.exit(f"No Bolt login in {creds_path}: sign in once with bolt-microbot.")
+if not creds:
+    sys.exit(f"No Bolt login in {creds_path}: sign in once with bolt-microbot.")
+session_id = creds[0]["session_id"]
+# Jagex's WAF rejects requests without a browser user agent (HTTP 403 "Security | Jagex").
+req = urllib.request.Request("https://auth.jagex.com/game-session/v1/accounts", headers={
+    "Authorization": f"Bearer {session_id}", "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"})
+try:
+    with urllib.request.urlopen(req, timeout=20) as r:
+        chars = json.load(r)
+except urllib.error.HTTPError as e:
+    if e.code in (401, 403):
+        print("Jagex session expired: sign in again with bolt-microbot (no need to press Play).", file=sys.stderr)
+        sys.exit(3)
+    sys.exit(f"Jagex character lookup failed: HTTP {e.code}")
+except OSError as e:
+    sys.exit(f"Jagex character lookup failed: {e}")
+if not chars:
+    sys.exit("The Jagex account has no characters.")
+wanted = os.environ.get("MICROBOT_CHARACTER", "").strip().lower()
+previous = ""
+try:
+    m = re.search(r'JX_CHARACTER_ID="([^"]*)"', open(out_path).read())
+    previous = m.group(1) if m else ""
+except OSError:
+    pass
+pick = next((c for c in chars if wanted and c.get("displayName", "").lower() == wanted), None)
+if wanted and not pick:
+    sys.exit(f"No character named {os.environ['MICROBOT_CHARACTER']!r} on this account: "
+             + ", ".join(c.get("displayName") or "(unnamed)" for c in chars))
+pick = pick or next((c for c in chars if c["accountId"] == previous), None) or chars[0]
+q = lambda v: '"' + str(v).replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`') + '"'
+with open(out_path, "w") as f:
+    f.write(f"export JX_SESSION_ID={q(session_id)}\nexport JX_CHARACTER_ID={q(pick['accountId'])}\n"
+            f"export JX_DISPLAY_NAME={q(pick.get('displayName') or '')}\n")
+os.chmod(out_path, 0o600)
+print(f"Jagex session ok; character: {pick.get('displayName') or '(unnamed)'} ({len(chars)} on the account)")
+EOF
+}
+
+case "${1:-}" in
+  --capture)
+    pid="$(pgrep -f 'net.runelite.client.RuneLite' | head -1 || true)"
+    [[ -n "$pid" ]] || { echo "Start RuneLite from Bolt first, then run --capture." >&2; exit 1; }
+    umask 077
+    tr '\0' '\n' < "/proc/$pid/environ" | grep -E '^JX_(SESSION_ID|CHARACTER_ID|DISPLAY_NAME)=' \
+      | sed 's/^/export /; s/=\(.*\)$/="\1"/' > "$SESSION_FILE"
+    echo "Saved Jagex session to $SESSION_FILE. Close that RuneLite window, then run microbot-run."
+    exit 0 ;;
+  --refresh)
+    refresh_session
+    exit 0 ;;
+esac
+
+# Without Bolt creds, a session saved earlier with --capture is used as is.
+if [[ -f "$BOLT_CREDS" ]]; then
+  refresh_session
+fi
+[[ -f "$SESSION_FILE" ]] || { echo "No saved session: sign in with bolt-microbot, then run microbot-run." >&2; exit 1; }
+# shellcheck disable=SC1090
+source "$SESSION_FILE"
+J17="$(mise where java@temurin-17)"
+cd "${MICROBOT_DIR:-$HOME/projects/Microbot_}"
+JAVA_HOME="$J17" exec ./gradlew :client:run --console=plain -Dorg.gradle.java.installations.paths="$J17"

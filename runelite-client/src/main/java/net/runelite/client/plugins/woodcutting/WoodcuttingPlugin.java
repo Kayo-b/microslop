@@ -313,7 +313,7 @@ public class WoodcuttingPlugin extends Plugin
 
 		if (msg.equals("There are no open, unpollinated flowers on this bush yet.")
 			|| msg.equals("The flowers on this bush have not yet opened enough to harvest pollen.")
-			|| msg.equals("<col=06600c>The bush is already fruiting and won't benefit from <col=06600c>any more pollen.</col>"))
+			|| msg.equals("@mes_hl_gre@The bush is already fruiting and won't benefit from any more pollen.</col>"))
 		{
 			if (activeFlowers.contains(lastInteractFlower))
 			{
@@ -563,6 +563,12 @@ public class WoodcuttingPlugin extends Plugin
 				case ObjectID.FARMING_REDWOOD_TREE_PATCH_1_4:
 				case ObjectID.FARMING_REDWOOD_TREE_PATCH_1_6:
 				case ObjectID.FARMING_REDWOOD_TREE_PATCH_1_8:
+
+				// sailing trees
+				case ObjectID.JATOBA_TREE_STUMP:
+				case ObjectID.CAMPHOR_TREE_UPDATE_STUMP:
+				case ObjectID.IRONWOOD_TREE_UPDATE_STUMP:
+				case ObjectID.ROSEWOOD_TREE_UPDATE_STUMP:
 				{
 					WorldPoint worldPoint = WorldPoint.fromCoord(locCoord);
 					GameObject gameObject = findObject(worldPoint);

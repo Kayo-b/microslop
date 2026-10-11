@@ -35,24 +35,23 @@ import joptsimple.*;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.api.Constants;
 import net.runelite.client.account.SessionManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.discord.DiscordService;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 import net.runelite.client.plugins.PluginManager;
+import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.MicrobotClientLoader;
-import net.runelite.client.plugins.microbot.sideloading.MicrobotPluginManager;
+import net.runelite.client.plugins.microbot.externalplugins.MicrobotPluginManager;
+import net.runelite.client.proxy.ProxyChecker;
 import net.runelite.client.ui.ClientUI;
 import net.runelite.client.ui.FatalErrorDialog;
 import net.runelite.client.ui.SplashScreen;
 import net.runelite.client.ui.overlay.OverlayManager;
-import net.runelite.client.ui.overlay.WidgetOverlay;
-import net.runelite.client.ui.overlay.tooltip.TooltipOverlay;
-import net.runelite.client.ui.overlay.worldmap.WorldMapOverlay;
 import net.runelite.client.util.OSType;
 import net.runelite.client.util.ReflectUtil;
+import net.runelite.client.util.CrashReportFormatter;
 import net.runelite.http.api.RuneLiteAPI;
 import okhttp3.Cache;
 import okhttp3.OkHttpClient;
@@ -61,20 +60,16 @@ import okhttp3.Response;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import javax.inject.Provider;
 import javax.inject.Singleton;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 import javax.swing.*;
-import java.applet.Applet;
 import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -98,7 +93,8 @@ public class RuneLiteDebug {
     public static final File DEFAULT_SESSION_FILE = new File(RUNELITE_DIR, "session");
 
     private static final int MAX_OKHTTP_CACHE_SIZE = 20 * 1024 * 1024; // 20mb
-    public static String USER_AGENT = "RuneLite/" + RuneLiteProperties.getVersion() + "-" + RuneLiteProperties.getCommit() + (RuneLiteProperties.isDirty() ? "+" : "");
+    public static String USER_AGENT = "RuneLite/" + RuneLiteProperties.getVersion();
+
 
     @Getter
     private static Injector injector;
@@ -131,12 +127,6 @@ public class RuneLiteDebug {
     private OverlayManager overlayManager;
 
     @Inject
-    private Provider<TooltipOverlay> tooltipOverlay;
-
-    @Inject
-    private Provider<WorldMapOverlay> worldMapOverlay;
-
-    @Inject
     @Nullable
     private Client client;
 
@@ -150,6 +140,8 @@ public class RuneLiteDebug {
 
     @Inject
     private MicrobotPluginManager microbotPluginManager;
+
+    public static List<Class<?>> pluginsToDebug = new ArrayList<>();
 
     public static void main(String[] args) throws Exception {
         Locale.setDefault(Locale.ENGLISH);
@@ -171,7 +163,6 @@ public class RuneLiteDebug {
 
         final ArgumentAcceptingOptionSpec<String> proxyInfo = parser.accepts("proxy", "Use a proxy server for your runelite session")
                 .withRequiredArg().ofType(String.class);
-        parser.accepts("proxy-type", "The Type of proxy: HTTP or SOCKS").withRequiredArg().ofType(String.class);
         final ArgumentAcceptingOptionSpec<File> sessionfile = parser.accepts("sessionfile", "Use a specified session file")
                 .withRequiredArg()
                 .withValuesConvertedBy(new ConfigFileConverter())
@@ -205,47 +196,6 @@ public class RuneLiteDebug {
             logger.setLevel(Level.DEBUG);
         }
 
-        //More information about java proxies can be found here
-        //https://docs.oracle.com/javase/8/docs/technotes/guides/net/proxies.html
-        //usage: -proxy=IP:PORT:USER:PASS -proxytype=SOCKS
-        //OR
-        //usage: -proxy=IP:PORT:USER:PASS -proxytype=HTTP
-        if (options.has("proxy")) {
-            String[] proxy = options.valueOf(proxyInfo).split(":");
-            boolean httpProxy = false;
-            boolean socksProxy = true; //default we take socks proxy
-            if (options.has("proxy-type")) {
-                socksProxy = options.valueOf("proxy-type").toString().equalsIgnoreCase("SOCKS");
-                httpProxy = options.valueOf("proxy-type").toString().equalsIgnoreCase("HTTP");
-            }
-
-            ClientUI.proxyMessage = (socksProxy ? "SOCKS" : "HTTP") + " Proxy with address " + options.valueOf(proxyInfo);
-
-            if (httpProxy && proxy.length >= 2) {
-                System.setProperty("http.proxyHost", proxy[0]);
-                System.setProperty("http.proxyPort", proxy[1]);
-            } else if (socksProxy && proxy.length >= 2) {
-                System.setProperty("socksProxyHost", proxy[0]);
-                System.setProperty("socksProxyPort", proxy[1]);
-            }
-
-            if (socksProxy && proxy.length >= 4) {
-                System.setProperty("java.net.socks.username", proxy[2]);
-                System.setProperty("java.net.socks.password", proxy[3]);
-
-                final String user = proxy[2];
-                final char[] pass = proxy[3].toCharArray();
-
-                Authenticator.setDefault(new Authenticator() {
-                    private final PasswordAuthentication auth = new PasswordAuthentication(user, pass);
-
-                    protected PasswordAuthentication getPasswordAuthentication() {
-                        return auth;
-                    }
-                });
-            }
-        }
-
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) ->
         {
             log.error("Uncaught exception:", throwable);
@@ -259,8 +209,20 @@ public class RuneLiteDebug {
         RuneLiteAPI.CLIENT = okHttpClient;
 
         SplashScreen.init();
+
+        if (options.has(proxyInfo)) {
+            String ip = ProxyChecker.getDetectedIp(okHttpClient);
+            if (ip.isEmpty()) {
+                Microbot.showMessage("Failed to detect external IP address, check your proxy settings. \n\n Make sure to use the format scheme://user:pass@host:port");
+                System.exit(1);
+            }
+
+            ClientUI.proxyMessage = "Proxy enabled (IP " + ip + ")";
+        }
+
         SplashScreen.stage(0, "Retrieving client", "");
 
+        boolean startupFailed = false;
         try {
             final RuntimeConfigLoader runtimeConfigLoader = new RuntimeConfigLoader(okHttpClient);
             final MicrobotClientLoader microbotClientLoader = new MicrobotClientLoader(okHttpClient, runtimeConfigLoader, (String) options.valueOf("jav_config"));
@@ -321,13 +283,29 @@ public class RuneLiteDebug {
             //This is done for a faster development cycle
 
         } catch (Exception e) {
+            startupFailed = true;
             log.error("Failure during startup", e);
+            final String crashSummary = CrashReportFormatter.summarize(e);
+            final String crashDetails = CrashReportFormatter.buildReport(e);
             SwingUtilities.invokeLater(() ->
-                    new FatalErrorDialog("RuneLite has encountered an unexpected error during startup.")
-                            .addHelpButtons()
-                            .open());
+                    {
+                        if (SplashScreen.isOpen())
+                        {
+                                SplashScreen.showError("RuneLite failed to start", crashSummary, crashDetails);
+                        }
+                        else
+                        {
+                                new FatalErrorDialog("RuneLite has encountered an unexpected error during startup.")
+                                        .setContent(crashDetails)
+                                        .addCopyButton("Copy error details")
+                                        .addHelpButtons()
+                                        .open();
+                        }
+                    });
         } finally {
-            SplashScreen.stop();
+            if (!startupFailed) {
+                SplashScreen.stop();
+            }
         }
     }
 
@@ -341,17 +319,18 @@ public class RuneLiteDebug {
         }
 
         setupSystemProps();
-        
-        // Start the applet
+
+        // Start the client
         copyJagexCache();
-        var applet = (Applet) client;
-        applet.setSize(Constants.GAME_FIXED_SIZE);
 
         System.setProperty("jagex.disableBouncyCastle", "true");
         System.setProperty("jagex.userhome", RUNELITE_DIR.getAbsolutePath());
 
-        applet.init();
-        applet.start();
+        if (isOutdated) {
+            throw new IllegalStateException("Client failed to load");
+        }
+
+        client.initialize();
         
         SplashScreen.stage(.57, null, "Loading configuration");
 
@@ -361,11 +340,13 @@ public class RuneLiteDebug {
         // Load user configuration
         configManager.load();
 
+		// Initialize MicrobotPluginManager after configManager is loaded
+		microbotPluginManager.init();
+
         // Update check requires ConfigManager to be ready before it runs
         Updater updater = injector.getInstance(Updater.class);
         updater.update(); // will exit if an update is in progress
 
-        microbotPluginManager.loadSideLoadPlugins();
         SplashScreen.stage(.70, null, "Finalizing configuration");
 
         // Plugins have provided their config, so set default config
@@ -388,25 +369,25 @@ public class RuneLiteDebug {
         eventBus.register(clientUI);
         eventBus.register(pluginManager);
         eventBus.register(externalPluginManager);
+		eventBus.register(microbotPluginManager);
         eventBus.register(overlayManager);
         eventBus.register(configManager);
         eventBus.register(discordService);
 
         if (!isOutdated) {
             // Add core overlays
-            WidgetOverlay.createOverlays(overlayManager, client).forEach(overlayManager::add);
-            overlayManager.add(worldMapOverlay.get());
-            overlayManager.add(tooltipOverlay.get());
+            overlayManager.init();
         }
 
         clientUI.show();
 
-        // This will initialize configuration
-        microbotPluginManager.loadCorePlugins(Arrays.asList("net.runelite.client.plugins.microbot", "net.runelite.client.plugins.banktags", "net.runelite.client.plugins.config", "net.runelite.client.plugins.cluescrolls",
-                "net.runelite.client.plugins.devtools", "net.runelite.client.plugins.stretchedmode", "net.runelite.client.plugins.gpu", "net.runelite.client.plugins.rsnhider"));
+        pluginManager.loadCoreRunelitePlugins();
 
-        // Start plugins later so we can already login
+        microbotPluginManager.loadCorePlugins(pluginsToDebug);
+
         pluginManager.startPlugins();
+
+        client.unblockStartup();
 
         if (telemetryClient != null) {
             telemetryClient.submitTelemetry();
@@ -456,19 +437,26 @@ public class RuneLiteDebug {
     }
 
     @VisibleForTesting
-    static OkHttpClient buildHttpClient(boolean insecureSkipTlsVerification) {
+    static OkHttpClient buildHttpClient(boolean insecureSkipTlsVerification)
+    {
         OkHttpClient.Builder builder = new OkHttpClient.Builder()
                 .pingInterval(30, TimeUnit.SECONDS)
                 .addInterceptor(chain ->
                 {
                     Request request = chain.request();
-                    if (request.header("User-Agent") != null) {
-                        return chain.proceed(request);
+                    String ua = request.header("User-Agent");
+                    if (ua == null)
+                    {
+                        ua = USER_AGENT;
+                    }
+                    else if (!ua.startsWith("RuneLite"))
+                    {
+                        ua = USER_AGENT + " " + ua;
                     }
 
                     Request userAgentRequest = request
                             .newBuilder()
-                            .header("User-Agent", USER_AGENT)
+                            .header("User-Agent", ua)
                             .build();
                     return chain.proceed(userAgentRequest);
                 })
@@ -478,7 +466,8 @@ public class RuneLiteDebug {
                 {
                     // This has to be a network interceptor so it gets hit before the cache tries to store stuff
                     Response res = chain.proceed(chain.request());
-                    if (res.code() >= 400 && "GET".equals(res.request().method())) {
+                    if (res.code() >= 400 && "GET".equals(res.request().method()))
+                    {
                         // if the request 404'd we don't want to cache it because its probably temporary
                         res = res.newBuilder()
                                 .header("Cache-Control", "no-store")
@@ -487,13 +476,19 @@ public class RuneLiteDebug {
                     return res;
                 });
 
-        try {
-            if (insecureSkipTlsVerification || RuneLiteProperties.isInsecureSkipTlsVerification()) {
+        try
+        {
+            if (insecureSkipTlsVerification || RuneLiteProperties.isInsecureSkipTlsVerification())
+            {
                 setupInsecureTrustManager(builder);
-            } else {
+            }
+            else
+            {
                 setupTrustManager(builder);
             }
-        } catch (KeyStoreException | KeyManagementException | NoSuchAlgorithmException e) {
+        }
+        catch (KeyStoreException | KeyManagementException | NoSuchAlgorithmException e)
+        {
             log.warn("error setting up trust manager", e);
         }
 

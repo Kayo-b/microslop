@@ -1,7 +1,5 @@
 package net.runelite.client.plugins.microbot.util.magic;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import net.runelite.api.*;
 import net.runelite.api.Point;
 import net.runelite.api.gameval.ItemID;
@@ -18,6 +16,7 @@ import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2RunePouch;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.magic.thralls.Rs2Thrall;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
@@ -33,12 +32,11 @@ import org.apache.commons.lang3.NotImplementedException;
 
 import java.awt.*;
 import java.awt.event.KeyEvent;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static net.runelite.api.Varbits.*;
 import static net.runelite.client.plugins.microbot.Microbot.log;
 import static net.runelite.client.plugins.microbot.util.Global.*;
 
@@ -58,6 +56,17 @@ public class Rs2Magic {
 
         checkedSpellBook = true;
         return true;
+    }
+
+    /**
+     * Determines if the player can cast the given spell by verifying the
+     * player's active spellbook and the availability of the required runes.
+     *
+     * @param spell the spell that needs to be checked for rune availability
+     * @return true if the player has the correct spellbook, high enough level and enough runes to cast the spell
+     */
+    public static boolean canCast(Spell spell) {
+        return spell.hasRequirements() && hasRequiredRunes(spell);
     }
 
     /**
@@ -94,10 +103,16 @@ public class Rs2Magic {
             Rs2Widget.clickWidget(14286852);
         }
 
-        Widget widget = Arrays.stream(Rs2Widget.getWidget(218, 3).getStaticChildren()).filter(x -> x.getSpriteId() == magicSpell.getSprite()).findFirst().orElse(null);
+        Widget spellbook = Rs2Widget.getWidget(218, 3);
+        if (spellbook == null || spellbook.getStaticChildren() == null) return false;
+        Widget widget = Arrays.stream(spellbook.getStaticChildren()).filter(x -> x.getSpriteId() == magicSpell.getSprite()).findFirst().orElse(null);
 
         return widget != null;
     }
+
+	public static boolean quickCanCast(Spell spell) {
+		return quickCanCast(spell.getMagicAction());
+	}
 
     /**
      * Checks if a specific spell can be cast without checking settings first
@@ -124,6 +139,14 @@ public class Rs2Magic {
     public static boolean quickCanCast(String spellName) {
         return quickCanCast(MagicAction.fromString(spellName));
     }
+
+	public static boolean cast(Spell spell) {
+		return cast(spell, "cast", 1);
+	}
+
+	public static boolean cast(Spell spell, String option, int identifier) {
+		return cast(spell.getMagicAction(), option, identifier);
+	}
     
     public static boolean cast(MagicAction magicSpell) {
         return cast(magicSpell, "cast", 1);
@@ -149,9 +172,41 @@ public class Rs2Magic {
         if (magicSpell.getWidgetId() == -1)
             throw new NotImplementedException("This spell has not been configured yet in the MagicAction.java class");
 
-        Microbot.doInvoke(new NewMenuEntry(option, -1, magicSpell.getWidgetId(), menuAction.getId(), identifier, -1, magicSpell.getName()), new Rectangle(Rs2Widget.getWidget(magicSpell.getWidgetId()).getBounds()));
+        Microbot.doInvoke(new NewMenuEntry()
+                .option(option)
+                .param0(-1)
+                .param1(magicSpell.getWidgetId())
+                .opcode(menuAction.getId())
+                .identifier(identifier)
+                .itemId(-1)
+                .target(magicSpell.getName())
+                ,
+                new Rectangle(Rs2Widget.getWidget(magicSpell.getWidgetId()).getBounds()));
         //Rs2Reflection.invokeMenu(-1, magicSpell.getWidgetId(), menuAction.getId(), 1, -1, "Cast", "<col=00ff00>" + magicSpell.getName() + "</col>", -1, -1);
         return true;
+    }
+
+	public static boolean quickCast(Spell spell) {
+		return quickCast(spell.getMagicAction());
+	}
+
+    /**
+     * Click a zero-rune spellbook action by its exact displayed name.
+     *
+     * <p>Home teleports exist on every spellbook but only the standard-book variant is represented by
+     * {@link MagicAction}. The active spellbook and cooldown are planner requirements; at execution time
+     * the exact visible widget is the authoritative capability check.</p>
+     */
+    public static boolean quickCast(String spellName) {
+        if (spellName == null || spellName.trim().isEmpty()) return false;
+
+        Microbot.status = "Casting " + spellName;
+        if (Rs2Tab.getCurrentTab() != InterfaceTab.MAGIC) {
+            Rs2Tab.switchToMagicTab();
+            if (!sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.MAGIC)) return false;
+        }
+
+        return Rs2Widget.clickWidget(spellName, Optional.of(218), 3, true);
     }
 
     public static boolean quickCast(MagicAction magicSpell) {
@@ -165,6 +220,10 @@ public class Rs2Magic {
         log("Unable to cast " + magicSpell.getName());
         return false;
     }
+
+	public static boolean castOn(Spell spell, Actor actor) {
+		return castOn(spell.getMagicAction(), actor);
+	}
 
     public static boolean castOn(MagicAction magicSpell, Actor actor) {
         if (actor == null) return false;
@@ -242,18 +301,12 @@ public class Rs2Magic {
 
     private static void highAlch(Rs2ItemModel item, int sleepMin, int sleepMax) {
         if (!setup()) return;
-
-        final Widget highAlch = Rs2Widget.findWidget(MagicAction.HIGH_LEVEL_ALCHEMY.getName());
-        if (highAlch.getSpriteId() != 41) return;
-        alch(highAlch, item, sleepMin, sleepMax);
+        alch(MagicAction.HIGH_LEVEL_ALCHEMY, item, sleepMin, sleepMax);
     }
 
     private static void lowAlch(Rs2ItemModel item, int sleepMin, int sleepMax) {
         if (!setup()) return;
-
-        Widget lowAlch = Rs2Widget.findWidget(MagicAction.LOW_LEVEL_ALCHEMY.getName());
-        if (lowAlch.getSpriteId() != 25) return;
-        alch(lowAlch, item, sleepMin, sleepMax);
+        alch(MagicAction.LOW_LEVEL_ALCHEMY, item, sleepMin, sleepMax);
     }
 
     private static void interact(Rs2ItemModel item, Point point, String info) {
@@ -266,12 +319,14 @@ public class Rs2Magic {
         }
     }
 
-    private static void alch(Widget alch, Rs2ItemModel item, int sleepMin, int sleepMax) {
-        if (alch == null) return;
-        Point point = new Point((int) alch.getBounds().getCenterX(), (int) alch.getBounds().getCenterY());
+    private static void alch(MagicAction magicSpell, Rs2ItemModel item, int sleepMin, int sleepMax) {
+        final Widget spellWidget = Rs2Widget.getWidget(magicSpell.getWidgetId());
+        if (spellWidget == null) return;
+
+        final Point point = new Point((int) spellWidget.getBounds().getCenterX(), (int) spellWidget.getBounds().getCenterY());
         sleepUntil(() -> Microbot.getClientThread().runOnClientThreadOptional(() -> Rs2Tab.getCurrentTab() == InterfaceTab.MAGIC).orElse(false), 5000);
         sleep(sleepMin, sleepMax);
-        Microbot.getMouse().click(point);
+        if (!cast(magicSpell)) return;
         sleepUntil(() -> Microbot.getClientThread().runOnClientThreadOptional(() -> Rs2Tab.getCurrentTab() == InterfaceTab.INVENTORY).orElse(false), 5000);
         sleep(sleepMin, sleepMax);
         interact(item, point, "Alching");
@@ -356,12 +411,11 @@ public class Rs2Magic {
     }
 
     public static boolean isShadowVeilActive() {
-        return Microbot.getVarbitValue(SHADOW_VEIL) == 1;
+        return Microbot.getVarbitValue(VarbitID.ARCEUUS_SHADOW_VEIL_ACTIVE) == 1;
     }
 
-	@Deprecated(since = "1.9.2", forRemoval = true)
     public static boolean isThrallActive() {
-        return (Microbot.getVarbitValue(RESURRECT_THRALL) == 1 || Microbot.getVarbitValue(RESURRECT_THRALL_COOLDOWN) == 1);
+        return Rs2Thrall.isActive();
     }
 
     private static final int ANCIENT_VARBIT_OFFSET = 10;
@@ -384,15 +438,11 @@ public class Rs2Magic {
     }
     
     public static Rs2Staff getRs2Staff(int itemID) {
-        return Stream.of(Rs2Staff.values())
-                .filter(staff -> staff.getItemID() == itemID)
-                .findAny().orElse(Rs2Staff.NONE);
+        return Rs2Staff.byItemId(itemID);
     }
 
     public static Rs2Tome getRs2Tome(int itemID) {
-        return Stream.of(Rs2Tome.values())
-                .filter(tome -> tome.getItemID() == itemID)
-                .findAny().orElse(Rs2Tome.NONE);
+        return Rs2Tome.byItemId(itemID);
     }
 
     public static List<Rs2Staff> findStavesByRunes(List<Runes> runes) {
@@ -410,8 +460,11 @@ public class Rs2Magic {
     }
 
     private static Map<Runes, Integer> addInventoryRunes(Map<Runes, Integer> runes) {
-        for (Runes rune : Runes.values()) {
-            runes.merge(rune, Rs2Inventory.itemQuantity(rune.getItemId()), Rs2Magic::limitSum);
+        for (Rs2ItemModel item : Rs2Inventory.all()) {
+            Runes rune = Runes.byItemId(item.getId());
+            if (rune != null) {
+                runes.merge(rune, item.getQuantity(), Rs2Magic::limitSum);
+            }
         }
         return runes;
     }
@@ -446,15 +499,14 @@ public class Rs2Magic {
     }
 
     private static Map<Runes, Integer> addComboRunes(Map<Runes, Integer> runes) {
-        runes.replaceAll((key, value) -> {
-            final Runes[] comboRunes = Runes.getComboRunes(key);
-            if (comboRunes.length == 0) return value;
-
-            final int comboQuantity = Arrays.stream(comboRunes)
-                    .map(rune -> runes.getOrDefault(rune, 0))
-                    .reduce(0, Rs2Magic::limitSum);
-            return limitSum(value, comboQuantity);
+        final Map<Runes, Integer> baseContributions = new HashMap<>();
+        runes.forEach((rune, quantity) -> {
+            for (Runes baseRune : rune.getBaseRunes()) {
+                baseContributions.merge(baseRune, quantity, Rs2Magic::limitSum);
+            }
         });
+        baseContributions.forEach((baseRune, quantity) ->
+                runes.merge(baseRune, quantity, Rs2Magic::limitSum));
         return runes;
     }
 
@@ -523,10 +575,11 @@ public class Rs2Magic {
         if (reqRunes.isEmpty()) return reqRunes;
 
         final Map<Runes, Integer> runes = getRunes(runeFilter);
-        reqRunes.replaceAll((key, value) -> Math.max(0,value-runes.getOrDefault(key, 0)));
-        reqRunes.keySet().removeIf(e -> reqRunes.get(e) <= 0);
+        final Map<Runes, Integer> diff = new HashMap<>(reqRunes);
+        diff.replaceAll((key, value) -> Math.max(0, value - runes.getOrDefault(key, 0)));
+        diff.keySet().removeIf(e -> diff.get(e) <= 0);
 
-        return reqRunes;
+        return diff;
     }
 
     public static Map<Runes, Integer> getMissingRunes(Map<Runes, Integer> reqRunes) {

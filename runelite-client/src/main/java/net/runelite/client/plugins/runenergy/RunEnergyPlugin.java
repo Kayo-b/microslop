@@ -173,7 +173,11 @@ public class RunEnergyPlugin extends Plugin
 			client.getLocalDestinationLocation() != null &&
 			prevLocalPlayerLocation.distanceTo(client.getLocalPlayer().getWorldLocation()) > 1;
 
-		prevLocalPlayerLocation = client.getLocalPlayer().getWorldLocation();
+		Player local =  client.getLocalPlayer();
+		if (local != null)
+		{
+			prevLocalPlayerLocation = local.getWorldLocation();
+		}
 	}
 
 	@Subscribe
@@ -268,7 +272,12 @@ public class RunEnergyPlugin extends Plugin
 	private void setRunOrbText(String text)
 	{
 		Widget runOrbText = client.getWidget(InterfaceID.Orbs.RUNENERGY_TEXT);
+		if (runOrbText != null)
+		{
+			runOrbText.setText(text);
+		}
 
+		runOrbText = client.getWidget(InterfaceID.OrbsNomap.RUNENERGY_TEXT);
 		if (runOrbText != null)
 		{
 			runOrbText.setText(text);

@@ -80,7 +80,8 @@ public enum DepositBoxLocation {
     WINTERTODT_CAMP(new WorldPoint(1636, 3948, 0)),
     WOODCUTTING_GUILD(new WorldPoint(1589, 3476, 0)),
     YANILLE(new WorldPoint(2611, 3088, 0)),
-    ZANARIS(new WorldPoint(2382, 4462, 0));
+    ZANARIS(new WorldPoint(2382, 4462, 0)),
+    SACRED_GROVE(new WorldPoint(3201, 2467, 0));
 
     private final WorldPoint worldPoint;
 
@@ -89,7 +90,11 @@ public enum DepositBoxLocation {
     }
     
     public boolean hasRequirements() {
-        boolean hasLineOfSight = Microbot.getClient().getLocalPlayer().getWorldArea().hasLineOfSightTo(Microbot.getClient().getTopLevelWorldView(), worldPoint);
+        boolean hasLineOfSight = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            Player localPlayer = Microbot.getClient().getLocalPlayer();
+            if (localPlayer == null) return false;
+            return localPlayer.getWorldArea().hasLineOfSightTo(Microbot.getClient().getTopLevelWorldView(), worldPoint);
+        }).orElse(false);
         switch (this) {
             case CRAFTING_GUILD:
                 boolean hasFaladorHardDiary = Microbot.getVarbitValue(Varbits.DIARY_FALADOR_HARD) == 1;
@@ -169,7 +174,7 @@ public enum DepositBoxLocation {
                 if (!isMember()) return false;
                 // Requires Lunar Diplomacy & Seal of passage OR Dream Mentor
                 if (Rs2Player.getQuestState(Quest.DREAM_MENTOR) != QuestState.FINISHED) {
-                    return Rs2Player.getQuestState(Quest.LUNAR_DIPLOMACY) == QuestState.FINISHED && Rs2Equipment.hasEquipped(ItemID.SEAL_OF_PASSAGE);
+                    return Rs2Player.getQuestState(Quest.LUNAR_DIPLOMACY) == QuestState.FINISHED && Rs2Equipment.isWearing(ItemID.SEAL_OF_PASSAGE);
                 } else {
                     return Rs2Player.getQuestState(Quest.DREAM_MENTOR) == QuestState.FINISHED;
                 }
@@ -226,6 +231,10 @@ public enum DepositBoxLocation {
                 if (!isMember()) return false;
                 // Requires Cabin Fever
                 return Rs2Player.getQuestState(Quest.CABIN_FEVER) == QuestState.FINISHED;
+            case SACRED_GROVE:
+                if (!isMember()) return false;
+                // Requires The Red Reef
+                return Rs2Player.getQuestState(Quest.THE_RED_REEF) == QuestState.FINISHED;
             case ARDOUGNE:
             case CATHERBY:
             case ETCETERIA:

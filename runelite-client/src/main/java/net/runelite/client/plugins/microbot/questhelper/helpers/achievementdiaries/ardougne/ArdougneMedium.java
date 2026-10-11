@@ -52,10 +52,7 @@ import net.runelite.client.plugins.microbot.questhelper.steps.*;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.api.gameval.ItemID;
-import net.runelite.api.gameval.NpcID;
-import net.runelite.api.gameval.ObjectID;
-import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.*;
 import net.runelite.client.game.FishingSpot;
 
 import java.util.ArrayList;
@@ -135,7 +132,7 @@ public class ArdougneMedium extends ComplexStateQuestHelper
 		doMedium.addStep(notPickMasterFarmer, pickMasterFarmerTask);
 
 		ibanUpgradeTask = new ConditionalStep(this, ibanUpgrade);
-		ibanUpgradeTask.addStep(ibanStaffU.alsoCheckBank(questBank), equipIban);
+		ibanUpgradeTask.addStep(ibanStaffU.alsoCheckBank(), equipIban);
 		doMedium.addStep(notIbanUpgrade, ibanUpgradeTask);
 
 		uniPenTask = new ConditionalStep(this, uniPen);
@@ -163,8 +160,8 @@ public class ArdougneMedium extends ComplexStateQuestHelper
 		notIbanUpgrade = new VarplayerRequirement(VarPlayerID.ARDOUNGE_ACHIEVEMENT_DIARY, false, 24);
 		notNecroTower = new VarplayerRequirement(VarPlayerID.ARDOUNGE_ACHIEVEMENT_DIARY, false, 25);
 
-		notCWBallon = new VarbitRequirement(2869, 1);
-		notCWBallon2 = new VarbitRequirement(2869, 0);
+		notCWBallon = new VarbitRequirement(VarbitID.ZEP_MULTI_CAST, 1);
+		notCWBallon2 = new VarbitRequirement(VarbitID.ZEP_MULTI_CAST, 0);
 		normalBook = new SpellbookRequirement(Spellbook.NORMAL);
 
 		combatGear = new ItemRequirement("Combat gear", -1, -1).isNotConsumed();
@@ -210,12 +207,12 @@ public class ArdougneMedium extends ComplexStateQuestHelper
 
 		grapUp = new ChatMessageRequirement(
 			inWall,
-			"<col=0040ff>Achievement Diary Stage Task - Current stage: 1.</col>"
+			"Achievement Diary Stage Task - Current stage: 1."
 		);
 		((ChatMessageRequirement) grapUp).setInvalidateRequirement(
 			new ChatMessageRequirement(
 				new Conditions(LogicType.NOR, inWall),
-				"<col=0040ff>Achievement Diary Stage Task - Current stage: 1.</col>"
+				"Achievement Diary Stage Task - Current stage: 1."
 			)
 		);
 

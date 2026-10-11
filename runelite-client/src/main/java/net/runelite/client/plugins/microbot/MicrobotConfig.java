@@ -17,15 +17,94 @@ public interface MicrobotConfig extends Config
 		name = "General",
 		description = "The overall global settings for microbot",
 		position = 0
-    )
+	)
 	String generalSection = "generalSection";
+
+	String keyDisableLevelUpInterface = "disableLevelUpInterface";
+	@ConfigItem(
+		keyName = keyDisableLevelUpInterface,
+		name = "Disable level-up interface",
+		description = "Automatically close the level-up interface when it appears",
+		position = 0,
+		section = generalSection
+	)
+	default boolean disableLevelUpInterface()
+	{
+		return true;
+	}
+
+	String keyDisableWorldSwitcherConfirmation = "disableWorldSwitcherConfirmation";
+	@ConfigItem(
+		keyName = keyDisableWorldSwitcherConfirmation,
+		name = "Disable world switcher confirmation",
+		description = "Automatically disable the world switcher confirmation prompt",
+		position = 1,
+		section = generalSection
+	)
+	default boolean disableWorldSwitcherConfirmation()
+	{
+		return true;
+	}
+
+	String keyHideRoofs = "hideRoofs";
+	@ConfigItem(
+		keyName = keyHideRoofs,
+		name = "Hide roofs",
+		description = "Automatically enable the hide roofs display setting",
+		position = 2,
+		section = generalSection
+	)
+	default boolean hideRoofs()
+	{
+		return true;
+	}
+
+	@ConfigSection(
+		name = "Movement",
+		description = "Movement and stamina settings. Plugins may override these, but any changes will be reflected here.",
+		position = 1,
+		closedByDefault = true
+	)
+	String movementSection = "movementSection";
+
+	String keyEnableAutoRunOn = "enableAutoRunOn";
+	@ConfigItem(
+		keyName = keyEnableAutoRunOn,
+		name = "Enable auto run",
+		description = "Automatically toggle run on when you have run energy",
+		position = 0,
+		section = movementSection
+	)
+	default boolean enableAutoRunOn()
+	{
+		return true;
+	}
+
+	String keyUseStaminaPotsIfNeeded = "useStaminaPotsIfNeeded";
+	@ConfigItem(
+		keyName = keyUseStaminaPotsIfNeeded,
+		name = "Use stamina potions",
+		description = "Automatically use stamina potions from inventory when run energy is low and the player is moving",
+		position = 1,
+		section = movementSection
+	)
+	default boolean useStaminaPotsIfNeeded()
+	{
+		return true;
+	}
 
 	@ConfigSection(
 		name = "Logging",
 		description = "Game chat logging configuration",
-		position = 1
+		position = 2
 	)
 	String loggingSection = "loggingSection";
+	@ConfigSection(
+			name = "Caching",
+			description = "Caching ingame data",
+			position = 3
+	)
+	String cacheSection = "cacheSection";
 
 	String keyEnableGameChatLogging = "enableGameChatLogging";
 	@ConfigItem(
@@ -80,6 +159,7 @@ public interface MicrobotConfig extends Config
 	}
 
 	String keyEnableMenuEntryLogging = "enableMenuEntryLogging";
+
 	@ConfigItem(
 			keyName = keyEnableMenuEntryLogging,
 			name = "Enable Menu Entry Logging",
@@ -126,4 +206,70 @@ public interface MicrobotConfig extends Config
 			return displayName;
 		}
     }
+
+	@ConfigItem(
+		keyName = "showCacheInfo",
+		name = "Show Cache Information",
+		description = "Display cache statistics and management button in overlays",
+		position = 2,
+		section = generalSection
+	)
+	default boolean showCacheInfo() {
+		return false;
+	}
+
+	String keyDisableTelemetry = "disableTelemetry";
+	@ConfigItem(
+		keyName = keyDisableTelemetry,
+		name = "Disable telemetry",
+		description = "Stop outbound calls to microbot.cloud (update check, random-fact splash, session ping, script error reports). " +
+				"Equivalent to launching with -Dmicrobot.disableTelemetry=true.",
+		position = 6,
+		section = generalSection
+	)
+	default boolean disableTelemetry() {
+		return false;
+	}
+
+	String keyDisableInputYielding = "disableInputYielding";
+	@ConfigItem(
+		keyName = keyDisableInputYielding,
+		name = "Disable input yielding",
+		description = "Stop scripts pausing when you use the real mouse or keyboard on the game canvas. " +
+				"Enabled by default; turn this off to opt into human-input yielding.",
+		position = 7,
+		section = generalSection
+	)
+	default boolean disableInputYielding()
+	{
+		return true;
+	}
+
+	String keyInputMotionThresholdPx = "inputMotionThresholdPx";
+	@ConfigItem(
+		keyName = keyInputMotionThresholdPx,
+		name = "Input yield: motion threshold",
+		description = "How far the real mouse must move, in pixels from where the bot last put it, before scripts yield. " +
+				"Lower reacts sooner and risks yielding on an accidental nudge.",
+		position = 8,
+		section = generalSection
+	)
+	default int inputMotionThresholdPx()
+	{
+		return 10;
+	}
+
+	String keyInputIdleResumeMs = "inputIdleResumeMs";
+	@ConfigItem(
+		keyName = keyInputIdleResumeMs,
+		name = "Input yield: resume delay (ms)",
+		description = "How long the real mouse and keyboard must stay quiet before scripts resume. " +
+				"Never resumes while you are holding a button or key, whatever this is set to.",
+		position = 9,
+		section = generalSection
+	)
+	default int inputIdleResumeMs()
+	{
+		return 1800;
+	}
 }

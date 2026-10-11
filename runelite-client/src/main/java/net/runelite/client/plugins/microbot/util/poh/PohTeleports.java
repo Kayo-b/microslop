@@ -1,20 +1,24 @@
 package net.runelite.client.plugins.microbot.util.poh;
 
-import net.runelite.api.NullObjectID;
-import net.runelite.api.ObjectID;
+import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.GameObject;
+import net.runelite.api.Skill;
 import net.runelite.api.TileObject;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.equipment.JewelleryLocationEnum;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
-import net.runelite.client.plugins.microbot.util.poh.data.NexusTeleport;
+import net.runelite.client.plugins.microbot.util.poh.data.HouseLocation;
+import net.runelite.client.plugins.microbot.util.poh.data.JewelleryBoxType;
+import net.runelite.client.plugins.microbot.util.poh.data.NexusPortal;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
@@ -28,21 +32,24 @@ import static net.runelite.client.plugins.microbot.util.Global.sleepUntilTrue;
  * 2. add fortis colosseum location in jewelleryLocationEnum
  * 3. Add configuration to allow the user to choose between teleports in wilderness or not
  */
+@Slf4j
 public class PohTeleports {
 
     /**
      * Checks if the player is in their house
      * based on the purple portal and if the player is
      * in an instance
+     *
      * @return
      */
     public static boolean isInHouse() {
-        return Rs2Player.IsInInstance() && Rs2GameObject.findObjectById(ObjectID.PORTAL_4525) != null;
+        return PohPresence.isInHouse();
     }
 
     /**
      * Checks if a player is in their house
      * sends a microbot log if the player is not in their house
+     *
      * @return
      */
     public static boolean checkIsInHouse() {
@@ -54,6 +61,15 @@ public class PohTeleports {
     }
 
     /**
+     * Checks if the player has a house
+     *
+     * @return true if a house location is found
+     */
+    public static boolean hasHouse() {
+        return HouseLocation.getHouseLocation() != null;
+    }
+
+    /**
      * Interacts with the jewelllerybox in a players house
      * The reason we use JewelleryLocationEnum is because it contains all the data we need for
      * jewellery teleports, so there was no need to add a seperate jewellerybox enum for the locations
@@ -61,6 +77,7 @@ public class PohTeleports {
      * or has in his inventory
      * Teleport currently not added: Fortis Colosseum.
      * Requirements: Hero	12,000	Ability to teleport to the Colosseum via the ring of dueling
+     *
      * @return
      */
     public static boolean useJewelleryBox(JewelleryLocationEnum jewelleryLocationEnum) {
@@ -73,9 +90,7 @@ public class PohTeleports {
         if (!checkIsInHouse()) return false;
 
         if (getJewelleryBoxInterface() == null) {
-            final Integer[] ornateJewelleryBox = new Integer[] { NullObjectID.NULL_29154, NullObjectID.NULL_29155, NullObjectID.NULL_29156};
-            TileObject tileObject = Rs2GameObject.findObject(ornateJewelleryBox);
-            Rs2GameObject.interact(tileObject, "Teleport Menu");
+            Rs2GameObject.interact(JewelleryBoxType.getObject(), "Teleport Menu");
         }
 
         sleepUntil(() -> getJewelleryBoxInterface() != null);
@@ -85,15 +100,17 @@ public class PohTeleports {
 
     /**
      * Checks if the jewellerybox interface is open
+     *
      * @return
      */
     public static Widget getJewelleryBoxInterface() {
-        return Rs2Widget.getWidget(590, 0);
+        return Rs2Widget.getWidget(InterfaceID.POH_JEWELLERY_BOX, 0);
     }
 
     /**
      * Interact with the jewellerybox widget based on the
      * JewelleryLocationEnum destination description
+     *
      * @param jewelleryLocationEnum
      * @return
      */
@@ -103,6 +120,11 @@ public class PohTeleports {
         if (mainWidget == null) return false;
 
         Widget widget = Rs2Widget.findWidget(jewelleryLocationEnum.getDestination().toLowerCase(), Arrays.stream(mainWidget.getStaticChildren()).collect(Collectors.toList()));
+
+        if (widget == null) {
+            Microbot.log(jewelleryLocationEnum.getDestination() + " widget not found in jewellery box");
+            return false;
+        }
 
         boolean isTeleportDisabled = widget.getText().contains("<str>");
 
@@ -120,39 +142,41 @@ public class PohTeleports {
 
     /**
      * Will click on the nexus and interact with the widget
-     * @param nexusTeleport
+     *
+     * @param nexusPortal
      * @return
      */
-    public static boolean usePortalNexus(NexusTeleport nexusTeleport) {
+    public static boolean usePortalNexus(NexusPortal nexusPortal) {
         //TODO: Add config here to inform the user if the teleport is a wilderness teleport
+        GameObject portal = findPohObjectAnywhere(NexusPortal.PORTAL_IDS);
         if (getPortalNexusInterface() == null) {
-            List<Integer> portalNexuses = new ArrayList<>();
-            for (int i = ObjectID.PORTAL_NEXUS; i < ObjectID.PORTAL_NEXUS_33410; i++) {
-                portalNexuses.add(i);
+            if (portal != null) {
+                Rs2GameObject.interact(portal, "Teleport Menu");
+            } else {
+                log.warn("Portal nexus not found");
             }
-            TileObject tileObject = Rs2GameObject.findObject(portalNexuses.toArray(Integer[]::new));
-            Rs2GameObject.interact(tileObject, "Teleport Menu");
         }
 
         sleepUntil(() -> getPortalNexusInterface() != null);
 
-        return interactWithPortalNexusWidget(nexusTeleport);
+        return interactWithPortalNexusWidget(nexusPortal);
     }
 
     public static Widget getPortalNexusInterface() {
-        return Rs2Widget.getWidget(17, 0);
+        return Rs2Widget.getWidget(InterfaceID.TELENEXUS_TELEPORT, 0);
     }
 
     /**
      * Will interact with the portal nexus widget if it's open
-     * @param nexusTeleport
+     *
+     * @param nexusPortal
      * @return
      */
-    public static boolean interactWithPortalNexusWidget(NexusTeleport nexusTeleport) {
+    public static boolean interactWithPortalNexusWidget(NexusPortal nexusPortal) {
         Widget portalNexusWidget = getPortalNexusInterface();
         if (portalNexusWidget == null) return false;
 
-        Widget widget = Rs2Widget.findWidget(nexusTeleport.getText().toLowerCase(), Arrays.stream(portalNexusWidget.getStaticChildren()).collect(Collectors.toList()));
+        Widget widget = Rs2Widget.findWidget(nexusPortal.getText().toLowerCase(), Arrays.stream(portalNexusWidget.getStaticChildren()).collect(Collectors.toList()));
 
         if (widget == null) return false;
 
@@ -178,8 +202,73 @@ public class PohTeleports {
             Rs2Widget.enterWilderness();
         }
 
-        sleepUntil(() -> Rs2Player.getWorldLocation().distanceTo(nexusTeleport.getLocation()) < 10);
+        sleepUntil(() -> Rs2Player.getWorldLocation().distanceTo(nexusPortal.getLocation()) < 10);
 
         return true;
+    }
+
+    private static final List<Integer> POH_SPIRIT_RING_IDS = Rs2GameObject.getObjectIdsByName("poh_spirit_ring");
+    private static final Set<Integer> FAIRY_RING_IDS = fairyRingIds();
+    private static final Set<Integer> SPIRIT_TREE_IDS = spiritTreeIds();
+
+    private static Set<Integer> fairyRingIds() {
+        Set<Integer> ids = new LinkedHashSet<>(POH_SPIRIT_RING_IDS);
+        ids.addAll(Rs2GameObject.getObjectIdsByName("poh_fairy_ring"));
+        return ids;
+    }
+
+    private static Set<Integer> spiritTreeIds() {
+        Set<Integer> ids = new LinkedHashSet<>(POH_SPIRIT_RING_IDS);
+        ids.addAll(Rs2GameObject.getObjectIdsByName("poh_spirit_tree"));
+        return ids;
+    }
+
+    public static GameObject getFairyRings() {
+        return Rs2GameObject.getGameObject(PohTeleports::isFairyRing);
+    }
+
+    public static GameObject getSpiritTree() {
+        return Rs2GameObject.getGameObject(PohTeleports::isSpiritTree);
+    }
+
+    public static boolean isFairyRing(TileObject tileObject) {
+        return FAIRY_RING_IDS.contains(tileObject.getId());
+    }
+
+    public static boolean isSpiritTree(TileObject tileObject) {
+        return SPIRIT_TREE_IDS.contains(tileObject.getId());
+    }
+
+    /**
+     * Scans the entire loaded scene for any GameObject matching the given ids, bypassing the
+     * {@link Rs2Player#getWorldLocation()} anchor that breaks every Rs2GameObject search when
+     * the player is in a POH instance.
+     *
+     * <p>Inside a POH, {@code Rs2Player.getWorldLocation()} returns the overworld-template tile
+     * (e.g. (1877, 7052, 1)), which isn't present in the actual loaded scene grid, so any
+     * search routed through that anchor converts to a null LocalPoint and returns nothing
+     * even when the object is plainly visible. This helper walks the raw
+     * {@code Scene.getTiles()[][][]} structure directly on the client thread, which is always
+     * valid regardless of instance.</p>
+     */
+    private static GameObject findPohObjectAnywhere(Integer[] ids) {
+        java.util.Set<Integer> idSet = java.util.Arrays.stream(ids).collect(java.util.stream.Collectors.toSet());
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            net.runelite.api.Client client = Microbot.getClient();
+            if (client == null) return null;
+            net.runelite.api.Scene scene = client.getTopLevelWorldView().getScene();
+            net.runelite.api.Tile[][][] tiles = scene.getTiles();
+            for (net.runelite.api.Tile[][] plane : tiles) {
+                for (net.runelite.api.Tile[] row : plane) {
+                    for (net.runelite.api.Tile tile : row) {
+                        if (tile == null) continue;
+                        for (GameObject go : tile.getGameObjects()) {
+                            if (go != null && idSet.contains(go.getId())) return go;
+                        }
+                    }
+                }
+            }
+            return null;
+        }).orElse(null);
     }
 }

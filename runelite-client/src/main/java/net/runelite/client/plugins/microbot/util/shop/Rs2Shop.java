@@ -1,11 +1,13 @@
 package net.runelite.client.plugins.microbot.util.shop;
 
-import net.runelite.api.ItemComposition;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.MenuAction;
+import net.runelite.api.NPCComposition;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
@@ -15,16 +17,18 @@ import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static net.runelite.client.plugins.microbot.Microbot.updateItemContainer;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntilOnClientThread;
 
+@Slf4j
 public class Rs2Shop {
     public static final int SHOP_INVENTORY_ITEM_CONTAINER = 19660800;
     public static final int SHOP_CLOSE_BUTTON = 196960801;
-    public static List<Rs2ItemModel> shopItems = new ArrayList<Rs2ItemModel>();
+    public static volatile List<Rs2ItemModel> shopItems = new ArrayList<Rs2ItemModel>();
 
 
     /**
@@ -34,7 +38,7 @@ public class Rs2Shop {
         Microbot.status = "Closing Shop";
         if (!isOpen()) return;
         Rs2Widget.clickChildWidget(19660801, 11);
-        sleepUntilOnClientThread(() -> Rs2Widget.getWidget(19660800) == null);
+        sleepUntilOnClientThread(() -> !isOpen() );
     }
 
     /**
@@ -48,17 +52,24 @@ public class Rs2Shop {
     }
 
     /**
-     * Opens the shop
+     * Opens the shop interface by interacting with the specified NPC.
      *
-     * @return
+     * @param npcName The name of the shop NPC to interact with
+     * @param exact   Whether to match the name exactly or allow partial matches
+     * @return true if the shop is successfully opened, false otherwise.
      */
-    public static boolean openShop(String NPC, boolean exact) {
+    public static boolean openShop(String npcName, boolean exact) {
         Microbot.status = "Opening Shop";
         try {
             if (isOpen()) return true;
-            Rs2NpcModel npc = Rs2Npc.getNpc(NPC, exact);
-            if (npc == null) return false;
-            Rs2Npc.interact(npc, "Trade");
+            
+            Rs2NpcModel shopNpc = getNearestShopNpc(npcName, exact);
+            if (shopNpc == null) {
+                log.warn("No shop NPC found with name '{}' and Trade action", npcName);
+                return false;
+            }
+            
+            Rs2Npc.interact(shopNpc, "Trade");
             sleepUntil(Rs2Shop::isOpen, 5000);
             return true;
         } catch (Exception ex) {
@@ -72,26 +83,98 @@ public class Rs2Shop {
     }
 
     /**
+     * Finds the nearest shop NPC with the specified name and "Trade" action.
+     *
+     * @param npcName The name of the shop NPC to find
+     * @param exact   Whether to match the name exactly or allow partial matches
+     * @return The nearest shop NPC with "Trade" action, or null if not found
+     */
+    public static Rs2NpcModel getNearestShopNpc(String npcName, boolean exact) {
+        return Rs2Npc.getNpcs(npcName, exact)
+                .filter(npc -> {
+                    // Check if NPC has "Trade" action
+                    try {
+                        NPCComposition composition = npc.getComposition();
+                        if (composition == null) return false;
+                        
+                        String[] actions = composition.getActions();
+                        if (actions == null) return false;
+                        
+                        // Check both base and transformed compositions for "Trade" action
+                        boolean hasTradeAction = Arrays.stream(actions)
+                                .anyMatch(action -> action != null && action.equals("Trade"));
+                        
+                        // Also check transformed composition if available
+                        if (!hasTradeAction) {
+                            NPCComposition transformedComposition = npc.getTransformedComposition();
+                            if (transformedComposition != null && transformedComposition.getActions() != null) {
+                                hasTradeAction = Arrays.stream(transformedComposition.getActions())
+                                        .anyMatch(action -> action != null && action.equals("Trade"));
+                            }
+                        }
+                        
+                        return hasTradeAction;
+                    } catch (Exception e) {
+                        log.error("Error checking NPC actions for {}: {}", npc.getName(), e.getMessage());
+                        return false;
+                    }
+                })
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Finds the nearest shop NPC with the specified name and "Trade" action (partial name matching).
+     *
+     * @param npcName The name of the shop NPC to find
+     * @return The nearest shop NPC with "Trade" action, or null if not found
+     */
+    public static Rs2NpcModel getNearestShopNpc(String npcName) {
+        return getNearestShopNpc(npcName, false);
+    }
+
+    /**
      * Buy Item from the shop
      *
-     * @return
+     * @param itemName The name of the item to buy
+     * @param quantity The quantity to buy
+     * @return true if successful, false otherwise
      */
     public static boolean buyItem(String itemName, String quantity) {
         Microbot.status = "Buying " + quantity + " " + itemName;
         try {
             Rs2ItemModel rs2Item = shopItems.stream()
-                    .filter(item -> item.getName().equalsIgnoreCase(itemName))
+                    .filter(item -> item.getName().equalsIgnoreCase(itemName) && item.getQuantity() > 0)
                     .findFirst().orElse(null);
+            if (rs2Item == null) return false;
             String actionAndQuantity = "Buy " + quantity;
-            System.out.println(actionAndQuantity);
-            // Check if the item is in stock
-            if (hasStock(itemName)) {
-                System.out.println("We Have Stock of " + itemName);
-                invokeMenu(rs2Item, actionAndQuantity);
-            } else {
-                return false;
-            }
+            log.debug(actionAndQuantity);
+            log.debug("We Have Stock of {}", itemName);
+            invokeMenu(rs2Item, actionAndQuantity);
+        } catch (Exception ex) {
+            Microbot.logStackTrace("Rs2Shop", ex);
+        }
+        return true;
+    }
 
+    /**
+     * Buy Item from the shop
+     *
+     * @param itemId The ID of the item to buy
+     * @param quantity The quantity to buy
+     * @return true if successful, false otherwise
+     */
+    public static boolean buyItem(int itemId, String quantity) {
+        Microbot.status = "Buying " + quantity + " item with ID " + itemId;
+        try {
+            Rs2ItemModel rs2Item = shopItems.stream()
+                    .filter(item -> item.getId() == itemId && item.getQuantity() > 0)
+                    .findFirst().orElse(null);
+            if (rs2Item == null) return false;
+            String actionAndQuantity = "Buy " + quantity;
+            log.debug(actionAndQuantity);
+            log.debug("We Have Stock of item with ID {}", itemId);
+            invokeMenu(rs2Item, actionAndQuantity);
         } catch (Exception ex) {
             Microbot.logStackTrace("Rs2Shop", ex);
         }
@@ -122,7 +205,7 @@ public class Rs2Shop {
 
     /**
      * Checks if the shop is completely full
-     * 
+     *
      * @return
      */
     public static boolean isFull() {
@@ -138,14 +221,37 @@ public class Rs2Shop {
      */
     public static boolean hasStock(String itemName) {
         // Iterate through the shop items to find the specified item
+        log.debug("Checking if item {} is in stock in the shop", itemName);
+
+        // Check if the item ID matches the specified item ID
         for (Rs2ItemModel item : shopItems) {
-            // Check if the item name matches the specified item name
-            if (item.getName().equalsIgnoreCase(itemName)) {
-                // System.out.println(item.name + " is in stock. Quantity: " + item.quantity + ", Slot: " + item.getSlot());
+            if (item.getName().equalsIgnoreCase(itemName) && item.getQuantity() > 0) {
                 return true; // Item found in stock
             }
         }
-        System.out.println(itemName + " isn't in stock in the shop");
+        log.warn("{} isn't in stock in the shop", itemName);
+        return false; // Item not found in stock
+    }
+
+    /**
+     * Checks if the specified item is in stock in the shop. **Note** if the item has stock 0 this will still return true.
+     *
+     * @param itemId The ID of the item to check.
+     *
+     * @return true if the item is in stock, false otherwise.
+     */
+    public static boolean hasStock(int itemId) {
+        // Iterate through the shop items to find the specified item
+        log.debug("Checking if item with ID {} is in stock in the shop", itemId);
+
+        for (Rs2ItemModel item : shopItems) {
+            // Check if the item ID matches the specified item ID
+            if (item.getId() == itemId && item.getQuantity() > 0) {
+                log.debug("Item with ID {} is in stock. Quantity: {}, Slot: {}", itemId, item.getQuantity(), item.getSlot());
+                return true; // Item found in stock
+            }
+        }
+        log.warn("Item with ID {} isn't in stock in the shop", itemId);
         return false; // Item not found in stock
     }
 
@@ -158,7 +264,6 @@ public class Rs2Shop {
      * @return true if the item is in stock with quantity >= minimumQuantity, false otherwise.
      */
     public static boolean hasMinimumStock(String itemName, int minimumQuantity) {
-        
         // Iterate through the shop items to find the specified item
         for (Rs2ItemModel item : shopItems) {
             // Check if the item name matches the specified item name and quantity is >= minimumQuantity
@@ -166,10 +271,37 @@ public class Rs2Shop {
                 return true; // Item found in stock with sufficient quantity
             }
         }
-        System.out.println(itemName + " isn't in stock in the shop with minimum quantity of " + minimumQuantity);
+        log.warn("{} isn't in stock in the shop with minimum quantity of {}", itemName, minimumQuantity);
         return false; // Item not found in stock or with sufficient quantity
     }
 
+    /**
+     * Checks if the specified item is in stock in the shop with quantity >= minimumQuantity.
+     *
+     * @param itemId          The ID of the item to check.
+     * @param minimumQuantity The minimum quantity required.
+     *
+     * @return true if the item is in stock with quantity >= minimumQuantity, false otherwise.
+     */
+    public static boolean hasMinimumStock(int itemId, int minimumQuantity) {
+        log.debug("Checking if item with ID {} is in stock in the shop", itemId);
+
+        if (shopItems == null || shopItems.isEmpty()) {
+            log.warn("Shop items list is empty or null, cannot check stock for item with ID {}", itemId);
+            return false; // No items in the shop to check
+        }
+
+        // Iterate through the shop items to find the specified item
+        for (Rs2ItemModel item : shopItems) {
+            // Check if the item ID matches the specified item ID and quantity is >= minimumQuantity
+            if (item.getId() == itemId && item.getQuantity() >= minimumQuantity) {
+                return true; // Item found in stock with sufficient quantity
+            }
+        }
+
+        log.warn("Item with ID {} isn't in stock in the shop with minimum quantity of {}", itemId, minimumQuantity);
+        return false; // Item not found in stock or with sufficient quantity
+    }
 
     /**
      * Updates the shop items in memory based on the provided event.
@@ -179,18 +311,8 @@ public class Rs2Shop {
     public static void storeShopItemsInMemory(ItemContainerChanged e, int id) {
         List<Rs2ItemModel> list = updateItemContainer(id, e);
         if (list != null) {
-            System.out.println("Storing shopItems");
+            log.debug("Storing shopItems");
             shopItems = list;
-
-            /*Print each item's name
-            System.out.println("Shop items:");
-            for (Rs2Item item : shopItems) {
-                System.out.println(item.name);
-                System.out.println(item.quantity);
-                System.out.println(item.slot);
-            }
-            */
-
         }
     }
 
@@ -230,22 +352,9 @@ public class Rs2Shop {
         int param1;
         int identifier = 3;
         MenuAction menuAction = MenuAction.CC_OP;
-        ItemComposition itemComposition = Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getItemDefinition(rs2Item.getId()))
-                .orElse(null);
-        if (!action.isEmpty()) {
-            String[] actions;
-            actions = itemComposition.getInventoryActions();
-
-            for (int i = 0; i < actions.length; i++) {
-                if (action.equalsIgnoreCase(actions[i])) {
-                    identifier = i + 2;
-                    break;
-                }
-            }
-        }
         // Determine param0 (item slot in the shop)
-        param0 = getSlot(rs2Item.getName()) + 1; // Use the getSlot method to get the slot number
-        System.out.println(param0);
+        param0 = rs2Item.getSlot() + 1;
+        log.debug("param0: {}", param0);
 
         // Shop Inventory
         switch (action) {
@@ -253,6 +362,7 @@ public class Rs2Shop {
                 // Logic to check Value of item
                 identifier = 1;
                 param1 = 19660816;
+                break;
             case "Buy 1":
                 // Logic to sell one item
                 identifier = 2;
@@ -274,13 +384,42 @@ public class Rs2Shop {
                 param1 = 19660816;
                 break;
             default:
-                System.out.println(action);
+                log.debug(action);
                 throw new IllegalArgumentException("Invalid action");
 
         }
 
-        Microbot.doInvoke(new NewMenuEntry(param0, param1, menuAction.getId(), identifier, rs2Item.getId(), rs2Item.getName()), (itemBounds(rs2Item) == null) ? new Rectangle(1, 1) : itemBounds(rs2Item));
+        Microbot.doInvoke(new NewMenuEntry()
+                .param0(param0)
+                .param1(param1)
+                .opcode(menuAction.getId())
+                .identifier(identifier)
+                .itemId(rs2Item.getId())
+                .target(rs2Item.getName())
+                ,
+                (itemBounds(rs2Item) == null) ? new Rectangle(1, 1) : itemBounds(rs2Item));
         //Rs2Reflection.invokeMenu(param0, param1, menuAction.getId(), identifier, rs2Item.id, action, target, -1, -1);
+    }
+
+    /**
+     * Waits for the shop to change by comparing the current items with the cached values.
+     *
+     * @return true if the shop has changed, false if it remains the same.
+     */
+    public static boolean waitForShopChanges() {
+        final List<Rs2ItemModel> initialShopItems = shopItems;
+
+        return Global.sleepUntil(() -> hasShopChanged(initialShopItems));
+    }
+
+    /**
+     * Checks if the shop has changed since the initial items were stored.
+     *
+     * @param initialShopItems The initial list of shop items to compare against.
+     * @return true if the shop has changed, false otherwise.
+     */
+    private static boolean hasShopChanged(List<Rs2ItemModel> initialShopItems) {
+        return shopItems != initialShopItems;
     }
 
     /**
@@ -291,7 +430,6 @@ public class Rs2Shop {
      * @return Rectangle of the item
      */
     private static Rectangle itemBounds(Rs2ItemModel rs2Item) {
-        return Rs2Widget.getWidget(19660816).getDynamicChildren()[getSlot(rs2Item.getName())+1].getBounds();
+        return Rs2Widget.getWidget(19660816).getDynamicChildren()[rs2Item.getSlot()+1].getBounds();
     }
 }
-

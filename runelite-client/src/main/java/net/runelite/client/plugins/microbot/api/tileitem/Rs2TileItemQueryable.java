@@ -1,0 +1,21 @@
+package net.runelite.client.plugins.microbot.api.tileitem;
+
+import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.api.AbstractEntityQueryable;
+import net.runelite.client.plugins.microbot.api.IEntityQueryable;
+import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
+
+import java.util.stream.Stream;
+
+public final class Rs2TileItemQueryable extends AbstractEntityQueryable<Rs2TileItemQueryable, Rs2TileItemModel>
+        implements IEntityQueryable<Rs2TileItemQueryable, Rs2TileItemModel> {
+
+    public Rs2TileItemQueryable() {
+        super();
+    }
+
+    @Override
+    protected Stream<Rs2TileItemModel> initialSource() {
+        return Microbot.getRs2TileItemCache().getStream();
+    }
+}

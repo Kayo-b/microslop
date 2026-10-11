@@ -25,9 +25,13 @@
 package net.runelite.client.plugins.microbot.ui;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.html.HtmlEscapers;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.client.config.*;
+import net.runelite.client.config.Config;
+import net.runelite.client.config.ConfigDescriptor;
+import net.runelite.client.config.ConfigGroup;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ExternalPluginsChanged;
@@ -38,11 +42,13 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.PluginInstantiationException;
 import net.runelite.client.plugins.PluginManager;
-import net.runelite.client.plugins.config.PluginSearch;
-import net.runelite.client.plugins.microbot.dashboard.DashboardWebSocket;
+import net.runelite.client.plugins.microbot.MicrobotConfig;
+import net.runelite.client.plugins.microbot.externalplugins.MicrobotPluginManager;
+import net.runelite.client.plugins.microbot.externalplugins.MicrobotPluginManifest;
+import net.runelite.client.plugins.microbot.ui.search.MicrobotPluginSearch;
 import net.runelite.client.ui.ColorScheme;
+import net.runelite.client.ui.ContainableFrame;
 import net.runelite.client.ui.DynamicGridLayout;
-import net.runelite.client.ui.MultiplexingPluginPanel;
 import net.runelite.client.ui.PluginPanel;
 import net.runelite.client.ui.components.IconTextField;
 import net.runelite.client.util.Text;
@@ -56,324 +62,373 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
 @Singleton
-public class MicrobotPluginListPanel extends PluginPanel
-{
-	private static final String RUNELITE_GROUP_NAME = RuneLiteConfig.class.getAnnotation(ConfigGroup.class).value();
-	private static final String PINNED_PLUGINS_CONFIG_KEY = "pinnedPlugins";
-	private static final ImmutableList<String> CATEGORY_TAGS = ImmutableList.of(
-		"Combat",
-		"Chat",
-		"Item",
-		"Minigame",
-		"Notification",
-		"Plugin Hub",
-		"Skilling",
-		"XP"
-	);
+public class MicrobotPluginListPanel extends MicrobotPluginPanel {
+    private static final long BLOCKED_NOTICE_WAIT_MS = 300_000;
+    static final int LIST_VIEW_WIDTH = PluginPanel.PANEL_WIDTH - PluginPanel.SCROLLBAR_WIDTH;
+    static final int LIST_ITEM_WIDTH = LIST_VIEW_WIDTH - 20;
 
-	private final ConfigManager configManager;
-	private final PluginManager pluginManager;
-	private final Provider<MicrobotConfigPanel> configPanelProvider;
-	private final List<MicrobotPluginConfigurationDescriptor> fakePlugins = new ArrayList<>();
+    private static final String RUNELITE_GROUP_NAME = MicrobotConfig.class.getAnnotation(ConfigGroup.class).value();
+    private static final String PINNED_PLUGINS_CONFIG_KEY = "pinnedPlugins";
+    private static final ImmutableList<String> CATEGORY_TAGS = ImmutableList.of(
+            "Combat",
+            "Chat",
+            "Item",
+            "Minigame",
+            "Notification",
+            "Plugin Hub",
+            "Skilling",
+            "XP"
+    );
 
-	@Getter
-	private final ExternalPluginManager externalPluginManager;
+    private final ConfigManager configManager;
+    private final PluginManager pluginManager;
+    private final MicrobotPluginManager microbotPluginManager;
+    private final Provider<MicrobotConfigPanel> configPanelProvider;
+    private final List<MicrobotPluginConfigurationDescriptor> fakePlugins = new ArrayList<>();
 
-	@Getter
-	private final MultiplexingPluginPanel muxer;
+    @Getter
+    private final ExternalPluginManager externalPluginManager;
 
-	private final IconTextField searchBar;
-	private final JScrollPane scrollPane;
-	private final MicrobotFixedWidthPanel mainPanel;
-	private List<MicrobotPluginListItem> pluginList;
+    @Getter
+    private final MicrobotMultiplexingPluginPanel muxer;
 
-	@Inject
-	public MicrobotPluginListPanel(
-		ConfigManager configManager,
-		PluginManager pluginManager,
-		ExternalPluginManager externalPluginManager,
-		EventBus eventBus,
-		Provider<MicrobotConfigPanel> configPanelProvider)
-	{
-		super(false);
+    private final IconTextField searchBar;
+    private final JScrollPane scrollPane;
+    private final MicrobotFixedWidthPanel mainPanel;
+    private List<MicrobotPluginListItem> pluginList;
 
-		this.configManager = configManager;
-		this.pluginManager = pluginManager;
-		this.externalPluginManager = externalPluginManager;
-		this.configPanelProvider = configPanelProvider;
+    @Inject
+    public MicrobotPluginListPanel(
+            ConfigManager configManager,
+            PluginManager pluginManager,
+            MicrobotPluginManager microbotPluginManager,
+            ExternalPluginManager externalPluginManager,
+            EventBus eventBus,
+            Provider<MicrobotConfigPanel> configPanelProvider) {
+        super(false);
 
-		muxer = new MultiplexingPluginPanel(this)
-		{
-			@Override
-			protected void onAdd(PluginPanel p)
-			{
-				eventBus.register(p);
-			}
+        this.configManager = configManager;
+        this.pluginManager = pluginManager;
+        this.externalPluginManager = externalPluginManager;
+        this.configPanelProvider = configPanelProvider;
+        this.microbotPluginManager = microbotPluginManager;
 
-			@Override
-			protected void onRemove(PluginPanel p)
-			{
-				eventBus.unregister(p);
-			}
-		};
+        muxer = new MicrobotMultiplexingPluginPanel(this) {
+            @Override
+            protected void onAdd(MicrobotPluginPanel p) {
+                eventBus.register(p);
+            }
 
-		searchBar = new IconTextField();
-		searchBar.setIcon(IconTextField.Icon.SEARCH);
-		searchBar.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
-		searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
-		searchBar.getDocument().addDocumentListener(new DocumentListener()
-		{
-			@Override
-			public void insertUpdate(DocumentEvent e)
-			{
-				onSearchBarChanged();
-			}
+            @Override
+            protected void onRemove(MicrobotPluginPanel p) {
+                eventBus.unregister(p);
+            }
+        };
 
-			@Override
-			public void removeUpdate(DocumentEvent e)
-			{
-				onSearchBarChanged();
-			}
+        searchBar = new IconTextField();
+        searchBar.setIcon(IconTextField.Icon.SEARCH);
+        searchBar.setPreferredSize(new Dimension(PluginPanel.PANEL_WIDTH - 20, 30));
+        searchBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        searchBar.setHoverBackgroundColor(ColorScheme.DARK_GRAY_HOVER_COLOR);
+        searchBar.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                onSearchBarChanged();
+            }
 
-			@Override
-			public void changedUpdate(DocumentEvent e)
-			{
-				onSearchBarChanged();
-			}
-		});
-		CATEGORY_TAGS.forEach(searchBar.getSuggestionListModel()::addElement);
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                onSearchBarChanged();
+            }
 
-		setLayout(new BorderLayout());
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                onSearchBarChanged();
+            }
+        });
+        CATEGORY_TAGS.forEach(searchBar.getSuggestionListModel()::addElement);
 
-		JPanel topPanel = new JPanel();
-		topPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
-		topPanel.setLayout(new BorderLayout(0, BORDER_OFFSET));
-		topPanel.add(searchBar, BorderLayout.CENTER);
-		add(topPanel, BorderLayout.NORTH);
+        setLayout(new BorderLayout());
+        setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		mainPanel = new MicrobotFixedWidthPanel();
-		mainPanel.setBorder(new EmptyBorder(8, 10, 10, 10));
-		mainPanel.setLayout(new DynamicGridLayout(0, 1, 0, 5));
-		mainPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JPanel topPanel = new JPanel();
+        topPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
+        topPanel.setLayout(new BorderLayout(0, BORDER_OFFSET));
+        topPanel.add(searchBar, BorderLayout.CENTER);
+        add(topPanel, BorderLayout.NORTH);
 
-		JPanel northPanel = new MicrobotFixedWidthPanel();
-		northPanel.setLayout(new BorderLayout());
-		northPanel.add(mainPanel, BorderLayout.NORTH);
+        mainPanel = new MicrobotFixedWidthPanel(LIST_VIEW_WIDTH);
+        mainPanel.setBorder(new EmptyBorder(8, 10, 10, 10));
+        mainPanel.setLayout(new DynamicGridLayout(0, 1, 0, 5));
+        mainPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		scrollPane = new JScrollPane(northPanel);
-		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-		add(scrollPane, BorderLayout.CENTER);
-	}
+        JPanel northPanel = new MicrobotFixedWidthPanel(LIST_VIEW_WIDTH);
+        northPanel.setLayout(new BorderLayout());
+        northPanel.add(mainPanel, BorderLayout.NORTH);
 
-	public void rebuildPluginList()
-	{
-		List<String> pinnedPlugins = getPinnedPluginNames();
-		//List<String> pinnedPlugins = new ArrayList<>();
+        scrollPane = new JScrollPane(northPanel);
+        scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
+        add(scrollPane, BorderLayout.CENTER);
+    }
 
-		// populate pluginList with all non-hidden plugins
-		pluginList = Stream.concat(
-			fakePlugins.stream(),
-			pluginManager.getPlugins().stream()
-				.filter(plugin -> !plugin.getClass().getAnnotation(PluginDescriptor.class).hidden() && plugin.getClass().getPackage().getName().toLowerCase().contains("microbot"))
-				.map(plugin ->
-				{
-					PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
-					Config config = pluginManager.getPluginConfigProxy(plugin);
-					ConfigDescriptor configDescriptor = config == null ? null : configManager.getConfigDescriptor(config);
-					List<String> conflicts = pluginManager.conflictsForPlugin(plugin).stream()
-						.map(Plugin::getName)
-						.collect(Collectors.toList());
+    public void rebuildPluginList() {
+        List<String> pinnedPlugins = getPinnedPluginNames();
 
-					return new MicrobotPluginConfigurationDescriptor(
-						descriptor.name(),
-						descriptor.description(),
-						descriptor.tags(),
-						plugin,
-						config,
-						configDescriptor,
-						conflicts);
-				})
-		)
-			.map(desc ->
-			{
-				MicrobotPluginListItem listItem = new MicrobotPluginListItem(this, desc);
-				listItem.setPinned(pinnedPlugins.contains(desc.getName()));
-				return listItem;
-			})
-			.sorted(Comparator.comparing(p -> p.getPluginConfig().getName()))
-			.collect(Collectors.toList());
+        Predicate<Plugin> isMicrobotPlugin = plugin ->
+                plugin.getClass().getPackage().getName().toLowerCase().contains("microbot");
 
-		mainPanel.removeAll();
-		refresh();
-	}
+        // populate pluginList with all non-hidden plugins
+        pluginList = Stream.concat(
+                        fakePlugins.stream(),
+                        pluginManager.getPlugins().stream()
+                                .filter(plugin -> {
+                                    PluginDescriptor d = plugin.getClass().getAnnotation(PluginDescriptor.class);
+                                    return !d.hidden() && (isMicrobotPlugin.test(plugin) || d.isExternal());
+                                })
+                                .map(plugin ->
+                                {
+                                    PluginDescriptor descriptor = plugin.getClass().getAnnotation(PluginDescriptor.class);
+                                    Config config = pluginManager.getPluginConfigProxy(plugin);
+                                    ConfigDescriptor configDescriptor = config == null ? null : configManager.getConfigDescriptor(config);
+                                    List<String> conflicts = pluginManager.conflictsForPlugin(plugin).stream()
+                                            .map(Plugin::getName)
+                                            .collect(Collectors.toList());
 
-	public void addFakePlugin(MicrobotPluginConfigurationDescriptor... descriptor)
-	{
-		Collections.addAll(fakePlugins, descriptor);
-	}
+                                    return new MicrobotPluginConfigurationDescriptor(
+                                            descriptor.name(),
+                                            descriptor.description(),
+                                            descriptor.tags(),
+                                            plugin,
+                                            config,
+                                            configDescriptor,
+                                            conflicts);
+                                })
+                )
+                .map(desc ->
+                {
+                    MicrobotPluginListItem listItem = new MicrobotPluginListItem(this, desc);
+                    listItem.setPinned(pinnedPlugins.contains(desc.getName()));
+                    return listItem;
+                })
+                .sorted(Comparator.comparing(p -> p.getPluginConfig().getName()))
+                .collect(Collectors.toList());
 
-	void refresh()
-	{
-		// update enabled / disabled status of all items
-		pluginList.forEach(listItem ->
-		{
-			final Plugin plugin = listItem.getPluginConfig().getPlugin();
-			if (plugin != null)
-			{
-				listItem.setPluginEnabled(pluginManager.isPluginEnabled(plugin));
-			}
-		});
+        mainPanel.removeAll();
+        refresh();
+        SwingUtilities.invokeLater(this::showBlockedPluginsNotice);
+    }
 
-		int scrollBarPosition = scrollPane.getVerticalScrollBar().getValue();
+    public void addFakePlugin(MicrobotPluginConfigurationDescriptor... descriptor) {
+        Collections.addAll(fakePlugins, descriptor);
+    }
 
-		onSearchBarChanged();
-		searchBar.requestFocusInWindow();
-		validate();
+    void refresh() {
+        // update enabled / disabled status of all items
+        pluginList.forEach(listItem ->
+        {
+            final Plugin plugin = listItem.getPluginConfig().getPlugin();
+            if (plugin != null) {
+                listItem.setPluginEnabled(pluginManager.isPluginEnabled(plugin));
+            }
+        });
 
-		scrollPane.getVerticalScrollBar().setValue(scrollBarPosition);
-	}
+        int scrollBarPosition = scrollPane.getVerticalScrollBar().getValue();
 
-	void openWithFilter(String filter)
-	{
-		searchBar.setText(filter);
-		onSearchBarChanged();
-		muxer.pushState(this);
-	}
+        onSearchBarChanged();
+        searchBar.requestFocusInWindow();
+        validate();
 
-	private void onSearchBarChanged()
-	{
-		final String text = searchBar.getText();
-		pluginList.forEach(mainPanel::remove);
-		PluginSearch.search(pluginList, text).forEach(mainPanel::add);
-		revalidate();
-	}
+        scrollPane.getVerticalScrollBar().setValue(scrollBarPosition);
+    }
 
-	void openConfigurationPanel(String configGroup)
-	{
-		for (MicrobotPluginListItem pluginListItem : pluginList)
-		{
-			if (pluginListItem.getPluginConfig().getName().equals(configGroup))
-			{
-				openConfigurationPanel(pluginListItem.getPluginConfig());
-				break;
-			}
-		}
-	}
+    void openWithFilter(String filter) {
+        searchBar.setText(filter);
+        onSearchBarChanged();
+        muxer.pushState(this);
+    }
 
-	void openConfigurationPanel(Plugin plugin)
-	{
-		for (MicrobotPluginListItem pluginListItem : pluginList)
-		{
-			if (pluginListItem.getPluginConfig().getPlugin() == plugin)
-			{
-				openConfigurationPanel(pluginListItem.getPluginConfig());
-				break;
-			}
-		}
-	}
+    private void onSearchBarChanged() {
+        final String text = searchBar.getText();
+        pluginList.forEach(mainPanel::remove);
+        MicrobotPluginSearch.search(pluginList, text).forEach(mainPanel::add);
+        revalidate();
+    }
 
-	void openConfigurationPanel(MicrobotPluginConfigurationDescriptor plugin)
-	{
-		MicrobotConfigPanel panel = configPanelProvider.get();
-		panel.init(plugin);
-		muxer.pushState(this);
-		muxer.pushState(panel);
-	}
+    void openConfigurationPanel(String configGroup) {
+        for (MicrobotPluginListItem pluginListItem : pluginList) {
+            if (pluginListItem.getPluginConfig().getName().equals(configGroup)) {
+                openConfigurationPanel(pluginListItem.getPluginConfig());
+                break;
+            }
+        }
+    }
 
-	void startPlugin(Plugin plugin)
-	{
-		pluginManager.setPluginEnabled(plugin, true);
+    void openConfigurationPanel(Plugin plugin) {
+        for (MicrobotPluginListItem pluginListItem : pluginList) {
+            if (pluginListItem.getPluginConfig().getPlugin() == plugin) {
+                openConfigurationPanel(pluginListItem.getPluginConfig());
+                break;
+            }
+        }
+    }
 
-		try
-		{
-			pluginManager.startPlugin(plugin);
-			DashboardWebSocket.SendPluginList();
-		}
-		catch (PluginInstantiationException ex)
-		{
-			log.warn("Error when starting plugin {}", plugin.getClass().getSimpleName(), ex);
-		}
-	}
+    void openConfigurationPanel(MicrobotPluginConfigurationDescriptor plugin) {
+        MicrobotConfigPanel panel = configPanelProvider.get();
+        panel.init(plugin);
+        muxer.pushState(this);
+        muxer.pushState(panel);
+    }
 
-	void stopPlugin(Plugin plugin)
-	{
-		pluginManager.setPluginEnabled(plugin, false);
+    void startPlugin(Plugin plugin) {
+        microbotPluginManager.getOutdatedPluginUpdate(plugin)
+                .ifPresent(this::showOutdatedPluginNotification);
 
-		try
-		{
-			pluginManager.stopPlugin(plugin);
-			DashboardWebSocket.SendPluginList();
-		}
-		catch (PluginInstantiationException ex)
-		{
-			log.warn("Error when stopping plugin {}", plugin.getClass().getSimpleName(), ex);
-		}
-	}
+        pluginManager.setPluginEnabled(plugin, true);
 
-	private List<String> getPinnedPluginNames()
-	{
-		final String config = configManager.getConfiguration(RUNELITE_GROUP_NAME, PINNED_PLUGINS_CONFIG_KEY);
+        try {
+            pluginManager.startPlugin(plugin);
+        } catch (PluginInstantiationException ex) {
+            log.warn("Error when starting plugin {}", plugin.getClass().getSimpleName(), ex);
+        }
+    }
 
-		if (config == null)
-		{
-			return Collections.emptyList();
-		}
+    void stopPlugin(Plugin plugin) {
+        if (pluginManager.isPluginAlwaysOn(plugin)) {
+            return;
+        }
 
-		return Text.fromCSV(config);
-	}
+        pluginManager.setPluginEnabled(plugin, false);
 
-	void savePinnedPlugins()
-	{
-		final String value = pluginList.stream()
-			.filter(MicrobotPluginListItem::isPinned)
-			.map(p -> p.getPluginConfig().getName())
-			.collect(Collectors.joining(","));
+        try {
+            pluginManager.stopPlugin(plugin);
+        } catch (PluginInstantiationException ex) {
+            log.warn("Error when stopping plugin {}", plugin.getClass().getSimpleName(), ex);
+        }
+    }
 
-		configManager.setConfiguration(RUNELITE_GROUP_NAME, PINNED_PLUGINS_CONFIG_KEY, value);
-	}
+    private List<String> getPinnedPluginNames() {
+        final String config = configManager.getConfiguration(RUNELITE_GROUP_NAME, PINNED_PLUGINS_CONFIG_KEY);
 
-	@Subscribe
-	public void onPluginChanged(PluginChanged event)
-	{
-		SwingUtilities.invokeLater(this::refresh);
-	}
+        if (config == null) {
+            return Collections.emptyList();
+        }
 
-	@Override
-	public Dimension getPreferredSize()
-	{
-		return new Dimension(PANEL_WIDTH + SCROLLBAR_WIDTH, super.getPreferredSize().height);
-	}
+        return Text.fromCSV(config);
+    }
 
-	@Override
-	public void onActivate()
-	{
-		super.onActivate();
+    private void showOutdatedPluginNotification(MicrobotPluginManager.OutdatedPluginUpdate outdatedPluginUpdate) {
+        String message = "<html>\""
+                + HtmlEscapers.htmlEscaper().escape(outdatedPluginUpdate.getDisplayName())
+                + "\" is out of date.<br><br>Installed version: "
+                + HtmlEscapers.htmlEscaper().escape(outdatedPluginUpdate.getInstalledVersion())
+                + "<br>Latest version: "
+                + HtmlEscapers.htmlEscaper().escape(outdatedPluginUpdate.getLatestVersion())
+                + "<br><br>Update it from the <strong>Microbot Plugin Hub</strong> to get the latest fixes.</html>";
 
-		if (searchBar.getParent() != null)
-		{
-			searchBar.requestFocusInWindow();
-		}
-	}
+        JOptionPane.showMessageDialog(
+                this,
+                message,
+                "Microbot Plugin Update Available",
+                JOptionPane.INFORMATION_MESSAGE
+        );
 
-	@Subscribe
-	private void onExternalPluginsChanged(ExternalPluginsChanged ev)
-	{
-		SwingUtilities.invokeLater(this::rebuildPluginList);
-	}
+        microbotPluginManager.rememberOutdatedPluginUpdateNotification(outdatedPluginUpdate);
+    }
 
-	@Subscribe
-	private void onProfileChanged(ProfileChanged ev)
-	{
-		SwingUtilities.invokeLater(this::rebuildPluginList);
-	}
+    private void showBlockedPluginsNotice() {
+        Map<String, String> blocked = microbotPluginManager.takeBlockedPluginsToNotify();
+        if (blocked.isEmpty()) {
+            return;
+        }
+
+        Map<String, MicrobotPluginManifest> manifests = microbotPluginManager.getManifestMap();
+        String message = blockedPluginsMessage(blocked, name -> {
+            MicrobotPluginManifest manifest = manifests.get(name);
+            return manifest == null || manifest.getDisplayName() == null ? name : manifest.getDisplayName();
+        });
+
+        long deadline = System.currentTimeMillis() + BLOCKED_NOTICE_WAIT_MS;
+        Timer timer = new Timer(1000, null);
+        timer.setInitialDelay(0);
+        timer.addActionListener(e -> {
+            Window window = Arrays.stream(Window.getWindows())
+                    .filter(w -> w instanceof ContainableFrame && w.isShowing())
+                    .findFirst()
+                    .orElse(null);
+            if (window == null) {
+                if (System.currentTimeMillis() > deadline) {
+                    timer.stop();
+                }
+                return;
+            }
+            timer.stop();
+            JDialog dialog = new JOptionPane(message, JOptionPane.WARNING_MESSAGE)
+                    .createDialog(window, "Microbot Plugins Not Loaded");
+            dialog.setModal(false);
+            dialog.setVisible(true);
+        });
+        timer.start();
+    }
+
+    static String blockedPluginsMessage(Map<String, String> blocked, Function<String, String> displayName) {
+        StringBuilder message = new StringBuilder("<html>These Microbot Plugin Hub plugins were not loaded:<br>");
+        blocked.forEach((name, reason) -> message.append("<br>&bull; <b>")
+                .append(HtmlEscapers.htmlEscaper().escape(displayName.apply(name)))
+                .append("</b>: ")
+                .append(HtmlEscapers.htmlEscaper().escape(reason)));
+        return message.append("<br><br>Open the <strong>Microbot Plugin Hub</strong> to see details, remove them or install an unaffected version.</html>")
+                .toString();
+    }
+
+    void savePinnedPlugins() {
+        final String value = pluginList.stream()
+                .filter(MicrobotPluginListItem::isPinned)
+                .map(p -> p.getPluginConfig().getName())
+                .collect(Collectors.joining(","));
+
+        configManager.setConfiguration(RUNELITE_GROUP_NAME, PINNED_PLUGINS_CONFIG_KEY, value);
+    }
+
+    @Subscribe
+    public void onPluginChanged(PluginChanged event) {
+        SwingUtilities.invokeLater(this::refresh);
+    }
+
+    @Override public Dimension getPreferredSize() {
+        Dimension d = super.getPreferredSize();
+        d.height = Math.max(d.height, 24);
+        return d;
+    }
+
+    @Override
+    public void onActivate() {
+        super.onActivate();
+
+        if (searchBar.getParent() != null) {
+            searchBar.requestFocusInWindow();
+        }
+    }
+
+    @Subscribe
+    private void onExternalPluginsChanged(ExternalPluginsChanged ev) {
+        SwingUtilities.invokeLater(this::rebuildPluginList);
+    }
+
+    @Subscribe
+    private void onProfileChanged(ProfileChanged ev) {
+        SwingUtilities.invokeLater(this::rebuildPluginList);
+    }
 }

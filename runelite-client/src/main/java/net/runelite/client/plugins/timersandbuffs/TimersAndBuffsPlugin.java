@@ -42,6 +42,7 @@ import net.runelite.client.game.ItemVariationMapping;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 import net.runelite.client.ui.overlay.infobox.InfoBoxManager;
 import net.runelite.client.util.RSTimeUnit;
 import org.apache.commons.lang3.ArrayUtils;
@@ -62,6 +63,7 @@ import net.runelite.api.Actor;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
+import net.runelite.api.GameState;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
@@ -113,14 +115,14 @@ public class TimersAndBuffsPlugin extends Plugin
 	private static final String CANNON_REPAIR_MESSAGE = "You repair your cannon, restoring it to working order.";
 	private static final String CANNON_DESTROYED_MESSAGE = "Your cannon has been destroyed!";
 	private static final String CANNON_BROKEN_MESSAGE = "<col=ef1020>Your cannon has broken!";
-	private static final String FROZEN_MESSAGE = "<col=ef1020>You have been frozen!</col>";
+	private static final String FROZEN_MESSAGE = "You have been frozen!</col>";
 	private static final String STAFF_OF_THE_DEAD_SPEC_EXPIRED_MESSAGE = "Your protection fades away";
 	private static final String STAFF_OF_THE_DEAD_SPEC_MESSAGE = "Spirits of deceased evildoers offer you their protection";
 	private static final String PRAYER_ENHANCE_EXPIRED = "<col=ff0000>Your prayer enhance effect has worn off.</col>";
-	private static final String SHADOW_VEIL_MESSAGE = ">Your thieving abilities have been enhanced.</col>";
-	private static final String RESURRECT_THRALL_MESSAGE_START = ">You resurrect a ";
+	private static final String SHADOW_VEIL_MESSAGE = "Your thieving abilities have been enhanced.</col>";
+	private static final String RESURRECT_THRALL_MESSAGE_START = "You resurrect a ";
 	private static final String RESURRECT_THRALL_MESSAGE_END = " thrall.</col>";
-	private static final String WARD_OF_ARCEUUS_MESSAGE = ">Your defence against Arceuus magic has been strengthened.</col>";
+	private static final String WARD_OF_ARCEUUS_MESSAGE = "Your defence against Arceuus magic has been strengthened.</col>";
 	private static final String MARK_OF_DARKNESS_MESSAGE = "You have placed a Mark of Darkness upon yourself.</col>";
 	private static final String PICKPOCKET_FAILURE_MESSAGE = "You fail to pick ";
 	private static final String DODGY_NECKLACE_PROTECTION_MESSAGE = "Your dodgy necklace protects you.";
@@ -189,7 +191,7 @@ public class TimersAndBuffsPlugin extends Plugin
 	@Override
 	public void startUp()
 	{
-		if (config.showHomeMinigameTeleports())
+		if (config.showHomeMinigameTeleports() && client.getGameState() == GameState.LOGGED_IN)
 		{
 			checkTeleport(VarPlayerID.AIDE_TELE_TIMER);
 			checkTeleport(VarPlayerID.SLUG2_REGIONUID);
@@ -378,7 +380,8 @@ public class TimersAndBuffsPlugin extends Plugin
 		}
 
 		if ((event.getVarbitId() == VarbitID.NZONE_OVERLOAD_POTION_EFFECTS
-			|| event.getVarbitId() == VarbitID.RAIDS_OVERLOAD_TIMER) && config.showOverload())
+			|| event.getVarbitId() == VarbitID.RAIDS_OVERLOAD_TIMER
+			|| event.getVarbitId() == VarbitID.DEADMAN_OVERLOAD_POTION_EFFECTS) && config.showOverload())
 		{
 			final int overloadVarb = event.getValue();
 			final int tickCount = client.getTickCount();
@@ -392,7 +395,16 @@ public class TimersAndBuffsPlugin extends Plugin
 				nextOverloadRefreshTick = tickCount + OVERLOAD_TICK_LENGTH;
 			}
 
-			GameTimer overloadTimer = client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) == 1 ? OVERLOAD_RAID : OVERLOAD;
+			GameTimer overloadTimer;
+			if (event.getVarbitId() == VarbitID.DEADMAN_OVERLOAD_POTION_EFFECTS)
+			{
+				overloadTimer = BLIGHTED_OVERLOAD;
+			}
+			else
+			{
+				overloadTimer = client.getVarbitValue(VarbitID.RAIDS_CLIENT_INDUNGEON) == 1 ? OVERLOAD_RAID : OVERLOAD;
+			}
+
 			updateVarTimer(overloadTimer, overloadVarb, i -> nextOverloadRefreshTick - tickCount + (i - 1) * OVERLOAD_TICK_LENGTH);
 		}
 
@@ -427,15 +439,12 @@ public class TimersAndBuffsPlugin extends Plugin
 		}
 
 		if (event.getVarbitId() == VarbitID.STAMINA_ACTIVE
-			|| event.getVarbitId() == VarbitID.STAMINA_DURATION
-			|| event.getVarbitId() == VarbitID.STAMINA_DURATION_EXTRA)
+			|| event.getVarbitId() == VarbitID.STAMINA_DURATION)
 		{
 			// staminaEffectActive is checked to match https://github.com/Joshua-F/cs2-scripts/blob/741271f0c3395048c1bad4af7881a13734516adf/scripts/%5Bproc%2Cbuff_bar_get_value%5D.cs2#L25
 			int staminaEffectActive = client.getVarbitValue(VarbitID.STAMINA_ACTIVE);
-			int staminaPotionEffectVarb = client.getVarbitValue(VarbitID.STAMINA_DURATION);
-			int enduranceRingEffectVarb = client.getVarbitValue(VarbitID.STAMINA_DURATION_EXTRA);
+			int totalStaminaEffect = client.getVarbitValue(VarbitID.STAMINA_DURATION);
 
-			final int totalStaminaEffect = staminaPotionEffectVarb + enduranceRingEffectVarb;
 			if (staminaEffectActive == 1 && config.showStamina())
 			{
 				updateVarTimer(STAMINA, totalStaminaEffect, i -> i * 10);
@@ -703,7 +712,7 @@ public class TimersAndBuffsPlugin extends Plugin
 			removeGameTimer(HOME_TELEPORT);
 			removeGameTimer(MINIGAME_TELEPORT);
 		}
-		else
+		else if (client.getGameState() == GameState.LOGGED_IN)
 		{
 			checkTeleport(VarPlayerID.AIDE_TELE_TIMER);
 			checkTeleport(VarPlayerID.SLUG2_REGIONUID);
@@ -724,6 +733,7 @@ public class TimersAndBuffsPlugin extends Plugin
 		{
 			removeGameTimer(OVERLOAD);
 			removeGameTimer(OVERLOAD_RAID);
+			removeGameTimer(BLIGHTED_OVERLOAD);
 			removeGameTimer(SMELLING_SALTS);
 		}
 
@@ -1018,7 +1028,7 @@ public class TimersAndBuffsPlugin extends Plugin
 			removeGameTimer(STAFF_OF_THE_DEAD);
 		}
 
-		if (message.equals(FROZEN_MESSAGE) && config.showFreezes())
+		if (message.endsWith(FROZEN_MESSAGE) && config.showFreezes())
 		{
 			freezeTimer = createGameTimer(ICEBARRAGE);
 			freezeTime = client.getTickCount();
@@ -1037,7 +1047,7 @@ public class TimersAndBuffsPlugin extends Plugin
 			}
 			else if (message.endsWith(MARK_OF_DARKNESS_MESSAGE))
 			{
-				createGameTimer(MARK_OF_DARKNESS, Duration.of(getMagicLevelMoD(magicLevel), RSTimeUnit.GAME_TICKS));
+				createGameTimer(MARK_OF_DARKNESS, getMarkOfDarknessDuration(magicLevel));
 			}
 			else if (message.contains(RESURRECT_THRALL_MESSAGE_START) && message.endsWith(RESURRECT_THRALL_MESSAGE_END))
 			{
@@ -1126,18 +1136,20 @@ public class TimersAndBuffsPlugin extends Plugin
 		}
 	}
 
-	private int getMagicLevelMoD(int magicLevel)
+	private Duration getMarkOfDarknessDuration(int magicLevel)
 	{
+		final Duration markOfDarknessDuration = Duration.of((long)magicLevel * 3, RSTimeUnit.GAME_TICKS);
+
 		final ItemContainer container = client.getItemContainer(InventoryID.WORN);
 		if (container != null)
 		{
 			final Item weapon = container.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
 			if (weapon != null && weapon.getId() == ItemID.PURGING_STAFF)
 			{
-				return magicLevel * 5;
+				return markOfDarknessDuration.multipliedBy(5);
 			}
 		}
-		return magicLevel;
+		return markOfDarknessDuration;
 	}
 
 	private boolean isInFightCaves()
@@ -1208,7 +1220,12 @@ public class TimersAndBuffsPlugin extends Plugin
 	public void onGameTick(GameTick event)
 	{
 		Player player = client.getLocalPlayer();
-		WorldPoint currentWorldPoint = player.getWorldLocation();
+		if (player == null)
+		{
+			return;
+		}
+
+		WorldPoint currentWorldPoint = Rs2Player.getWorldLocation();
 
 		if (freezeTimer != null)
 		{

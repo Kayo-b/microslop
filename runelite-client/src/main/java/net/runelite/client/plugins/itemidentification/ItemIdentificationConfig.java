@@ -151,6 +151,17 @@ public interface ItemIdentificationConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showCoralFrags",
+		name = "Coral Frags",
+		description = "Show identification on coral frags.",
+		section = identificationSection
+	)
+	default boolean showCoralFrags()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "showSacks",
 		name = "Sacks",
 		description = "Show identification on sacks.",
@@ -195,12 +206,56 @@ public interface ItemIdentificationConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showSapTreatedLogs",
+		name = "Logs (sap-treated)",
+		description = "Show identification on sap-treated logs.",
+		section = identificationSection
+	)
+	default boolean showSapTreatedLogs()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "showPlanks",
 		name = "Planks",
 		description = "Show identification on planks.",
 		section = identificationSection
 	)
 	default boolean showPlanks()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showRepairKits",
+		name = "Repair Kits",
+		description = "Show identification on repair kits.",
+		section = identificationSection
+	)
+	default boolean showRepairKits()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showYarn",
+		name = "Yarn",
+		description = "Show identification on yarns.",
+		section = identificationSection
+	)
+	default boolean showYarn()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showCloth",
+		name = "Cloth",
+		description = "Show identification on bolts of cloth.",
+		section = identificationSection
+	)
+	default boolean showCloth()
 	{
 		return false;
 	}

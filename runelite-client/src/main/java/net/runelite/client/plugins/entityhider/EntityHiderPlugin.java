@@ -36,6 +36,8 @@ import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Projectile;
 import net.runelite.api.Renderable;
+import net.runelite.api.Scene;
+import net.runelite.api.WorldEntity;
 import net.runelite.api.gameval.NpcID;
 import net.runelite.api.gameval.SpotanimID;
 import net.runelite.client.callback.Hooks;
@@ -58,7 +60,10 @@ public class EntityHiderPlugin extends Plugin
 	private static final Set<Integer> THRALL_IDS = ImmutableSet.of(
 		NpcID.ARCEUUS_THRALL_GHOST_LESSER, NpcID.ARCEUUS_THRALL_SKELETON_LESSER, NpcID.ARCEUUS_THRALL_ZOMBIE_LESSER,  // Lesser Thrall (ghost, skeleton, zombie)
 		NpcID.ARCEUUS_THRALL_GHOST_SUPERIOR, NpcID.ARCEUUS_THRALL_SKELETON_SUPERIOR, NpcID.ARCEUUS_THRALL_ZOMBIE_SUPERIOR,  // Superior Thrall (ghost, skeleton, zombie)
-		NpcID.ARCEUUS_THRALL_GHOST_GREATER, NpcID.ARCEUUS_THRALL_SKELETON_GREATER, NpcID.ARCEUUS_THRALL_ZOMBIE_GREATER   // Greater Thrall (ghost, skeleton, zombie)
+		NpcID.ARCEUUS_THRALL_GHOST_GREATER, NpcID.ARCEUUS_THRALL_SKELETON_GREATER, NpcID.ARCEUUS_THRALL_ZOMBIE_GREATER,   // Greater Thrall (ghost, skeleton, zombie)
+		NpcID.THRALL_IMP_MAGIC_LESSER, NpcID.THRALL_IMP_RANGED_LESSER, NpcID.THRALL_IMP_MELEE_LESSER, // Leagues 6 Cosmetic Override for lesser thralls
+		NpcID.THRALL_IMP_MAGIC_SUPERIOR, NpcID.THRALL_IMP_RANGED_SUPERIOR, NpcID.THRALL_IMP_MELEE_SUPERIOR, // Leagues 6 Cosmetic Override for superior thralls
+		NpcID.THRALL_IMP_MAGIC_GREATER, NpcID.THRALL_IMP_RANGED_GREATER, NpcID.THRALL_IMP_MELEE_GREATER // Leagues 6 Cosmetic Override for greater thralls
 	);
 	private static final Set<Integer> RANDOM_EVENT_NPC_IDS = ImmutableSet.of(
 		NpcID.MACRO_BEEKEEPER_INVITATION,
@@ -112,6 +117,7 @@ public class EntityHiderPlugin extends Plugin
 	private boolean hideLocalPlayer2D;
 	private boolean hideNPCs;
 	private boolean hideNPCs2D;
+	private boolean hideBoats;
 	private boolean hideDeadNpcs;
 	private boolean hidePets;
 	private boolean hideThralls;
@@ -167,6 +173,8 @@ public class EntityHiderPlugin extends Plugin
 		hideNPCs = config.hideNPCs();
 		hideNPCs2D = config.hideNPCs2D();
 		hideDeadNpcs = config.hideDeadNpcs();
+
+		hideBoats = config.hideWorldEntities();
 
 		hidePets = config.hidePets();
 
@@ -289,6 +297,22 @@ public class EntityHiderPlugin extends Plugin
 				default:
 					return true;
 			}
+		}
+		else if (renderable instanceof Scene)
+		{
+			if (!hideBoats)
+			{
+				return true;
+			}
+
+			Scene scene = (Scene) renderable;
+			WorldEntity we = client.getTopLevelWorldView().worldEntities().byIndex(scene.getWorldViewId());
+			if (we.getOwnerType() == WorldEntity.OWNER_TYPE_OTHER_PLAYER)
+			{
+				return false;
+			}
+
+			return true;
 		}
 
 		return true;

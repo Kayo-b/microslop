@@ -68,7 +68,6 @@ import net.runelite.api.ItemComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.ScriptID;
-import net.runelite.api.VarClientStr;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.FocusChanged;
 import net.runelite.api.events.GameStateChanged;
@@ -78,6 +77,7 @@ import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetUtil;
@@ -451,7 +451,7 @@ public class GrandExchangePlugin extends Plugin
 		}
 
 		final int qty = offer.getQuantitySold() - savedOffer.getQuantitySold();
-		final int dspent = offer.getSpent() - savedOffer.getSpent();
+		final long dspent = offer.getSpent() - savedOffer.getSpent();
 		if (qty <= 0 || dspent <= 0)
 		{
 			return;
@@ -647,7 +647,7 @@ public class GrandExchangePlugin extends Plugin
 		{
 			return;
 		}
-		String input = client.getVarcStrValue(VarClientStr.INPUT_TEXT).toLowerCase();
+		String input = client.getVarcStrValue(VarClientID.MESLAYERINPUT).toLowerCase();
 
 		String underlineTag = "<u=" + ColorUtil.colorToHexCode(FUZZY_HIGHLIGHT_COLOR) + ">";
 
@@ -689,7 +689,7 @@ public class GrandExchangePlugin extends Plugin
 		wasFuzzySearch = false;
 
 		GrandExchangeSearchMode searchMode = config.geSearchMode();
-		final String input = client.getVarcStrValue(VarClientStr.INPUT_TEXT);
+		final String input = client.getVarcStrValue(VarClientID.MESLAYERINPUT);
 		if (searchMode == GrandExchangeSearchMode.DEFAULT || input.isEmpty() || event.isConsumed())
 		{
 			return;
@@ -704,7 +704,7 @@ public class GrandExchangePlugin extends Plugin
 		{
 			List<Integer> ids = IntStream.range(0, client.getItemCount())
 					.mapToObj(itemManager::getItemComposition)
-					.filter(item -> item.isTradeable() && item.getNote() == -1
+					.filter(item -> item.isGeTradeable() && item.getNote() == -1
 						&& item.getName().toLowerCase().contains(input))
 					.limit(MAX_RESULT_COUNT + 1)
 					.sorted(Comparator.comparing(ItemComposition::getName))
@@ -728,7 +728,7 @@ public class GrandExchangePlugin extends Plugin
 			ToDoubleFunction<ItemComposition> comparator = fuzzySearchScorer.comparator(input);
 			List<Integer> ids = IntStream.range(0, client.getItemCount())
 					.mapToObj(itemManager::getItemComposition)
-					.filter(item -> item.isTradeable() && item.getNote() == -1)
+					.filter(item -> item.isGeTradeable() && item.getNote() == -1)
 					.filter(item -> comparator.applyAsDouble(item) > 0)
 					.sorted(Comparator.comparingDouble(comparator).reversed()
 						.thenComparing(ItemComposition::getName))
@@ -878,7 +878,7 @@ public class GrandExchangePlugin extends Plugin
 
 		if (config.showActivelyTradedPrice() && !client.getWorldType().contains(net.runelite.api.WorldType.DEADMAN))
 		{
-			final int price = itemManager.getItemPriceWithSource(itemId, true);
+			final long price = itemManager.getItemPriceWithSource(itemId, true);
 			if (price > 0)
 			{
 				if (sb.length() > 0)

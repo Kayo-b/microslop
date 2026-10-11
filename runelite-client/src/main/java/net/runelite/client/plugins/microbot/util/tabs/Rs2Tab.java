@@ -1,59 +1,51 @@
 package net.runelite.client.plugins.microbot.util.tabs;
 
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.VarClientInt;
+import net.runelite.api.events.VarClientIntChanged;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.globval.VarcIntValues;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
 
-import java.util.Arrays;
-import java.util.Objects;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import static net.runelite.client.plugins.microbot.util.Global.sleepUntil;
 
 @Slf4j
 public class Rs2Tab {
     private static final int TAB_SWITCH_SCRIPT = 915;
+    private static volatile InterfaceTab cachedTab = InterfaceTab.NOTHING_SELECTED;
+
+    // Derived from InterfaceTab.varcIntIndex — single source of truth.
+    public static final Map<Integer, InterfaceTab> INDEX_TO_TAB;
+    static {
+        Map<Integer, InterfaceTab> map = new HashMap<>();
+        for (InterfaceTab tab : InterfaceTab.values()) {
+            if (tab.getVarcIntIndex() < 0) continue;
+            InterfaceTab existing = map.put(tab.getVarcIntIndex(), tab);
+            if (existing != null) {
+                throw new ExceptionInInitializerError(
+                        "Duplicate varcIntIndex " + tab.getVarcIntIndex()
+                                + " for " + existing + " and " + tab);
+            }
+        }
+        INDEX_TO_TAB = Collections.unmodifiableMap(map);
+    }
+
+    public static void onVarClientIntChanged(VarClientIntChanged event) {
+        if (event.getIndex() != VarClientID.TOPLEVEL_PANEL) return;
+        int value = Microbot.getClient().getVarcIntValue(VarClientID.TOPLEVEL_PANEL);
+        cachedTab = INDEX_TO_TAB.getOrDefault(value, InterfaceTab.NOTHING_SELECTED);
+    }
 
     public static InterfaceTab getCurrentTab() {
-        final int varcIntValue = Microbot.getClient().getVarcIntValue(VarClientInt.INVENTORY_TAB);
-        switch (VarcIntValues.valueOf(varcIntValue)) {
-            case TAB_COMBAT_OPTIONS:
-                return InterfaceTab.COMBAT;
-            case TAB_SKILLS:
-                return InterfaceTab.SKILLS;
-            case TAB_QUEST_LIST:
-                return InterfaceTab.QUESTS;
-            case TAB_INVENTORY:
-                return InterfaceTab.INVENTORY;
-            case TAB_WORN_EQUIPMENT:
-                return InterfaceTab.EQUIPMENT;
-            case TAB_PRAYER:
-                return InterfaceTab.PRAYER;
-            case TAB_SPELLBOOK:
-                return InterfaceTab.MAGIC;
-            case TAB_FRIEND_LIST:
-                return InterfaceTab.FRIENDS;
-            case TAB_LOGOUT:
-                return InterfaceTab.LOGOUT;
-            case TAB_SETTINGS:
-                return InterfaceTab.SETTINGS;
-            case TAB_MUSIC:
-                return InterfaceTab.MUSIC;
-            case TAB_CHAT_CHANNEL:
-                return InterfaceTab.CHAT;
-            case TAB_ACC_MANAGEMENT:
-                return InterfaceTab.ACC_MAN;
-            case TAB_EMOTES:
-                return InterfaceTab.EMOTES;
-            case TAB_NOT_SELECTED:
-                return InterfaceTab.NOTHING_SELECTED;
-            default:
-                throw new IllegalStateException("Unexpected value: " + VarcIntValues.valueOf(varcIntValue));
-        }
+        return cachedTab;
     }
 
     public static boolean isCurrentTab(InterfaceTab tab) {
@@ -66,7 +58,21 @@ public class Rs2Tab {
         if (tab == InterfaceTab.NOTHING_SELECTED && Microbot.getVarbitValue(VarbitID.RESIZABLE_STONE_ARRANGEMENT) == 0)
             return false;
 
-        Microbot.getClientThread().invokeLater(() -> Microbot.getClient().runScript(TAB_SWITCH_SCRIPT, tab.getIndex()));
+        int varcIntIndex = tab.getVarcIntIndex();
+        if (varcIntIndex != -1) {
+            Microbot.getClientThread().runOnClientThreadOptional(() -> {
+                Microbot.getClient().runScript(TAB_SWITCH_SCRIPT, varcIntIndex);
+                return true;
+            });
+        } else {
+            int hotkey = tab.getHotkey();
+            if (hotkey == -1) {
+                log.warn("Tab {} does not have a hotkey assigned, cannot switch to it.", tab.getName());
+                return false;
+            }
+            Rs2Keyboard.keyPress(hotkey);
+        }
+
         return sleepUntil(() -> isCurrentTab(tab));
     }
 
@@ -140,16 +146,16 @@ public class Rs2Tab {
         return switchTo(InterfaceTab.LOGOUT);
     }
 
-    private final static int[] LOGOUT_WIDGET_ID_VARIATIONS = {
-            35913778, // Fixed Classic Display
-            10551342, // Resizable Classic Display
-            10747938  // Resizable Modern Display
-    };
-    private static Widget getLogoutWidget() {
-        return Arrays.stream(LOGOUT_WIDGET_ID_VARIATIONS).mapToObj(Rs2Widget::getWidget).filter(Objects::nonNull)
-                .findFirst().orElseGet(() -> {
-                    Microbot.showMessage("Unable to find logout button widget!");
-                    return null;
-                });
-    }
+	public static Widget getSpellBookTab()
+	{
+		if (Microbot.getClient().isResized())
+		{
+			if (Microbot.getVarbitValue(VarbitID.RESIZABLE_STONE_ARRANGEMENT) == 1)
+			{
+				return Rs2Widget.getWidget(InterfaceID.ToplevelPreEoc.STONE6);
+			}
+			return Rs2Widget.getWidget(InterfaceID.ToplevelOsrsStretch.STONE6);
+		}
+		return Rs2Widget.getWidget(InterfaceID.Toplevel.STONE6);
+	}
 }

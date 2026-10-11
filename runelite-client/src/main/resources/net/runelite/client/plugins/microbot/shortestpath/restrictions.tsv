@@ -1,8 +1,8 @@
 # Origin	Item IDs	Quests	Skills	isMembers	Varbits	Varplayers
-# Varrock museum						
-3265 3442 0						
-3264 3442 0						
-3261 3446 0						
+# Varrock museum south doors + interior gate were unconditionally restricted here (Feb 2025,
+# bulk commit, no stated reason) which made every interior target unroutable — the Kudos museum
+# script's interactions all dead-ended at the gate. The doors are ordinary openable scene doors
+# the runtime handles; restrictions removed 2026-08-08.
 # Gate between digsite and varrock						
 3296 3429 0					3637>152	
 3296 3428 0					3637>152	
@@ -20,11 +20,7 @@
 3207 3217 0		Recipe for Disaster				
 3213 3222 0		Recipe for Disaster				
 3213 3221 0		Recipe for Disaster				
-# Al Kharid Gate						
-3267 3228 0		Prince Ali Rescue				
-3267 3227 0		Prince Ali Rescue				
-3268 3227 0		Prince Ali Rescue				
-3268 3228 0		Prince Ali Rescue				
+# Al Kharid toll gate is modeled as transports plus blocked edge overrides.
 2936 9810 0			63 Agility			
 # Tree near Draynor Manor						
 3138 3352 0						
@@ -232,3 +228,8 @@
 # Ruins of Unkah
 3169 2818 0
 3169 2817 0
+# Castle Wars
+2432 3118 0
+2431 3118 0
+2385 3068 0
+2385 3069 0

@@ -2,30 +2,35 @@ package net.runelite.client.plugins.microbot.util.player;
 
 import lombok.Getter;
 import net.runelite.api.*;
+import net.runelite.api.Point;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.AnimationChanged;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.kit.KitType;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.plugins.microbot.Microbot;
-import net.runelite.client.plugins.microbot.globval.VarbitValues;
+import net.runelite.client.plugins.microbot.api.boat.Rs2BoatCache;
 import net.runelite.client.plugins.microbot.globval.enums.InterfaceTab;
+import net.runelite.client.plugins.microbot.api.playerstate.Rs2PlayerStateCache;
 import net.runelite.client.plugins.microbot.util.coords.Rs2WorldPoint;
 import net.runelite.client.plugins.microbot.util.equipment.Rs2Equipment;
 import net.runelite.client.plugins.microbot.util.gameobject.Rs2GameObject;
 import net.runelite.client.plugins.microbot.util.grounditem.Rs2GroundItem;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2Inventory;
 import net.runelite.client.plugins.microbot.util.inventory.Rs2ItemModel;
+import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Food;
 import net.runelite.client.plugins.microbot.util.misc.Rs2Potion;
 import net.runelite.client.plugins.microbot.util.misc.Rs2UiHelper;
 import net.runelite.client.plugins.microbot.util.npc.Rs2NpcModel;
-import net.runelite.client.plugins.microbot.util.security.Login;
+import net.runelite.client.plugins.microbot.util.security.LoginManager;
 import net.runelite.client.plugins.microbot.util.tabs.Rs2Tab;
 import net.runelite.client.plugins.microbot.util.walker.Rs2Walker;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
@@ -38,6 +43,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -60,14 +67,15 @@ public class Rs2Player {
     public static int antiPoisonTime = -1;
     public static int teleBlockTime = -1;
     public static int goadingTime = -1;
+    public static int moonlightTime = -1;
     public static Instant lastAnimationTime = null;
     private static final long COMBAT_TIMEOUT_MS = 10000;
-    private static long lastCombatTime = 0;
+    private static volatile long lastCombatTime = 0;
     @Getter
     public static int lastAnimationID = AnimationID.IDLE;
 
     public static boolean hasPrayerRegenerationActive() {
-        return Microbot.getVarbitValue(Varbits.BUFF_PRAYER_REGENERATION) > 0;
+        return (Microbot.getVarbitValue(VarbitID.PRAYER_REGENERATION_POTION_TIMER) > 0);
     }
 
     public static boolean hasAntiFireActive() {
@@ -83,7 +91,7 @@ public class Rs2Player {
     }
 
     public static boolean hasRangingPotionActive(int threshold) {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.RANGED) - threshold > Microbot.getClient().getRealSkillLevel(Skill.RANGED);
+        return getBoostedSkillLevel(Skill.RANGED) - threshold > getRealSkillLevel(Skill.RANGED);
     }
 
     public static boolean hasDivineBastionActive() {
@@ -102,20 +110,24 @@ public class Rs2Player {
         return goadingTime > 0;
     }
 
+    public static boolean hasMoonlightActive() {
+        return moonlightTime > 0;
+    }
+
     public static boolean hasAttackActive(int threshold) {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.ATTACK) - threshold > Microbot.getClient().getRealSkillLevel(Skill.ATTACK);
+        return getBoostedSkillLevel(Skill.ATTACK) - threshold > getRealSkillLevel(Skill.ATTACK);
     }
 
     public static boolean hasStrengthActive(int threshold) {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.STRENGTH) - threshold > Microbot.getClient().getRealSkillLevel(Skill.STRENGTH);
+        return getBoostedSkillLevel(Skill.STRENGTH) - threshold > getRealSkillLevel(Skill.STRENGTH);
     }
 
     public static boolean hasDefenseActive(int threshold) {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.DEFENCE) - threshold > Microbot.getClient().getRealSkillLevel(Skill.DEFENCE);
+        return getBoostedSkillLevel(Skill.DEFENCE) - threshold > getRealSkillLevel(Skill.DEFENCE);
     }
 
     public static boolean hasMagicActive(int threshold) {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.MAGIC) - threshold > Microbot.getClient().getRealSkillLevel(Skill.MAGIC);
+        return getBoostedSkillLevel(Skill.MAGIC) - threshold > getRealSkillLevel(Skill.MAGIC);
     }
 
     public static boolean hasAntiVenomActive() {
@@ -136,7 +148,7 @@ public class Rs2Player {
         return teleBlockTime > 0;
     }
 
-    private static final Map<Player, Long> playerDetectionTimes = new ConcurrentHashMap<>();
+    private static final Map<Integer, Long> playerDetectionTimes = new ConcurrentHashMap<>();
 
     public static void handlePotionTimers(VarbitChanged event) {
         if (event.getVarbitId() == Varbits.ANTIFIRE) {
@@ -159,6 +171,9 @@ public class Rs2Player {
         }
         if (event.getVarbitId() == Varbits.BUFF_GOADING_POTION) {
             goadingTime = event.getValue();
+        }
+        if (event.getVarbitId() == Varbits.MOONLIGHT_POTION) {
+            moonlightTime = event.getValue();
         }
         if (event.getVarbitId() == Varbits.DIVINE_MAGIC) {
             divineMagicTime = event.getValue();
@@ -216,9 +231,9 @@ public class Rs2Player {
      * Wait for walking
      */
     public static void waitForWalking() {
-        boolean result = sleepUntilTrue(Rs2Player::isWalking, 100, 5000);
+        boolean result = sleepUntilTrue(Rs2Player::isMoving, 100, 5000);
         if (!result) return;
-        sleepUntil(() -> !Rs2Player.isWalking());
+        sleepUntil(() -> !Rs2Player.isMoving());
     }
 
     /**
@@ -229,9 +244,9 @@ public class Rs2Player {
      *             If the player does not start walking within this time, the method exits early.
      */
     public static void waitForWalking(int time) {
-        boolean result = sleepUntilTrue(Rs2Player::isWalking, 100, time);
+        boolean result = sleepUntilTrue(Rs2Player::isMoving, 100, time);
         if (!result) return;
-        sleepUntil(() -> !Rs2Player.isWalking(), time);
+        sleepUntil(() -> !Rs2Player.isMoving(), time);
     }
 
     /**
@@ -328,17 +343,6 @@ public class Rs2Player {
     }
 
     /**
-     * Checks if the player is currently walking.
-     *
-     * @return {@code true} if the player is moving, {@code false} otherwise.
-     * @deprecated Since version 1.7.2, use {@link #isMoving()} instead.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean isWalking() {
-        return Rs2Player.isMoving();
-    }
-
-    /**
      * Checks if the player is currently moving based on their pose animation.
      * A player is considered moving if their pose animation is different from their idle pose animation.
      *
@@ -375,6 +379,9 @@ public class Rs2Player {
      * @return {@code true} if the player is interacting with another entity, {@code false} otherwise.
      */
     public static boolean isInteracting() {
+        if (Microbot.getClient().getLocalPlayer() == null) {
+            return false;
+        }
         return Optional.of(Microbot.getClient().getLocalPlayer().isInteracting()).orElse(false);
     }
 
@@ -384,9 +391,7 @@ public class Rs2Player {
      * @return {@code true} if the player is a member (has remaining membership days), {@code false} otherwise.
      */
     public static boolean isMember() {
-        return Microbot.getClientThread().runOnClientThreadOptional(() ->
-                Microbot.getClient().getVarpValue(VarPlayer.MEMBERSHIP_DAYS) > 0
-        ).orElse(false);
+        return Microbot.getVarbitPlayerValue(VarPlayerID.ACCOUNT_CREDIT) > 0;
     }
 
     /**
@@ -406,33 +411,56 @@ public class Rs2Player {
         return false;
     }
 
-
-    @Deprecated(since = "Use the Rs2Combat.specState method", forRemoval = true)
-    public static void toggleSpecialAttack(int energyRequired) {
-        int currentSpecEnergy = Microbot.getClient().getVarpValue(VarPlayer.SPECIAL_ATTACK_PERCENT);
-        if (currentSpecEnergy >= energyRequired && (Microbot.getClient().getVarpValue(VarPlayer.SPECIAL_ATTACK_ENABLED) == 0)) {
-            Rs2Widget.clickWidget("special attack");
-        }
-    }
+    private static final ReentrantLock RUN_TOGGLE_LOCK = new ReentrantLock();
+    private static final long RUN_TOGGLE_RETRY_NANOS = TimeUnit.MILLISECONDS.toNanos(1200);
+    private static long lastRunToggleAttempt;
+    private static boolean runToggleAttempted;
 
     /**
-     * Toggles the player's run energy on or off.
+     * Requests the desired run state. Enabling requires energy strictly above
+     * {@link Microbot#runEnergyThreshold} (hundredths of a percent; default 1000 = 10%).
+     * Disabling and an already satisfied state do not require energy.
      *
-     * @param toggle {@code true} to enable running, {@code false} to disable it.
-     * @return {@code true} if the toggle action was performed successfully or was already in the desired state,
-     *         {@code false} if the run energy toggle widget was not found.
+     * @return true only when the desired state is observed; false includes a pending click,
+     *         insufficient energy, unavailable orb, retry cooldown, or a client-thread request
+     *         that would require a mouse gesture. Call again from the normal script loop.
      */
     public static boolean toggleRunEnergy(boolean toggle) {
-        if (Microbot.getVarbitPlayerValue(173) == 0 && !toggle) return true;
-        if (Microbot.getVarbitPlayerValue(173) == 1 && toggle) return true;
-
-        Widget widget = Rs2Widget.getWidget(WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId());
-        if (widget == null) return false;
-
-        Microbot.getMouse().click(widget.getCanvasLocation());
-        sleep(150, 300);
-
-        return true;
+        if (Thread.currentThread().isInterrupted() || !RUN_TOGGLE_LOCK.tryLock()) return false;
+        try {
+            Boolean satisfied = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getClient().getGameState() == GameState.LOGGED_IN
+                            && (Microbot.getClient().getVarpValue(173) == 1) == toggle).orElse(false);
+            if (satisfied) return true;
+            if (Microbot.getClientThread().isClientThread()) return false;
+            if (runToggleAttempted && System.nanoTime() - lastRunToggleAttempt < RUN_TOGGLE_RETRY_NANOS) {
+                return false;
+            }
+            Point target = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+                Client client = Microbot.getClient();
+                if (client.getGameState() != GameState.LOGGED_IN
+                        || (client.getVarpValue(173) == 1) == toggle
+                        || (toggle && client.getEnergy() <= Math.max(0, Microbot.runEnergyThreshold))) return null;
+                Widget widget = Rs2Widget.getWidget(WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId());
+                if (widget == null || widget.isHidden()) return null;
+                Rectangle bounds = widget.getBounds();
+                if (bounds == null || bounds.width < 3 || bounds.height < 3 || bounds.x < 0 || bounds.y < 0
+                        || !Rs2UiHelper.isRectangleWithinCanvas(bounds)) return null;
+                return new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+            }).orElse(null);
+            if (target == null) return false;
+            try {
+                Microbot.getMouse().click(target);
+            } finally {
+                lastRunToggleAttempt = System.nanoTime();
+                runToggleAttempted = true;
+            }
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getClient().getGameState() == GameState.LOGGED_IN
+                            && (Microbot.getClient().getVarpValue(173) == 1) == toggle).orElse(false);
+        } finally {
+            RUN_TOGGLE_LOCK.unlock();
+        }
     }
 
     /**
@@ -449,18 +477,31 @@ public class Rs2Player {
      */
     public static void logout() {
         if (!Microbot.isLoggedIn()) return;
-        if (Rs2Tab.getCurrentTab() != InterfaceTab.LOGOUT) {
-            Rs2Tab.switchToLogout();
-            sleepUntil(() -> Rs2Tab.getCurrentTab() == InterfaceTab.LOGOUT);
-        }
+
+        // Make sure jagex acount does not auto login
+        Rs2Keyboard.resetEnter();
+
+        Rs2Tab.switchTo(InterfaceTab.LOGOUT);
 
         Widget currentWorldWidget = Rs2Widget.getWidget(69, 3);
         if (currentWorldWidget != null) {
             // From World Switcher
-            Microbot.doInvoke(new NewMenuEntry(-1, 4522009, CC_OP.getId(), 1, -1, "Logout"), new Rectangle(1, 1, Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight()));
+            Microbot.doInvoke(new NewMenuEntry()
+                    .param0(-1)
+                    .param1(4522009)
+                    .opcode(CC_OP.getId())
+                    .identifier(1)
+                    .itemId(-1)
+                    .option("Logout"), new Rectangle(1, 1, Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight()));
         } else {
             // From red logout button
-            Microbot.doInvoke(new NewMenuEntry(-1, 11927560, CC_OP.getId(), 1, -1, "Logout"), new Rectangle(1, 1, Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight()));
+            Microbot.doInvoke(new NewMenuEntry()
+                    .param0(-1)
+                    .param1(11927560)
+                    .opcode(CC_OP.getId())
+                    .identifier(1)
+                    .itemId(-1)
+                    .option("Logout"), new Rectangle(1, 1, Microbot.getClient().getCanvasWidth(), Microbot.getClient().getCanvasHeight()));
         }
     }
 
@@ -483,18 +524,18 @@ public class Rs2Player {
                     .filter(x -> x != null && x.getWorldLocation().distanceTo(Rs2Player.getWorldLocation()) <= distance)
                     .collect(Collectors.toList());
         }
-        if (time > 0 && players.size() > amountOfPlayers) {
+        if (time > 0 && players.size() >= amountOfPlayers) {
             // Update detection times for currently detected players
             for (Rs2PlayerModel player : players) {
-                playerDetectionTimes.putIfAbsent(player, currentTime);
+                playerDetectionTimes.putIfAbsent(player.getId(), currentTime);
             }
 
             // Remove players who are no longer detected
-            playerDetectionTimes.keySet().retainAll(players);
+            playerDetectionTimes.keySet().retainAll(players.stream().map(Rs2PlayerModel::getId).collect(Collectors.toSet()));
 
             // Check if any player has been detected for longer than the specified time
             for (Rs2PlayerModel player : players) {
-                long detectionTime = playerDetectionTimes.getOrDefault(player, 0L);
+                long detectionTime = playerDetectionTimes.getOrDefault(player.getId(), 0L);
                 if (currentTime - detectionTime >= time) {
                     logout();
                     playerDetectionTimes.clear();
@@ -556,23 +597,23 @@ public class Rs2Player {
         if (time > 0 && players.size() >= amountOfPlayers) {
             // Update detection times for currently detected players
             for (Rs2PlayerModel player : players) {
-                playerDetectionTimes.putIfAbsent(player, currentTime);
+                playerDetectionTimes.putIfAbsent(player.getId(), currentTime);
             }
 
             // Remove players who are no longer detected
-            playerDetectionTimes.keySet().retainAll(players);
+            playerDetectionTimes.keySet().retainAll(players.stream().map(Rs2PlayerModel::getId).collect(Collectors.toSet()));
 
             // Check if any player has been detected for longer than the specified time
             for (Rs2PlayerModel player : players) {
-                long detectionTime = playerDetectionTimes.getOrDefault(player, 0L);
+                long detectionTime = playerDetectionTimes.getOrDefault(player.getId(), 0L);
                 if (currentTime - detectionTime >= time) {
-                    int randomWorld = Login.getRandomWorld(isMember());
+                    int randomWorld = LoginManager.getRandomWorld(isMember());
                     Microbot.hopToWorld(randomWorld);
                     return true;
                 }
             }
         } else if (players.size() >= amountOfPlayers) {
-            int randomWorld = Login.getRandomWorld(isMember());
+            int randomWorld = LoginManager.getRandomWorld(isMember());
             Microbot.hopToWorld(randomWorld);
             return true;
         }
@@ -669,23 +710,7 @@ public class Rs2Player {
      *         150.0 if boosted, 80.0 if drained, or 100.0 if unchanged.
      */
     public static double getHealthPercentage() {
-        return (double) (Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS) * 100) / Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
-    }
-
-    /**
-     * Retrieves a list of players around the player.
-     *
-     * @return A list of {@code Rs2PlayerModel} objects representing nearby players, excluding the local player.
-     * @deprecated Since 1.7.2, use {@link #getPlayers(Predicate)} for better filtering support.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static List<Player> getPlayers() {
-        return Microbot.getClient()
-                .getTopLevelWorldView()
-                .players()
-                .stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        return (double) (getBoostedSkillLevel(Skill.HITPOINTS) * 100) / getRealSkillLevel(Skill.HITPOINTS);
     }
 
     /**
@@ -694,6 +719,7 @@ public class Rs2Player {
      * @param predicate A condition to filter players (optional).
      * @return A stream of Rs2PlayerModel objects representing nearby players.
      */
+    @Deprecated(since = "2.1.0 - Use Rs2PlayerCache/Rs2PlayerQueryable", forRemoval = true)
     public static Stream<Rs2PlayerModel> getPlayers(Predicate<Rs2PlayerModel> predicate) {
         return getPlayers(predicate, false);
     }
@@ -705,6 +731,7 @@ public class Rs2Player {
      * @param includeLocalPlayer a flag on whether to include the local player within the stream
      * @return A stream of Rs2PlayerModel objects representing nearby players.
      */
+    @Deprecated(since = "2.1.0 - Use Rs2PlayerCache/Rs2PlayerQueryable", forRemoval = true)
     public static Stream<Rs2PlayerModel> getPlayers(Predicate<Rs2PlayerModel> predicate, boolean includeLocalPlayer) {
         List<Rs2PlayerModel> players = Optional.of(Microbot.getClient().getTopLevelWorldView().players()
                         .stream()
@@ -726,6 +753,7 @@ public class Rs2Player {
      *                   If {@code false}, checks if the player name contains the given string.
      * @return The first matching {@code Rs2PlayerModel}, or {@code null} if no player is found.
      */
+    @Deprecated(since = "2.1.0 - Use Rs2PlayerCache/Rs2PlayerQueryable", forRemoval = true)
     public static Rs2PlayerModel getPlayer(String playerName, boolean exact) {
         return getPlayers(player -> {
             String name = player.getName();
@@ -741,6 +769,7 @@ public class Rs2Player {
      * @return The first matching {@code Rs2PlayerModel}, or {@code null} if no player is found.
      *         Uses {@code getPlayer(playerName, false)} to perform a case-insensitive partial match.
      */
+    @Deprecated(since = "2.1.0 - Use Rs2PlayerCache/Rs2PlayerQueryable", forRemoval = true)
     public static Rs2PlayerModel getPlayer(String playerName) {
         return getPlayer(playerName, false);
     }
@@ -750,6 +779,7 @@ public class Rs2Player {
      *
      * @return a list of players that are in combat
      */
+    @Deprecated(since = "2.1.0 - Use Rs2PlayerCache/Rs2PlayerQueryable", forRemoval = true)
     public static List<Rs2PlayerModel> getPlayersInCombat() {
         return getPlayers(player -> player.getHealthRatio() != -1).collect(Collectors.toList());
     }
@@ -780,21 +810,6 @@ public class Rs2Player {
     }
 
     /**
-     * Calculates the player's health as a percentage.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel}
-     * before calculating health percentage.</p>
-     *
-     * @param player The {@link Player} to calculate health for.
-     * @return The health percentage (0-100), or {@code -1} if health information is unavailable.
-     * @deprecated Since 1.7.2, use {@link #calculateHealthPercentage(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static int calculateHealthPercentage(Player player) {
-        return calculateHealthPercentage(new Rs2PlayerModel(player));
-    }
-
-    /**
      * Retrieves a map of the player's equipped items, mapping {@link KitType} to their corresponding item IDs.
      *
      * @param rs2Player The {@link Rs2PlayerModel} representing the player whose equipment is to be retrieved.
@@ -809,18 +824,6 @@ public class Rs2Player {
         }
 
         return equipmentMap;
-    }
-
-    /**
-     * Retrieves a map of the player's equipped items by converting a {@link Player} object into an {@link Rs2PlayerModel}.
-     *
-     * @param player The {@link Player} whose equipment is to be retrieved.
-     * @return A {@code Map<KitType, Integer>} containing the equipment slot types as keys and the corresponding item IDs as values.
-     * @deprecated Since 1.7.2, use {@link #getPlayerEquipmentIds(Rs2PlayerModel)} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static Map<KitType, Integer> getPlayerEquipmentIds(Player player) {
-        return getPlayerEquipmentIds(new Rs2PlayerModel(player));
     }
 
 
@@ -845,18 +848,6 @@ public class Rs2Player {
         return equipmentMap;
     }
 
-    /**
-     * Retrieves a map of the player's equipped items by converting a {@link Player} object into an {@link Rs2PlayerModel}.
-     *
-     * @param player The {@link Player} whose equipment names are to be retrieved.
-     * @return A {@code Map<KitType, String>} containing the equipment slot types as keys and the corresponding item names as values.
-     * @deprecated Since 1.7.2, use {@link #getPlayerEquipmentNames(Rs2PlayerModel)} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static Map<KitType, String> getPlayerEquipmentNames(Player player) {
-        return getPlayerEquipmentNames(new Rs2PlayerModel(player));
-    }
-
 
     /**
      * Checks if a player has a specific item equipped by its item ID.
@@ -871,20 +862,6 @@ public class Rs2Player {
         return equipment.values().stream()
                 .anyMatch(equippedItemId -> equippedItemId == itemId);
     }
-
-    /**
-     * Checks if a player has a specific item equipped by its item ID.
-     * Converts a {@link Player} object into an {@link Rs2PlayerModel} before performing the check.
-     *
-     * @param player The {@link Player} whose equipment is being checked.
-     * @param itemId The ID of the item to check for.
-     * @return {@code true} if the player has the specified item equipped, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #hasPlayerEquippedItem(Rs2PlayerModel, int)} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean hasPlayerEquippedItem(Player player, int itemId) {
-        return hasPlayerEquippedItem(new Rs2PlayerModel(player), itemId);
-    }
     
     /**
      * Checks if a player has any of the specified items equipped by their item IDs.
@@ -898,20 +875,6 @@ public class Rs2Player {
 
         return equipment.values().stream()
                 .anyMatch(equippedItemId -> Arrays.stream(itemIds).anyMatch(id -> id == equippedItemId));
-    }
-
-    /**
-     * Checks if a player has any of the specified items equipped by their item IDs.
-     * Converts a {@link Player} object into an {@link Rs2PlayerModel} before performing the check.
-     *
-     * @param player  The {@link Player} whose equipment is being checked.
-     * @param itemIds An array of item IDs to check for.
-     * @return {@code true} if the player has any of the specified items equipped, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #hasPlayerEquippedItem(Rs2PlayerModel, int[])} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean hasPlayerEquippedItem(Player player, int[] itemIds) {
-        return hasPlayerEquippedItem(new Rs2PlayerModel(player), itemIds);
     }
 
 
@@ -929,20 +892,6 @@ public class Rs2Player {
                 .anyMatch(equippedItem -> equippedItem.equalsIgnoreCase(itemName));
     }
 
-    /**
-     * Checks if a player has a specific item equipped by its name.
-     * Converts a {@link Player} object into an {@link Rs2PlayerModel} before performing the check.
-     *
-     * @param player   The {@link Player} whose equipment is being checked.
-     * @param itemName The name of the item to check for.
-     * @return {@code true} if the player has the specified item equipped, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #hasPlayerEquippedItem(Rs2PlayerModel, String)} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean hasPlayerEquippedItem(Player player, String itemName) {
-        return hasPlayerEquippedItem(new Rs2PlayerModel(player), itemName);
-    }
-
 
     /**
      * Checks if a player has any of the specified items equipped by their names.
@@ -956,20 +905,6 @@ public class Rs2Player {
 
         return equipment.values().stream()
                 .anyMatch(equippedItem -> itemNames.stream().anyMatch(equippedItem::equalsIgnoreCase));
-    }
-
-    /**
-     * Checks if a player has any of the specified items equipped by their names.
-     * Converts a {@link Player} object into an {@link Rs2PlayerModel} before performing the check.
-     *
-     * @param player    The {@link Player} whose equipment is being checked.
-     * @param itemNames A list of item names to check for.
-     * @return {@code true} if the player has any of the specified items equipped, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #hasPlayerEquippedItem(Rs2PlayerModel, List)} for consistency and better type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean hasPlayerEquippedItem(Player player, List<String> itemNames) {
-        return hasPlayerEquippedItem(new Rs2PlayerModel(player), itemNames);
     }
 
 
@@ -1006,17 +941,6 @@ public class Rs2Player {
     }
 
     /**
-     * Get the raw local player instance.
-     *
-     * @return The raw {@link Player} object.
-     * @deprecated Since 1.7.2, use {@link #getLocalPlayer()} instead.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static Player getLocalPlayer(boolean raw) {
-        return Microbot.getClient().getLocalPlayer();
-    }
-
-    /**
      * Checks if the player is in combat based on recent activity.
      *
      * @return True if the player is in combat, false otherwise.
@@ -1033,21 +957,6 @@ public class Rs2Player {
      */
     public static List<Rs2PlayerModel> getPlayersInCombatLevelRange() {
         return getPlayersMatchingCombatCriteria().collect(Collectors.toList());
-    }
-
-    /**
-     * Gets a list of Player objects around the local player within the combat level range 
-     * and wilderness level where they can attack and be attacked.
-     *
-     * @param raw If true, returns a list of raw Player objects instead of Rs2PlayerModel.
-     * @return A list of Player objects within the combat range and attackable wilderness levels.
-     * @deprecated Since 1.7.2, use {@link #getPlayersInCombatLevelRange()} instead.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static List<Player> getPlayersInCombatLevelRange(boolean raw) {
-        return getPlayersMatchingCombatCriteria()
-                .map(Rs2PlayerModel::getPlayer)
-                .collect(Collectors.toList());
     }
 
     /**
@@ -1080,23 +989,59 @@ public class Rs2Player {
         });
     }
 
-    /**
-     * Retrieves the player's current world location as a {@link WorldPoint}.
-     *
-     * <p>If the player is in an instanced world, the method converts the local position 
-     * to an instanced {@link WorldPoint}. Otherwise, it returns the player's standard 
-     * world location.</p>
-     *
-     * @return The {@link WorldPoint} representing the player's current location.
-     */
-    public static WorldPoint getWorldLocation() {
-        if (Microbot.getClient().getTopLevelWorldView().getScene().isInstance()) {
-            LocalPoint l = LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), Microbot.getClient().getLocalPlayer().getWorldLocation());
-            return WorldPoint.fromLocalInstance(Microbot.getClient(), l);
-        } else {
-            return Microbot.getClient().getLocalPlayer().getWorldLocation();
-        }
-    }
+	/**
+	 * Retrieves the player's current world location as a {@link WorldPoint} from the client thread.
+	 *
+	 * <p>If the player is in an instanced world, the method converts the local position
+	 * to an instanced {@link WorldPoint}. Otherwise, it returns the player's standard
+	 * world location.</p>
+	 *
+	 * @return The {@link WorldPoint} representing the player's current location, or {@code null} if unavailable.
+	 */
+	public static WorldPoint getWorldLocation_Internal(){
+		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			if (Microbot.getClient().getTopLevelWorldView().getScene().isInstance()) {
+				LocalPoint l = LocalPoint.fromWorld(Microbot.getClient().getTopLevelWorldView(), Microbot.getClient().getLocalPlayer().getWorldLocation());
+				return WorldPoint.fromLocalInstance(Microbot.getClient(), l);
+			}
+			return Microbot.getClient().getLocalPlayer().getWorldLocation();
+		}).orElse(null);
+	}
+
+	/**
+	 * Retrieves the player's current {@link WorldView} from the client thread.
+	 *
+	 * @return The {@link WorldView} representing the player's current world view, or {@code null} if unavailable.
+	 */
+	public static WorldView getWorldView_Internal() {
+		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			Player player = Microbot.getClient().getLocalPlayer();
+			if (player == null) return null;
+			return player.getWorldView();
+		}).orElse(null);
+	}
+
+	/**
+	 * Retrieves the player's current world location as a {@link WorldPoint}.
+	 *
+	 * <p>If the player is in an instanced world, the method converts the local position
+	 * to an instanced {@link WorldPoint}. Otherwise, it returns the player's standard
+	 * world location.</p>
+	 *
+	 * @return The {@link WorldPoint} representing the player's current location.
+	 */
+	public static WorldPoint getWorldLocation() {
+		return Microbot.getRs2PlayerStateCache().getLocalPlayerPosition();
+	}
+
+	/**
+	 * Retrieves the player's current {@link WorldView}.
+	 *
+	 * @return The {@link WorldView} representing the player's current world view, or {@code null} if unavailable.
+	 */
+	public static WorldView getWorldView() {
+		return Microbot.getRs2PlayerStateCache().getLocalPlayerWorldView();
+	}
 
     /**
      * Retrieves the player's current location as an {@link Rs2WorldPoint}.
@@ -1113,12 +1058,102 @@ public class Rs2Player {
      * Checks if the player is within a specified distance of a given {@link WorldPoint}.
      *
      * @param worldPoint The {@link WorldPoint} to check proximity to.
-     * @param distance   The radius (in tiles) around the {@code worldPoint} to check.
+     * @param radius   The radius (in tiles) around the {@code worldPoint} to check.
      * @return {@code true} if the player is within the specified distance, {@code false} otherwise.
      */
-    public static boolean isNearArea(WorldPoint worldPoint, int distance) {
-        WorldArea worldArea = new WorldArea(worldPoint, distance, distance);
-        return worldArea.contains(getWorldLocation());
+    public static boolean isInArea(WorldPoint worldPoint, int radius) {
+        return isInArea(worldPoint, radius, radius);
+    }
+
+    /**
+     * Checks if the player is within a specified area around a given {@link WorldPoint}.
+     *
+     * @param worldPoint The {@link WorldPoint} to check proximity to.
+     * @param xRadius    The horizontal radius (in tiles) around the {@code worldPoint}.
+     * @param yRadius    The vertical radius (in tiles) around the {@code worldPoint}.
+     * @return {@code true} if the player is within the specified area, {@code false} otherwise.
+     */
+    public static boolean isInArea(WorldPoint worldPoint, int xRadius, int yRadius) {
+        // Null check for world point
+        if (worldPoint == null) {
+            return false;
+        }
+        
+        // Validate radius parameters (should be non-negative)
+        if (xRadius < 0 || yRadius < 0) {
+            return false;
+        }
+        
+        WorldPoint playerLocation = getWorldLocation();
+        
+        // Null check for player location
+        if (playerLocation == null) {
+            return false;
+        }
+        
+        // Ensure both points are on the same plane
+        if (worldPoint.getPlane() != playerLocation.getPlane()) {
+            return false;
+        }
+        
+        // Simple distance check - check if player is within the rectangular radius
+        int deltaX = Math.abs(playerLocation.getX() - worldPoint.getX());
+        int deltaY = Math.abs(playerLocation.getY() - worldPoint.getY());
+        
+        return deltaX <= xRadius && deltaY <= yRadius;
+    }
+
+    /**
+     * Checks if two areas intersect - one centered on the player and another on a target {@link WorldPoint}.
+     *
+     * @param targetPoint    The {@link WorldPoint} to check intersection with.
+     * @param targetXSpan    The total width (in tiles) of the area around the {@code targetPoint}.
+     * @param targetYSpan    The total height (in tiles) of the area around the {@code targetPoint}.
+     * @param playerXSpan    The total width (in tiles) of the area around the player's position.
+     * @param playerYSpan    The total height (in tiles) of the area around the player's position.
+     * @return {@code true} if the player's area intersects with the target area, {@code false} otherwise.
+     */
+    public static boolean isPlayerAreaIntersecting(WorldPoint targetPoint, int targetXSpan, int targetYSpan, 
+                                             int playerXSpan, int playerYSpan) {
+        // Null check for target point
+        if (targetPoint == null) {
+            return false;
+        }
+        
+        // Validate span parameters (should be non-negative)
+        if (targetXSpan < 0 || targetYSpan < 0 || playerXSpan < 0 || playerYSpan < 0) {
+            return false;
+        }
+        
+        WorldPoint playerLocation = getWorldLocation();
+        
+        // Null check for player location
+        if (playerLocation == null) {
+            return false;
+        }
+        
+        // Ensure both points are on the same plane
+        if (targetPoint.getPlane() != playerLocation.getPlane()) {
+            return false;
+        }
+        
+        // Create target area centered on targetPoint
+        WorldPoint targetSouthWest = new WorldPoint(
+            targetPoint.getX() - (targetXSpan /2), 
+            targetPoint.getY() - (targetYSpan / 2), 
+            targetPoint.getPlane()
+        );
+        WorldArea targetArea = new WorldArea(targetSouthWest, targetXSpan, targetYSpan);
+        
+        // Create player area centered on player location
+        WorldPoint playerSouthWest = new WorldPoint(
+            playerLocation.getX() - (playerXSpan / 2), 
+            playerLocation.getY() - (playerYSpan / 2), 
+            playerLocation.getPlane()
+        );
+        WorldArea playerArea = new WorldArea(playerSouthWest, playerXSpan, playerYSpan);
+        
+        return targetArea.intersectsWith2D(playerArea);
     }
 
     /**
@@ -1139,8 +1174,8 @@ public class Rs2Player {
      *         {@code false} otherwise.
      */
     public static boolean isFullHealth() {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.HITPOINTS)
-                >= Microbot.getClient().getRealSkillLevel(Skill.HITPOINTS);
+        return getBoostedSkillLevel(Skill.HITPOINTS)
+                >= getRealSkillLevel(Skill.HITPOINTS);
     }
 
     /**
@@ -1149,8 +1184,26 @@ public class Rs2Player {
      * @return {@code true} if the player is inside a multi-combat zone, {@code false} otherwise.
      */
     public static boolean isInMulti() {
-        return Microbot.getVarbitValue(Varbits.MULTICOMBAT_AREA)
-                == VarbitValues.INSIDE_MULTICOMBAT_ZONE.getValue();
+        return Microbot.getVarbitValue(VarbitID.MULTIWAY_INDICATOR)
+                == 1;
+    }
+
+    /**
+     * Checks if the player is currently inside their Player Owned House (POH).
+     *
+     * <p>This is detected by verifying two conditions:</p>
+     * <ul>
+     *     <li>The current scene is an instanced region (all POHs are instanced).</li>
+     *     <li>The {@link VarbitID#POH_HOUSE_LOCATION} varbit is non-zero, which is
+     *         set whenever the player is inside a POH. This distinguishes the POH from
+     *         other instanced regions such as the Gauntlet or Hallowed Sepulchre.</li>
+     * </ul>
+     *
+     * @return {@code true} if the player is inside a POH, {@code false} otherwise.
+     */
+    public static boolean isInPoh() {
+        return Microbot.getClient().getTopLevelWorldView().getScene().isInstance()
+                && Microbot.getVarbitValue(VarbitID.POH_HOUSE_LOCATION) > 0;
     }
 
     public static boolean drinkPrayerPotion() {
@@ -1160,7 +1213,7 @@ public class Rs2Player {
 
         if (hasPotion("moonlight moth mix")) {
             restoreAmount = 22;
-        } else if (hasPotion("moonlight potion")) {
+        } else if (hasPotion("moonlight potion") || hasPotion("moonlight moth")) {
             int prayerRestore = (maxPrayer / 4) + 7;
             int herbloreRestore = (int) Math.floor((maxHerblore * 3.0 / 10.0)) + 7;
             restoreAmount = Math.max(prayerRestore, herbloreRestore);
@@ -1240,8 +1293,8 @@ public class Rs2Player {
      * @return {@code true} if a potion was successfully consumed, {@code false} otherwise.
      */
     public static boolean drinkCombatPotionAt(Skill skill, boolean superCombat) {
-        int real = Microbot.getClient().getRealSkillLevel(skill);
-        int boosted = Microbot.getClient().getBoostedSkillLevel(skill);
+        int real = getRealSkillLevel(skill);
+        int boosted = getBoostedSkillLevel(skill);
 
         // max boost per wiki: RealLevel * (15/100) + 5
         double maxBoost = real * 0.15 + 5;
@@ -1380,7 +1433,15 @@ public class Rs2Player {
 
         if (potion == null) return false;
 
-        return Rs2Inventory.interact(potion, "drink");
+        String action = Arrays.stream(potion.getInventoryActions())
+                .filter(a -> a != null && a.equalsIgnoreCase("drink"))
+                .findFirst()
+                .orElseGet(() -> Arrays.stream(potion.getInventoryActions())
+                        .filter(a -> a != null && a.equalsIgnoreCase("release"))
+                        .findFirst()
+                        .orElse("drink"));
+
+        return Rs2Inventory.interact(potion, action);
     }
     
     /**
@@ -1413,7 +1474,7 @@ public class Rs2Player {
      * @return {@code true} if the player's boosted prayer level is greater than zero, {@code false} otherwise.
      */
     public static boolean hasPrayerPoints() {
-        return Microbot.getClient().getBoostedSkillLevel(Skill.PRAYER) > 0;
+        return getBoostedSkillLevel(Skill.PRAYER) > 0;
     }
 
     /**
@@ -1422,8 +1483,8 @@ public class Rs2Player {
      * @return a value between 0 and 100 representing the percentage of prayer remaining.
      */
     public static int getPrayerPercentage() {
-        int current = Microbot.getClient().getBoostedSkillLevel(Skill.PRAYER);
-        int base = Microbot.getClient().getRealSkillLevel(Skill.PRAYER);
+        int current = getBoostedSkillLevel(Skill.PRAYER);
+        int base = getRealSkillLevel(Skill.PRAYER);
 
         return (int) ((current / (double) base) * 100);
     }
@@ -1454,8 +1515,10 @@ public class Rs2Player {
      * @return The animation ID of the player's current action, or {@code -1} if the player is null.
      */
     public static int getAnimation() {
-        if (Microbot.getClient().getLocalPlayer() == null) return -1;
-        return Microbot.getClient().getLocalPlayer().getAnimation();
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            if (Microbot.getClient() == null || Microbot.getClient().getLocalPlayer() == null) return -1;
+            return Microbot.getClient().getLocalPlayer().getAnimation();
+        }).orElse(-1);
     }
 
     /**
@@ -1464,7 +1527,9 @@ public class Rs2Player {
      * @return The pose animation ID of the player.
      */
     public static int getPoseAnimation() {
-        return Microbot.getClient().getLocalPlayer().getPoseAnimation();
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getLocalPlayer().getPoseAnimation()
+        ).orElse(-1);
     }
 
     /**
@@ -1474,8 +1539,7 @@ public class Rs2Player {
      * @return The {@link QuestState} representing the player's progress in the quest.
      */
     public static QuestState getQuestState(Quest quest) {
-        Client client = Microbot.getClient();
-        return Microbot.getClientThread().runOnClientThreadOptional(() -> quest.getState(client)).orElse(null);
+        return Microbot.getRs2PlayerStateCache().getQuestState(quest);
     }
 
     /**
@@ -1485,7 +1549,9 @@ public class Rs2Player {
      * @return The player's real level for the specified skill.
      */
     public static int getRealSkillLevel(Skill skill) {
-        return Microbot.getClient().getRealSkillLevel(skill);
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getRealSkillLevel(skill)
+        ).orElse(0);
     }
 
     /**
@@ -1495,7 +1561,9 @@ public class Rs2Player {
      * @return The player's boosted level for the specified skill.
      */
     public static int getBoostedSkillLevel(Skill skill) {
-        return Microbot.getClient().getBoostedSkillLevel(skill);
+        return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                Microbot.getClient().getBoostedSkillLevel(skill)
+        ).orElse(0);
     }
 
     /**
@@ -1634,7 +1702,7 @@ public class Rs2Player {
      * @return The player's run energy as an integer percentage (0-100).
      */
     public static int getRunEnergy() {
-        return Microbot.getClient().getEnergy() / 100;
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> Microbot.getClient().getEnergy()).orElse(0) / 100;
     }
 
     /**
@@ -1698,20 +1766,6 @@ public class Rs2Player {
     }
 
     /**
-     * Invokes the "attack" action on the specified player.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the attack action.</p>
-     *
-     * @param player The {@link Player} to attack.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #attack(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean attack(Player player) {
-        return attack(new Rs2PlayerModel(player));
-    }
-
-    /**
      * Invokes the "walk here" action to move to the same location as the specified player.
      *
      * <p>This method interacts with the specified {@link Rs2PlayerModel} to initiate movement to their position.</p>
@@ -1721,20 +1775,6 @@ public class Rs2Player {
      */
     public static boolean walkUnder(Rs2PlayerModel rs2Player) {
         return invokeMenu(rs2Player, "walk here");
-    }
-
-    /**
-     * Invokes the "walk here" action to move to the same location as the specified player.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the movement action.</p>
-     *
-     * @param player The {@link Player} under whose position to walk.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #walkUnder(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean walkUnder(Player player) {
-        return walkUnder(new Rs2PlayerModel(player));
     }
 
     /**
@@ -1750,20 +1790,6 @@ public class Rs2Player {
     }
 
     /**
-     * Invokes the "trade with" action on the specified player.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the trade action.</p>
-     *
-     * @param player The {@link Player} to trade with.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #trade(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean trade(Player player) {
-        return trade(new Rs2PlayerModel(player));
-    }
-
-    /**
      * Invokes the "follow" action on the specified player.
      *
      * <p>This method interacts with the specified {@link Rs2PlayerModel} to initiate following them.</p>
@@ -1773,20 +1799,6 @@ public class Rs2Player {
      */
     public static boolean follow(Rs2PlayerModel rs2Player) {
         return invokeMenu(rs2Player, "follow");
-    }
-
-    /**
-     * Invokes the "follow" action on the specified player.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the follow action.</p>
-     *
-     * @param player The {@link Player} to follow.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #follow(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean follow(Player player) {
-        return follow(new Rs2PlayerModel(player));
     }
 
     /**
@@ -1802,20 +1814,6 @@ public class Rs2Player {
     }
 
     /**
-     * Invokes the "cast" action on the specified player.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the cast action.</p>
-     *
-     * @param player The {@link Player} to cast on.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #cast(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean cast(Player player) {
-        return cast(new Rs2PlayerModel(player));
-    }
-
-    /**
      * Selects the "USE" option on a player for an item that is already selected via {@code Rs2Inventory.use(item)}.
      *
      * <p>This method interacts with the specified {@link Rs2PlayerModel} to use the selected item on them.</p>
@@ -1825,20 +1823,6 @@ public class Rs2Player {
      */
     public static boolean use(Rs2PlayerModel rs2Player) {
         return invokeMenu(rs2Player, "use");
-    }
-
-    /**
-     * Selects the "USE" option on a player for an item that is already selected via {@code Rs2Inventory.use(item)}.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the use action.</p>
-     *
-     * @param player The {@link Player} to use the item on.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #use(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean use(Player player) {
-        return use(new Rs2PlayerModel(player));
     }
     
     /**
@@ -1851,20 +1835,6 @@ public class Rs2Player {
      */
     public static boolean challenge(Rs2PlayerModel rs2Player) {
         return invokeMenu(rs2Player, "challenge");
-    }
-
-    /**
-     * Selects the "CHALLENGE" option on a player for Soul Wars.
-     *
-     * <p>This method converts a {@link Player} object into an {@link Rs2PlayerModel} before invoking the challenge action.</p>
-     *
-     * @param player The {@link Player} to challenge.
-     * @return {@code true} if the action was invoked successfully, {@code false} otherwise.
-     * @deprecated Since 1.7.2, use {@link #challenge(Rs2PlayerModel)} for consistency and improved type handling.
-     */
-    @Deprecated(since = "1.7.2", forRemoval = true)
-    public static boolean challenge(Player player) {
-        return challenge(new Rs2PlayerModel(player));
     }
 
     /**
@@ -1902,7 +1872,14 @@ public class Rs2Player {
 
         // Invoke the menu entry using the selected action
         Microbot.doInvoke(
-                new NewMenuEntry(0, 0, menuAction.getId(), rs2Player.getId(), -1, rs2Player.getName(), rs2Player),
+                new NewMenuEntry()
+                        .param0(0)
+                        .param1(0)
+                        .opcode(menuAction.getId())
+                        .identifier(rs2Player.getId())
+                        .itemId(-1)
+                        .target(rs2Player.getName())
+                        .actor(rs2Player),
                 Rs2UiHelper.getActorClickbox(rs2Player)
         );
 

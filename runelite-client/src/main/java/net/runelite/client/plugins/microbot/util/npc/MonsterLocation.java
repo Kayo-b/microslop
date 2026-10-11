@@ -64,6 +64,16 @@ public class MonsterLocation
         return closest;
     }
 
+    public WorldPoint getBestClusterCenter() {
+        if (coords.isEmpty()) {
+            return null;
+        }
+
+        PointClusterer clusterer = new PointClusterer(coords);
+
+        return clusterer.getClosestToDenseCenterAdaptive();
+    }
+
     public WorldPoint getClosestToCenterParallel() {
         if (coords.isEmpty()) {
             return null;

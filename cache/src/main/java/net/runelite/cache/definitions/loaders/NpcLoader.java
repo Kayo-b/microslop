@@ -24,7 +24,6 @@
  */
 package net.runelite.cache.definitions.loaders;
 
-import java.util.HashMap;
 import lombok.Data;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +39,9 @@ public class NpcLoader
 
 	private int defaultHeadIconArchive = -1;
 	private boolean rev210HeadIcons = true;
+	private boolean rev233 = true;
+
+	private EntityOpsLoader entityOpsLoader = new EntityOpsLoader();
 
 	public NpcLoader configureForRevision(int rev)
 	{
@@ -127,11 +129,7 @@ public class NpcLoader
 		}
 		else if (opcode >= 30 && opcode < 35)
 		{
-			def.actions[opcode - 30] = stream.readString();
-			if (def.actions[opcode - 30].equalsIgnoreCase("Hidden"))
-			{
-				def.actions[opcode - 30] = null;
-			}
+			entityOpsLoader.decodeOp(def.ops, stream, opcode - 30);
 		}
 		else if (opcode == 40)
 		{
@@ -157,7 +155,10 @@ public class NpcLoader
 				def.retextureToFind[index] = (short) stream.readUnsignedShort();
 				def.retextureToReplace[index] = (short) stream.readUnsignedShort();
 			}
-
+		}
+		else if (opcode == 42)
+		{
+			def.fullRecolor = (short) stream.readUnsignedShort();
 		}
 		else if (opcode == 60)
 		{
@@ -167,6 +168,26 @@ public class NpcLoader
 			for (index = 0; index < length; ++index)
 			{
 				def.chatheadModels[index] = stream.readUnsignedShort();
+			}
+		}
+		else if (opcode == 61)
+		{
+			length = stream.readUnsignedByte();
+			def.models = new int[length];
+
+			for (index = 0; index < length; ++index)
+			{
+				def.models[index] = stream.readInt();
+			}
+		}
+		else if (opcode == 62)
+		{
+			length = stream.readUnsignedByte();
+			def.chatheadModels = new int[length];
+
+			for (index = 0; index < length; ++index)
+			{
+				def.chatheadModels[index] = stream.readInt();
 			}
 		}
 		else if (opcode == 74)
@@ -211,7 +232,7 @@ public class NpcLoader
 		}
 		else if (opcode == 99)
 		{
-			def.hasRenderPriority = true;
+			def.renderPriority = 1;
 		}
 		else if (opcode == 100)
 		{
@@ -296,11 +317,15 @@ public class NpcLoader
 		{
 			def.rotationFlag = false;
 		}
-		else if (opcode == 111)
+		else if (opcode == 111 && !rev233)
 		{
 			// removed in 220
 			def.isFollower = true;
 			def.lowPriorityFollowerOps = true;
+		}
+		else if (opcode == 111 && rev233)
+		{
+			def.renderPriority = 2;
 		}
 		else if (opcode == 114)
 		{
@@ -374,30 +399,41 @@ public class NpcLoader
 		{
 			def.footprintSize = stream.readUnsignedShort();
 		}
+		else if (opcode == 129)
+		{
+			def.unknown1 = true;
+		}
+		else if (opcode == 130)
+		{
+			def.idleAnimRestart = true;
+		}
+		else if (opcode == 145)
+		{
+			def.canHideForOverlap = true;
+		}
+		else if (opcode == 146)
+		{
+			def.overlapTintHSL = stream.readUnsignedShort();
+		}
+		else if (opcode == 147)
+		{
+			def.zbuf = false;
+		}
 		else if (opcode == 249)
 		{
-			length = stream.readUnsignedByte();
-
-			def.params = new HashMap<>(length);
-
-			for (int i = 0; i < length; i++)
-			{
-				boolean isString = stream.readUnsignedByte() == 1;
-				int key = stream.read24BitInt();
-				Object value;
-
-				if (isString)
-				{
-					value = stream.readString();
-				}
-
-				else
-				{
-					value = stream.readInt();
-				}
-
-				def.params.put(key, value);
-			}
+			def.params = stream.readParams();
+		}
+		else if (opcode == 251)
+		{
+			entityOpsLoader.decodeSubOp(def.ops, stream);
+		}
+		else if (opcode == 252)
+		{
+			entityOpsLoader.decodeConditionalOp(def.ops, stream);
+		}
+		else if (opcode == 253)
+		{
+			entityOpsLoader.decodeConditionalSubOp(def.ops, stream);
 		}
 		else
 		{

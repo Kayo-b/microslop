@@ -225,8 +225,6 @@ public final class ParamID
 
 	public static final int NPC_DEATH_HIDER_EXCLUDE = 1799;
 
-	public static final int SLAYER_TASK_NAME = 1801;
-
 	public static final int ATTACK_STYLE_NAME = 1407;
 
 	public static final int SPELL_BUTTON = 596;
@@ -236,4 +234,8 @@ public final class ParamID
 	public static final int BANK_AUTOCHARGE = 2257;
 
 	public static final int CLUE_SCROLL = 623;
+
+	public static final int QUIVER_AMMO_AVAILABLE = 1910;
+
+	public static final int COURIER_BAG_TIER = 2645;
 }

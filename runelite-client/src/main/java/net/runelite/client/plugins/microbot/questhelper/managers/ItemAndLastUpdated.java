@@ -30,7 +30,7 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Item;
 
-import javax.annotation.Nullable;
+import javax.annotation.Nonnull;
 import java.util.concurrent.Callable;
 
 @Slf4j
@@ -42,7 +42,7 @@ public class ItemAndLastUpdated
     // last game tick item container was changed
     @Getter
     private int lastUpdated = -1;
-    private Item[] items;
+    private Item[] items = new Item[0];
 
     @Setter
     private Callable<Item[]> specialMethodToObtainItems;
@@ -65,7 +65,7 @@ public class ItemAndLastUpdated
      *
      * @return an {@link Item}[] of items currently thought to be in the container.
      */
-    public @Nullable Item[] getItems()
+    public @Nonnull Item[] getItems()
     {
         if (specialMethodToObtainItems != null)
         {

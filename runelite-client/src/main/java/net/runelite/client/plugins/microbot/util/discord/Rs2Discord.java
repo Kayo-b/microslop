@@ -5,7 +5,7 @@ import net.runelite.client.config.ConfigProfile;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.discord.models.DiscordEmbed;
 import net.runelite.client.plugins.microbot.util.discord.models.DiscordPayload;
-import net.runelite.client.plugins.microbot.util.security.Login;
+import net.runelite.client.plugins.microbot.util.security.LoginManager;
 import okhttp3.*;
 
 import java.awt.*;
@@ -32,7 +32,15 @@ public class Rs2Discord {
     public static boolean sendWebhookMessage(String bodyMessage, List<DiscordEmbed> embeds, List<String> files) {
         // Retrieve and validate the Discord Webhook URL
         String webHookUrl = Optional.ofNullable(getDiscordWebhookUrl())
+                .map(String::trim)
                 .filter(url -> !url.isEmpty())
+                .map(url -> {
+                    // Auto-fix URL if it doesn't have a scheme
+                    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                        return "https://" + url;
+                    }
+                    return url;
+                })
                 .orElseGet(() -> {
                     Microbot.log("The webhook URL is not configured in the RuneLite profile. Please check the configuration.");
                     return null;
@@ -69,19 +77,27 @@ public class Rs2Discord {
 
         RequestBody requestBody = builder.build();
 
-        // Build and execute the request
-        Request request = new Request.Builder()
-                .url(webHookUrl)
-                .post(requestBody)
-                .build();
+        try {
+            // Build and execute the request
+            Request request = new Request.Builder()
+                    .url(webHookUrl)
+                    .post(requestBody)
+                    .build();
 
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                Microbot.log("Failed to send Discord notification. Error Code: " + response.code());
+            try (Response response = httpClient.newCall(request).execute()) {
+                if (!response.isSuccessful()) {
+                    Microbot.log("Failed to send Discord notification. Error Code: " + response.code() 
+                            + " - URL marked as invalid: " + webHookUrl);
+                }
+                return response.isSuccessful();
             }
-            return response.isSuccessful();
+        } catch (IllegalArgumentException e) {
+            Microbot.log("Invalid Discord webhook URL format - URL marked as invalid: " + webHookUrl 
+                    + " - Error: " + e.getMessage());
+            return false;
         } catch (IOException e) {
-            Microbot.log("Error while sending Discord notification: " + e.getMessage());
+            Microbot.log("Error while sending Discord notification to URL: " + webHookUrl 
+                    + " - Error: " + e.getMessage());
             return false;
         }
     }
@@ -113,7 +129,7 @@ public class Rs2Discord {
      * @return String
      */
     private static String getDiscordWebhookUrl() {
-        return Optional.ofNullable(Login.activeProfile)
+        return Optional.ofNullable(LoginManager.getActiveProfile())
                 .map(ConfigProfile::getDiscordWebhookUrl)
                 .orElse(null);
     }
@@ -147,5 +163,127 @@ public class Rs2Discord {
 
         // Shift the red, green, and blue components to create the integer color representation
         return (red << 16) | (green << 8) | blue;
+    }
+
+    /**
+     * sends a custom notification with configurable title, description, and color
+     *
+     * @param title the notification title
+     * @param description the notification description
+     * @param color the embed color (hex format)
+     * @param playerName the player name to include
+     * @param source the source of the notification
+     * @return true if notification was sent successfully
+     */
+    public static boolean sendCustomNotification(String title, String description, int color, String playerName, String source) {
+        String timestamp = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+
+        DiscordEmbed embed = new DiscordEmbed();
+        embed.setTitle(title);
+        embed.setDescription(description);
+        embed.setColor(color);
+        embed.addField(new DiscordEmbed.Field("Player", 
+                playerName.isEmpty() ? "Unknown" : playerName, true));
+        embed.addField(new DiscordEmbed.Field("Time", timestamp, true));
+        embed.addField(new DiscordEmbed.Field("Source", source, true));
+        embed.setFooter(new DiscordEmbed.Footer("Microbot", null));
+
+        return sendWebhookMessage("", Collections.singletonList(embed));
+    }
+
+    /**
+     * sends a notification with custom fields
+     *
+     * @param title the notification title
+     * @param description the notification description
+     * @param color the embed color
+     * @param fields list of custom fields to add
+     * @param footerText custom footer text
+     * @return true if notification was sent successfully
+     */
+    public static boolean sendNotificationWithFields(String title, String description, int color, 
+                                                   java.util.List<DiscordEmbed.Field> fields, String footerText) {
+        DiscordEmbed embed = new DiscordEmbed();
+        embed.setTitle(title);
+        embed.setDescription(description);
+        embed.setColor(color);
+        
+        // add custom fields
+        if (fields != null) {
+            for (DiscordEmbed.Field field : fields) {
+                embed.addField(field);
+            }
+        }
+        
+        embed.setFooter(new DiscordEmbed.Footer(footerText != null ? footerText : "Microbot", null));
+
+        return sendWebhookMessage("", Collections.singletonList(embed));
+    }
+
+    /**
+     * sends a simple text message notification
+     *
+     * @param message the message to send
+     * @param playerName the player name to include
+     * @param source the source of the notification
+     * @return true if notification was sent successfully
+     */
+    public static boolean sendSimpleNotification(String message, String playerName, String source) {
+        return sendCustomNotification("📢 Notification", message, 0x3498DB, playerName, source);
+    }
+
+    /**
+     * sends an alert notification with customizable icon and color
+     *
+     * @param alertType the type of alert (e.g., "ERROR", "WARNING", "SUCCESS")
+     * @param message the alert message
+     * @param color the embed color
+     * @param playerName the player name
+     * @param source the source of the alert
+     * @return true if notification was sent successfully
+     */
+    public static boolean sendAlert(String alertType, String message, int color, String playerName, String source) {
+        String icon = getIconForAlertType(alertType);
+        String title = icon + " " + alertType.toUpperCase();
+        return sendCustomNotification(title, message, color, playerName, source);
+    }
+
+    /**
+     * gets appropriate icon for alert type
+     */
+    private static String getIconForAlertType(String alertType) {
+        switch (alertType.toUpperCase()) {
+            case "ERROR": return "❌";
+            case "WARNING": return "⚠️";
+            case "SUCCESS": return "✅";
+            case "INFO": return "ℹ️";
+            case "BAN": return "🚫";
+            case "SHUTDOWN": return "🔴";
+            default: return "📢";
+        }
+    }
+
+    /**
+     * creates a field for discord embed
+     */
+    public static DiscordEmbed.Field createField(String name, String value, boolean inline) {
+        return new DiscordEmbed.Field(name, value, inline);
+    }
+
+    /**
+     * creates a timestamp field for current time
+     */
+    public static DiscordEmbed.Field createTimestampField() {
+        String timestamp = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        return createField("Time", timestamp, true);
+    }
+
+    /**
+     * creates a player field
+     */
+    public static DiscordEmbed.Field createPlayerField(String playerName) {
+        return createField("Player", playerName.isEmpty() ? "Unknown" : playerName, true);
     }
 }

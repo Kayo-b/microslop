@@ -1,6 +1,7 @@
 - **Start botting**
     - Install Microbot
 - [**Development**](Development.md)
+    - [**Agent Script Tools**](AGENT_SCRIPT_TOOLS.md)
     - **API**
       * [Rs2Bank](api/apidocs/net/runelite/client/plugins/microbot/util/bank/Rs2Bank.html)
       * [Rs2Camera](api/apidocs/net/runelite/client/plugins/microbot/util/camera/Rs2Camera.html)
@@ -33,8 +34,8 @@
       * [Defining Conditions](scheduler/defining-conditions.md)
       * [PluginScheduleEntry](scheduler/plugin-schedule-entry-merged.md)
       * [SchedulerPlugin](scheduler/scheduler-plugin.md)
-      * [PluginScheduleEntryFinishedEvent](scheduler/event/plugin-schedule-entry-finished-event.md)
-      * [PluginScheduleEntrySoftStopEvent](scheduler/event/plugin-schedule-entry-soft-stop-event.md)
+      * [PluginScheduleEntryMainTaskFinishedEvent](scheduler/event/plugin-schedule-entry-finished-event.md)
+      * [PluginScheduleEntryPostScheduleTaskEvent](scheduler/event/plugin-schedule-entry-soft-stop-event.md)
       * [Time Conditions](scheduler/time-conditions.md)
       * [Logical Conditions](scheduler/logical-conditions.md)
       * [Resource Conditions](scheduler/resource-conditions.md)

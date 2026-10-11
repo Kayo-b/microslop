@@ -1,0 +1,6 @@
+node_modules/
+data/
+logs/
+kb-dumper/build/
+kb-dumper/.gradle/
+!package-lock.json

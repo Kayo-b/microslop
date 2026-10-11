@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.client.input.MouseAdapter;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.util.mouse.BotEventGuard;
 import net.runelite.client.ui.overlay.OverlayPanel;
 
 import javax.swing.*;
@@ -26,10 +27,8 @@ public class ButtonComponent implements LayoutableRenderableEntity
         @Override
         public MouseEvent mouseMoved(MouseEvent mouseEvent)
         {
-            if (mouseEvent.getSource().toString().equals("Microbot"))
+            if (BotEventGuard.isSynthetic())
                 return mouseEvent;
-            //                log.info("Hovering over button at: " + mouseEvent.getPoint());
-            //                log.info("Not hovering over button at: " + mouseEvent.getPoint());
             isHovered = isMouseOver(mouseEvent.getPoint());
             return mouseEvent;
         }
@@ -41,15 +40,16 @@ public class ButtonComponent implements LayoutableRenderableEntity
             {
                 return mouseEvent;
             }
-            if (mouseEvent.getSource().toString().equals("Microbot"))
+            if (BotEventGuard.isSynthetic())
                 return mouseEvent;
+
             if (SwingUtilities.isLeftMouseButton(mouseEvent))
             {
                     Microbot.getClientThread().invokeLater(() ->
                     {
                         if (isHovered && isEnabled)
                         {
-                            log.info("Button clicked at: " + mouseEvent.getPoint());
+                            log.debug("Button clicked at: " + mouseEvent.getPoint());
                             if (onClick != null)
                             {
                                 onClick.run();
@@ -183,6 +183,10 @@ public class ButtonComponent implements LayoutableRenderableEntity
                 localBounds.height
         );
         return trueBounds.contains(mousePoint);
+    }
+
+    public boolean isHovered() {
+        return isHovered;
     }
 
 }

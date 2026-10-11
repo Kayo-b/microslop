@@ -70,6 +70,7 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.achievementdiari
 import net.runelite.client.plugins.microbot.questhelper.helpers.achievementdiaries.wilderness.WildernessElite;
 import net.runelite.client.plugins.microbot.questhelper.helpers.achievementdiaries.wilderness.WildernessHard;
 import net.runelite.client.plugins.microbot.questhelper.helpers.achievementdiaries.wilderness.WildernessMedium;
+import net.runelite.client.plugins.microbot.questhelper.helpers.activities.charting.ChartingHelper;
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.alfredgrimhandsbarcrawl.AlfredGrimhandsBarcrawl;
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.barbariantraining.BarbarianTraining;
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.curseoftheemptylord.CurseOfTheEmptyLord;
@@ -85,11 +86,12 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.thege
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.themagearenai.TheMageArenaI;
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.themagearenaii.MA2Locator;
 import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.themagearenaii.TheMageArenaII;
+import net.runelite.client.plugins.microbot.questhelper.helpers.miniquests.valetotems.ValeTotems;
 import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.allneededitems.AllNeededItems;
-import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.knightswaves.KnightWaves;
-import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.strongholdofsecurity.StrongholdOfSecurity;
 import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.farmruns.HerbRun;
 import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.farmruns.TreeRun;
+import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.knightswaves.KnightWaves;
+import net.runelite.client.plugins.microbot.questhelper.helpers.mischelpers.strongholdofsecurity.StrongholdOfSecurity;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.akingdomdivided.AKingdomDivided;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.anightatthetheatre.ANightAtTheTheatre;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.animalmagnetism.AnimalMagnetism;
@@ -115,6 +117,7 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.coldwar.C
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.contact.Contact;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.cooksassistant.CooksAssistant;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.creatureoffenkenstrain.CreatureOfFenkenstrain;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.currentaffairs.CurrentAffairs;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.darknessofhallowvale.DarknessOfHallowvale;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.deathontheisle.DeathOnTheIsle;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.deathplateau.DeathPlateau;
@@ -141,6 +144,7 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.ernestthe
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.ethicallyacquiredantiquities.EthicallyAcquiredAntiquities;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.fairytalei.FairytaleI;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.fairytaleii.FairytaleII;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.fallenfromgrace.FallenFromGrace;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.familycrest.FamilyCrest;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.fightarena.FightArena;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.fishingcontest.FishingContest;
@@ -184,11 +188,13 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.naturespi
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.observatoryquest.ObservatoryQuest;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.olafsquest.OlafsQuest;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.onesmallfavour.OneSmallFavour;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.pandemonium.Pandemonium;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.perilousmoon.PerilousMoon;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.piratestreasure.PiratesTreasure;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.plaguecity.PlagueCity;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.priestinperil.PriestInPeril;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.princealirescue.PrinceAliRescue;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.pryingtimes.PryingTimes;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.ragandboneman.RagAndBoneManI;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.ragandboneman.RagAndBoneManII;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.ratcatchers.RatCatchers;
@@ -201,10 +207,12 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.royaltrou
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.rumdeal.RumDeal;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.runemysteries.RuneMysteries;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.scorpioncatcher.ScorpionCatcher;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.scrambled.Scrambled;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.seaslug.SeaSlug;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.secretsofthenorth.SecretsOfTheNorth;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.shadesofmortton.ShadesOfMortton;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.shadowofthestorm.ShadowOfTheStorm;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.shadowsofcustodia.ShadowsOfCustodia;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.sheepherder.SheepHerder;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.sheepshearer.SheepShearer;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.shieldofarrav.ShieldOfArravBlackArmGang;
@@ -221,12 +229,14 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.tearsofgu
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.templeofikov.TempleOfIkov;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.templeoftheeye.TempleOfTheEye;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theascentofarceuus.TheAscentOfArceuus;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thebloodmoonrises.TheBloodMoonRises;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thecorsaircurse.TheCorsairCurse;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thecurseofarrav.TheCurseOfArrav;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thedepthsofdespair.TheDepthsOfDespair;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thedigsite.TheDigSite;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theeyesofglouphrie.TheEyesOfGlouphrie;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thefeud.TheFeud;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thefinaldawn.TheFinalDawn;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theforsakentower.TheForsakenTower;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thefremennikexiles.TheFremennikExiles;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thefremennikisles.TheFremennikIsles;
@@ -238,10 +248,12 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thegrandt
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thegreatbrainrobbery.TheGreatBrainRobbery;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thehandinthesand.TheHandInTheSand;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theheartofdarkness.TheHeartOfDarkness;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theidesofmilk.TheIdesOfMilk;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theknightssword.TheKnightsSword;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thelosttribe.TheLostTribe;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thepathofglouphrie.ThePathOfGlouphrie;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.thequeenofthieves.TheQueenOfThieves;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theredreef.TheRedReef;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.therestlessghost.TheRestlessGhost;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theribbitingtaleofalilypadlabourdispute.TheRibbitingTaleOfALilyPadLabourDispute;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.theslugmenace.TheSlugMenace;
@@ -252,6 +264,7 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.quests.treegnome
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.tribaltotem.TribalTotem;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.trollromance.TrollRomance;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.trollstronghold.TrollStronghold;
+import net.runelite.client.plugins.microbot.questhelper.helpers.quests.troubledtortugans.TroubledTortugans;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.twilightspromise.TwilightsPromise;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.undergroundpass.UndergroundPass;
 import net.runelite.client.plugins.microbot.questhelper.helpers.quests.vampyreslayer.VampyreSlayer;
@@ -269,7 +282,6 @@ import net.runelite.client.plugins.microbot.questhelper.helpers.skills.mining.Mi
 import net.runelite.client.plugins.microbot.questhelper.helpers.skills.woodcutting.Woodcutting;
 import net.runelite.client.plugins.microbot.questhelper.helpers.skills.woodcutting.WoodcuttingMember;
 import net.runelite.client.plugins.microbot.questhelper.playerquests.bikeshedder.BikeShedder;
-import net.runelite.client.plugins.microbot.questhelper.playerquests.cookshelper.CooksHelper;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestDetails;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestHelper;
 import lombok.Getter;
@@ -295,6 +307,7 @@ public enum QuestHelperQuest
 	ERNEST_THE_CHICKEN(new ErnestTheChicken(), Quest.ERNEST_THE_CHICKEN, QuestVarPlayer.QUEST_ERNEST_THE_CHICKEN, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
 	GOBLIN_DIPLOMACY(new GoblinDiplomacy(), Quest.GOBLIN_DIPLOMACY, QuestVarbits.QUEST_GOBLIN_DIPLOMACY, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
 	IMP_CATCHER(new ImpCatcher(), Quest.IMP_CATCHER, QuestVarPlayer.QUEST_IMP_CATCHER, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
+	THE_IDES_OF_MILK(new TheIdesOfMilk(), Quest.THE_IDES_OF_MILK, QuestVarbits.QUEST_THE_IDES_OF_MILK, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
 	THE_KNIGHTS_SWORD(new TheKnightsSword(), Quest.THE_KNIGHTS_SWORD, QuestVarPlayer.QUEST_THE_KNIGHTS_SWORD, QuestDetails.Type.F2P, QuestDetails.Difficulty.INTERMEDIATE),
 	MISTHALIN_MYSTERY(new MisthalinMystery(), Quest.MISTHALIN_MYSTERY, QuestVarbits.QUEST_MISTHALIN_MYSTERY, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
 	PIRATES_TREASURE(new PiratesTreasure(), Quest.PIRATES_TREASURE, QuestVarPlayer.QUEST_PIRATES_TREASURE, QuestDetails.Type.F2P, QuestDetails.Difficulty.NOVICE),
@@ -467,7 +480,16 @@ public enum QuestHelperQuest
 	MEAT_AND_GREET(new MeatAndGreet(), Quest.MEAT_AND_GREET, QuestVarbits.QUEST_MEAT_AND_GREET, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
 	THE_HEART_OF_DARKNESS(new TheHeartOfDarkness(), Quest.THE_HEART_OF_DARKNESS, QuestVarbits.QUEST_THE_HEART_OF_DARKNESS, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
 	THE_CURSE_OF_ARRAV(new TheCurseOfArrav(), Quest.THE_CURSE_OF_ARRAV, QuestVarbits.QUEST_THE_CURSE_OF_ARRAV, QuestDetails.Type.P2P, QuestDetails.Difficulty.MASTER),
-
+	THE_FINAL_DAWN(new TheFinalDawn(), Quest.THE_FINAL_DAWN, QuestVarbits.QUEST_THE_FINAL_DAWN, QuestDetails.Type.P2P, QuestDetails.Difficulty.MASTER),
+	SHADOWS_OF_CUSTODIA(new ShadowsOfCustodia(), Quest.SHADOWS_OF_CUSTODIA, QuestVarbits.QUEST_SHADOWS_OF_CUSTODIA, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
+	SCRAMBLED(new Scrambled(), Quest.SCRAMBLED, QuestVarbits.QUEST_SCRAMBLED, QuestDetails.Type.P2P, QuestDetails.Difficulty.INTERMEDIATE),
+	PANDEMONIUM(new Pandemonium(), Quest.PANDEMONIUM, QuestVarbits.QUEST_PANDEMONIUM, QuestDetails.Type.P2P, QuestDetails.Difficulty.NOVICE),
+	PRYING_TIMES(new PryingTimes(), Quest.PRYING_TIMES, QuestVarbits.QUEST_PRYING_TIMES, QuestDetails.Type.P2P, QuestDetails.Difficulty.INTERMEDIATE),
+	CURRENT_AFFAIRS(new CurrentAffairs(), Quest.CURRENT_AFFAIRS, QuestVarbits.QUEST_CURRENT_AFFAIRS, QuestDetails.Type.P2P, QuestDetails.Difficulty.NOVICE),
+	TROUBLED_TORTUGANS(new TroubledTortugans(), Quest.TROUBLED_TORTUGANS, QuestVarbits.QUEST_TROUBLED_TORTUGANS, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
+	THE_RED_REEF(new TheRedReef(), Quest.THE_RED_REEF, QuestVarbits.QUEST_THE_RED_REEF, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
+	THE_BLOOD_MOON_RISES(new TheBloodMoonRises(), Quest.THE_BLOOD_MOON_RISES, QuestVarbits.QUEST_THE_BLOOD_MOON_RISES, QuestDetails.Type.P2P, QuestDetails.Difficulty.GRANDMASTER),
+	FALLEN_FROM_GRACE(new FallenFromGrace(), Quest.FALLEN_FROM_GRACE, QuestVarbits.QUEST_FALLEN_FROM_GRACE, QuestDetails.Type.P2P, QuestDetails.Difficulty.EXPERIENCED),
 	//Miniquests
 	ENTER_THE_ABYSS(new EnterTheAbyss(), Quest.ENTER_THE_ABYSS, QuestVarPlayer.QUEST_ENTER_THE_ABYSS, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
 	BEAR_YOUR_SOUL(new BearYourSoul(), Quest.BEAR_YOUR_SOUL, QuestVarbits.QUEST_BEAR_YOUR_SOUL, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
@@ -485,6 +507,7 @@ public enum QuestHelperQuest
 	HOPESPEARS_WILL(new HopespearsWill(), Quest.HOPESPEARS_WILL, QuestVarbits.QUEST_HOPESPEARS_WILL, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
 	HIS_FAITHFUL_SERVANTS(new HisFaithfulServants(), Quest.HIS_FAITHFUL_SERVANTS, QuestVarbits.HIS_FAITHFUL_SERVANTS, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
 	BARBARIAN_TRAINING(new BarbarianTraining(), Quest.BARBARIAN_TRAINING, QuestVarbits.BARBARIAN_TRAINING, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
+	VALE_TOTEMS(new ValeTotems(), Quest.VALE_TOTEMS, QuestVarbits.QUEST_VALE_TOTEMS, QuestDetails.Type.MINIQUEST, QuestDetails.Difficulty.MINIQUEST),
 
 	// Fake miniquests
 	KNIGHT_WAVES_TRAINING_GROUNDS(new KnightWaves(), "Knight Waves Training Grounds", QuestVarbits.KNIGHT_WAVES_TRAINING_GROUNDS, 8,
@@ -497,7 +520,6 @@ public enum QuestHelperQuest
 		QuestDetails.Difficulty.MINIQUEST),
 	BALLOON_TRANSPORT_GRAND_TREE(new GrandTreeBalloonFlight(), "Balloon Transport - Grand Tree", QuestVarbits.BALLOON_TRANSPORT_GRAND_TREE, 1, QuestDetails.Type.MINIQUEST,
 		QuestDetails.Difficulty.MINIQUEST),
-
 
 	// Achievement diaries
 
@@ -635,6 +657,7 @@ public enum QuestHelperQuest
 	BARROWS_HELPER(new BarrowsHelper(), "Barrows helper", QuestVarbits.CUTSCENE, -1, QuestDetails.Type.GENERIC, QuestDetails.Difficulty.GENERIC),
 	STRONGHOLD_OF_SECURITY(new StrongholdOfSecurity(), "Stronghold of Security", QuestVarbits.STRONGHOLD_OF_SECURITY, 1,
 		QuestDetails.Type.GENERIC, QuestDetails.Difficulty.GENERIC),
+	SEA_CHARTING(new ChartingHelper(), "Sea charting", QuestVarbits.CHARTING, 1, QuestDetails.Type.GENERIC, QuestDetails.Difficulty.GENERIC),
 	// Skill
 	AGILITY(new Agility(), "Agility", Skill.AGILITY, 99, QuestDetails.Type.SKILL_P2P, QuestDetails.Difficulty.SKILL),
 	WOODCUTTING_MEMBER(new WoodcuttingMember(), "Woodcutting - Member", Skill.WOODCUTTING, 99, QuestDetails.Type.SKILL_P2P, QuestDetails.Difficulty.SKILL),
@@ -644,7 +667,6 @@ public enum QuestHelperQuest
 	MINING(new Mining(), "Mining", Skill.MINING, 99, QuestDetails.Type.SKILL_F2P, QuestDetails.Difficulty.SKILL),
 
 	// Player Quests
-	COOKS_HELPER(new CooksHelper(), "Cook's Helper", PlayerQuests.COOKS_HELPER, 4, false),
 	BIKE_SHEDDER(new BikeShedder(), "Bike Shedder", PlayerQuests.BIKE_SHEDDER, 4, true);
 
 	@Getter
@@ -661,9 +683,14 @@ public enum QuestHelperQuest
 
 	@Getter
 	private final QuestDetails.Difficulty difficulty;
-
+	@Getter
 	private final QuestVarbits varbit;
 
+	// MICROBOT: expose varPlayer like varbit above. Rs2PlayerStateCache refreshes cached quest state
+	// from VarbitChanged and could only match varbit-tracked quests, so every VARPLAYER-tracked quest
+	// (Fishing Contest among them) stayed frozen at its login value and the transports it gates never
+	// unlocked mid-session. Annotation only — no behaviour change to the vendored package.
+	@Getter
 	private final QuestVarPlayer varPlayer;
 
 	private Skill skill;

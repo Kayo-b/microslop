@@ -84,10 +84,10 @@
 # Fossil Island, Underwater									
 3724 3807 0	3734 3893 0	Travel;Rowboat;30914						4	2. North of Island
 3734 3893 0	3724 3807 0	Travel;Rowboat;30915						4	2. The Camp
-3734 3893 0	3768 3898 0	Travel;Rowboat;30915						4	3. To Sea
-3768 3898 0	3734 3893 0	Travel;Rowboat;30919						3	2. North of Island
-3724 3807 0	3768 3898 0	Travel;Rowboat;30914						4	4. To Sea
-3768 3898 0	3724 3807 0	Travel;Rowboat;30919						4	3. The Camp
+3734 3893 0	3763 3899 0	Travel;Rowboat;30915						4	3. To Sea
+3763 3899 0	3734 3893 0	Travel;Rowboat;30919						3	2. North of Island
+3724 3807 0	3763 3899 0	Travel;Rowboat;30914						4	4. To Sea
+3763 3899 0	3724 3807 0	Travel;Rowboat;30919						4	3. The Camp
 									
 # Hosidius, Crabclaw Isle									
 1783 3458 0	1779 3417 0	Travel;Sandicrahb;7483						5	
@@ -110,18 +110,18 @@
 1195 3452 0	1229 3469 0	Travel;Rowboat;48720				Desert Treasure II - The Fallen Empire		7	
 									
 # Molch Island, Molch, Battlefront, Shayzien									
-1384 3665 0	1369 3639 0	Board;Boaty;33614						4	Molch Island
-1384 3665 0	1341 3645 0	Board;Boaty;33614						4	Battlefront
-1384 3665 0	1408 3612 0	Board;Boaty;33614						4	Shayzien
-1342 3645 0	1369 3639 0	Board;Boaty;33614						4	Molch Island
-1342 3645 0	1384 3665 0	Board;Boaty;33614						4	Molch
-1342 3645 0	1408 3612 0	Board;Boaty;33614						4	Shayzien
-1408 3612 0	1369 3639 0	Board;Boaty;33614						4	Molch Island
-1408 3612 0	1384 3665 0	Board;Boaty;33614						4	Molch
-1408 3612 0	1341 3645 0	Board;Boaty;33614						4	Battlefront
-1369 3639 0	1384 3665 0	Board;Boaty;33614						4	Molch
-1369 3639 0	1341 3645 0	Board;Boaty;33614						4	Battlefront
-1369 3639 0	1408 3612 0	Board;Boaty;33614						4	Shayzien
+1342 3645 0	1369 3639 0	Board;Boaty;33614						5	Molch Island
+1342 3645 0	1384 3665 0	Board;Boaty;33614						5	Battlefront
+1342 3645 0	1408 3612 0	Board;Boaty;33614						5	Shayzien
+1369 3639 0	1342 3645 0	Board;Boaty;33614						5	Molch
+1369 3639 0	1384 3665 0	Board;Boaty;33614						5	Battlefront
+1369 3639 0	1408 3612 0	Board;Boaty;33614						5	Shayzien
+1384 3665 0	1369 3639 0	Board;Boaty;33614						5	Molch Island
+1384 3665 0	1342 3645 0	Board;Boaty;33614						5	Molch
+1384 3665 0	1408 3612 0	Board;Boaty;33614						5	Shayzien
+1408 3612 0	1369 3639 0	Board;Boaty;33614						5	Molch Island
+1408 3612 0	1342 3645 0	Board;Boaty;33614						5	Molch
+1408 3612 0	1384 3665 0	Board;Boaty;33614						5	Battlefront
 									
 # Burgh de Rott, Meiyerditch, Icyene Graveyard, Slepe									
 3525 3170 0	3605 3161 1	Board;Boat;38089					7255>41	13	1: Meiyerditch.
@@ -148,4 +148,4 @@
 3672 3544 0	3661 3277 0	Travel;Row boat;32601			10000 Coins			5	
 3661 3278 0	3671 3542 0	Travel;Row boat;32602			10000 Coins			5	
 3661 3278 0	3671 3542 0	Travel;Row boat;32602			10000 Coins			5	
-3661 3278 0	3671 3542 0	Travel;Row boat;32602			10000 Coins			5	
+3661 3278 0	3671 3542 0	Travel;Row boat;32602			10000 Coins			5

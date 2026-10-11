@@ -8,8 +8,10 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.plugins.camera.CameraPlugin;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.api.player.models.Rs2PlayerModel;
 import net.runelite.client.plugins.microbot.util.Global;
 import net.runelite.client.plugins.microbot.util.keyboard.Rs2Keyboard;
+import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.player.Rs2Player;
 
 import java.awt.*;
@@ -18,29 +20,45 @@ import java.awt.event.KeyEvent;
 @Slf4j
 public class Rs2Camera {
     private static final NpcTracker NPC_TRACKER = new NpcTracker();
+    private static final int LEGACY_ANGLE_UNITS = 2048;
+    private static final int CLIENT_ANGLE_SCALE = 8;
+    private static final int LEGACY_MIN_PITCH = 128;
+    private static final int LEGACY_MAX_PITCH = 383;
 
     public static int angleToTile(Actor t) {
-        int angle = (int) Math.toDegrees(Math.atan2(t.getWorldLocation().getY() - Microbot.getClient().getLocalPlayer().getWorldLocation().getY(),
-                t.getWorldLocation().getX() - Microbot.getClient().getLocalPlayer().getWorldLocation().getX()));
-        return angle >= 0 ? angle : 360 + angle;
+        return Microbot.getClientThread().invoke(() -> {
+            var playerLocation = new Rs2PlayerModel().getWorldLocation();
+            int angle = (int) Math.toDegrees(Math.atan2(t.getWorldLocation().getY() - playerLocation.getY(),
+                    t.getWorldLocation().getX() - playerLocation.getX()));
+            return angle >= 0 ? angle : 360 + angle;
+        });
     }
 
     public static int angleToTile(TileObject t) {
-        int angle = (int) Math.toDegrees(Math.atan2(t.getWorldLocation().getY() - Microbot.getClient().getLocalPlayer().getWorldLocation().getY(),
-                t.getWorldLocation().getX() - Microbot.getClient().getLocalPlayer().getWorldLocation().getX()));
-        return angle >= 0 ? angle : 360 + angle;
+        return Microbot.getClientThread().invoke(() -> {
+            var playerLocation = new Rs2PlayerModel().getWorldLocation();
+            int angle = (int) Math.toDegrees(Math.atan2(t.getWorldLocation().getY() - playerLocation.getY(),
+                    t.getWorldLocation().getX() - playerLocation.getX()));
+            return angle >= 0 ? angle : 360 + angle;
+        });
     }
 
     public static int angleToTile(LocalPoint localPoint) {
-        int angle = (int) Math.toDegrees(Math.atan2(localPoint.getY() - Microbot.getClient().getLocalPlayer().getLocalLocation().getY(),
-                localPoint.getX() - Microbot.getClient().getLocalPlayer().getLocalLocation().getX()));
-        return angle >= 0 ? angle : 360 + angle;
+        return Microbot.getClientThread().invoke(() -> {
+            var playerLocation = new Rs2PlayerModel().getWorldLocation();
+            int angle = (int) Math.toDegrees(Math.atan2(localPoint.getY() - playerLocation.getY(),
+                    localPoint.getX() - playerLocation.getX()));
+            return angle >= 0 ? angle : 360 + angle;
+        });
     }
 
     public static int angleToTile(WorldPoint worldPoint) {
-        int angle = (int) Math.toDegrees(Math.atan2(worldPoint.getY() - Rs2Player.getWorldLocation().getY(),
-                worldPoint.getX() - Rs2Player.getWorldLocation().getX()));
-        return angle >= 0 ? angle : 360 + angle;
+        return Microbot.getClientThread().invoke(() -> {
+            var playerLocation = new Rs2PlayerModel().getWorldLocation();
+            int angle = (int) Math.toDegrees(Math.atan2(worldPoint.getY() - playerLocation.getY(),
+                    worldPoint.getX() - playerLocation.getX()));
+            return angle >= 0 ? angle : 360 + angle;
+        });
     }
 
     public static void turnTo(final Actor actor) {
@@ -118,13 +136,9 @@ public class Rs2Camera {
         Microbot.getClient().setCameraSpeed(3f);
 
         if (getAngleTo(targetDegrees) > maxAngle) {
-            Rs2Keyboard.keyHold(KeyEvent.VK_LEFT);
-            Global.sleepUntilTrue(() -> Math.abs(getAngleTo(targetDegrees)) <= maxAngle, 50, 5000);
-            Rs2Keyboard.keyRelease(KeyEvent.VK_LEFT);
+            holdUntil(KeyEvent.VK_LEFT, () -> Math.abs(getAngleTo(targetDegrees)) <= maxAngle);
         } else if (getAngleTo(targetDegrees) < -maxAngle) {
-            Rs2Keyboard.keyHold(KeyEvent.VK_RIGHT);
-            Global.sleepUntilTrue(() -> Math.abs(getAngleTo(targetDegrees)) <= maxAngle, 50, 5000);
-            Rs2Keyboard.keyRelease(KeyEvent.VK_RIGHT);
+            holdUntil(KeyEvent.VK_RIGHT, () -> Math.abs(getAngleTo(targetDegrees)) <= maxAngle);
         }
         Microbot.getClient().setCameraSpeed((float) defaultCameraSpeed);
     }
@@ -133,36 +147,45 @@ public class Rs2Camera {
         float currentPitchPercentage = cameraPitchPercentage();
 
         if (currentPitchPercentage < percentage) {
-            Rs2Keyboard.keyHold(KeyEvent.VK_UP);
-            Global.sleepUntilTrue(() -> cameraPitchPercentage() >= percentage, 50, 5000);
-            Rs2Keyboard.keyRelease(KeyEvent.VK_UP);
+            holdUntil(KeyEvent.VK_UP, () -> cameraPitchPercentage() >= percentage);
         } else {
-            Rs2Keyboard.keyHold(KeyEvent.VK_DOWN);
-            Global.sleepUntilTrue(() -> cameraPitchPercentage() <= percentage, 50, 5000);
-            Rs2Keyboard.keyRelease(KeyEvent.VK_DOWN);
+            holdUntil(KeyEvent.VK_DOWN, () -> cameraPitchPercentage() <= percentage);
+        }
+    }
+
+    /**
+     * Holds an arrow key until the camera arrives, then always releases it. The {@code finally}
+     * matters: if the condition throws in between, the key stays down at the client with nothing
+     * to clear it, since releaseHeldKeys only runs on a takeover.
+     */
+    private static void holdUntil(int keyCode, java.util.function.BooleanSupplier reached) {
+        Rs2Keyboard.keyHold(keyCode);
+        try {
+            Global.sleepUntilTrue(reached, 50, 5000);
+        } finally {
+            Rs2Keyboard.keyRelease(keyCode);
         }
     }
 
     public static int getPitch() {
-        return Microbot.getClient().getCameraPitch();
+        return fromClientAngleUnits(Microbot.getClient().getCameraPitch());
     }
 
     // set camera pitch
     public static void setPitch(int pitch) {
-        int minPitch = 128;
-        int maxPitch = 383;
-        // clamp pitch to avoid out of bounds
-        pitch = Math.max(minPitch, Math.min(maxPitch, pitch));
-        Microbot.getClient().setCameraPitchTarget(pitch);
+        smoothTo(pitch, true);
+    }
+
+    public static void setPitchInstant(int pitch) {
+        pitch = Math.max(LEGACY_MIN_PITCH, Math.min(LEGACY_MAX_PITCH, pitch));
+        setCameraTargetOnClientThread(pitch, true);
     }
 
     public static float cameraPitchPercentage() {
-        int minPitch = 128;
-        int maxPitch = 383;
-        int currentPitch = Microbot.getClient().getCameraPitch();
+        int currentPitch = getPitch();
 
-        int adjustedPitch = currentPitch - minPitch;
-        int adjustedMaxPitch = maxPitch - minPitch;
+        int adjustedPitch = currentPitch - LEGACY_MIN_PITCH;
+        int adjustedMaxPitch = LEGACY_MAX_PITCH - LEGACY_MIN_PITCH;
 
         return (float) adjustedPitch / (float) adjustedMaxPitch;
     }
@@ -180,10 +203,7 @@ public class Rs2Camera {
     }
 
     public static int getAngle() {
-        // the client uses fixed point radians 0 - 2^14
-        // degrees = yaw * 360 / 2^14 = yaw / 45.5111...
-        // This leaves it on a scale of 45 versus a scale of 360 so we multiply it by 8 to fix that.
-        return (int) Math.abs(Microbot.getClient().getCameraYaw() / 45.51 * 8);
+        return (int) (getYaw() * (360.0 / LEGACY_ANGLE_UNITS));
     }
 
     /**
@@ -194,7 +214,7 @@ public class Rs2Camera {
      */
     public static int calculateCameraYaw(int npcAngle) {
         // Convert the NPC angle to CameraYaw using the derived formula
-        return (1536 + (int) Math.round(npcAngle * (2048.0 / 360.0))) % 2048;
+        return (1536 + (int) Math.round(npcAngle * (LEGACY_ANGLE_UNITS / 360.0))) % LEGACY_ANGLE_UNITS;
     }
 
     /**
@@ -263,7 +283,7 @@ public class Rs2Camera {
     }
     // Get camera/compass facing
     public static int getYaw() {
-        return Microbot.getClient().getCameraYaw();
+        return fromClientAngleUnits(Microbot.getClient().getCameraYaw());
     }
 
     // Set camera/compass facing
@@ -273,9 +293,76 @@ public class Rs2Camera {
     // West = 512
 
     public static void setYaw(int yaw) {
-        if ( yaw >= 0 && yaw < 2048 ) {
-            Microbot.getClient().setCameraYawTarget(yaw);
+        if (yaw < 0 || yaw > LEGACY_ANGLE_UNITS) return;
+        smoothTo(yaw % LEGACY_ANGLE_UNITS, false);
+    }
+
+    public static void setYawInstant(int yaw) {
+        if (yaw >= 0 && yaw <= LEGACY_ANGLE_UNITS) {
+            setCameraTargetOnClientThread(yaw % LEGACY_ANGLE_UNITS, false);
         }
+    }
+
+    static int toClientAngleUnits(int legacyAngle) {
+        return legacyAngle * CLIENT_ANGLE_SCALE;
+    }
+
+    static int fromClientAngleUnits(int clientAngle) {
+        return clientAngle / CLIENT_ANGLE_SCALE;
+    }
+
+    private static void setCameraTargetOnClientThread(int target, boolean isPitch) {
+        int clientTarget = toClientAngleUnits(target);
+        Microbot.getClientThread().invoke(() -> {
+            if (isPitch) {
+                Microbot.getClient().setCameraPitchTarget(clientTarget);
+            } else {
+                Microbot.getClient().setCameraYawTarget(clientTarget);
+            }
+        });
+    }
+
+    static final int SMOOTH_MIN_DURATION_MS = 220;
+    static final int SMOOTH_MAX_DURATION_MS = 780;
+    static final int SMOOTH_STEPS = 10;
+
+    // Short rotation hops (<3 units) are below the noise floor of the internal camera speed
+    // and would be invisible anyway, so skip smoothing for those — avoids a 200ms stall on no-ops.
+    private static void smoothTo(int target, boolean isPitch) {
+        int start = isPitch ? getPitch() : getYaw();
+        int clampedTarget;
+        if (isPitch) {
+            clampedTarget = Math.max(LEGACY_MIN_PITCH, Math.min(LEGACY_MAX_PITCH, target));
+        } else {
+            clampedTarget = Math.max(0, Math.min(LEGACY_ANGLE_UNITS - 1, target));
+        }
+        int delta = shortestDelta(clampedTarget - start, isPitch);
+        if (Math.abs(delta) < 3 || Microbot.getClientThread().isClientThread()) {
+            setCameraTargetOnClientThread(clampedTarget, isPitch);
+            return;
+        }
+        int totalMs = Rs2Random.logNormalBounded(SMOOTH_MIN_DURATION_MS, SMOOTH_MAX_DURATION_MS);
+        int stepMs = Math.max(1, totalMs / SMOOTH_STEPS);
+        for (int i = 1; i <= SMOOTH_STEPS; i++) {
+            double t = i / (double) SMOOTH_STEPS;
+            double eased = easeInOut(t);
+            int next = start + (int) Math.round(delta * eased);
+            if (!isPitch) {
+                next = ((next % LEGACY_ANGLE_UNITS) + LEGACY_ANGLE_UNITS) % LEGACY_ANGLE_UNITS;
+            }
+            setCameraTargetOnClientThread(next, isPitch);
+            if (i < SMOOTH_STEPS) Global.sleep(stepMs);
+        }
+    }
+
+    private static int shortestDelta(int rawDelta, boolean isPitch) {
+        if (isPitch) return rawDelta;
+        int d = ((rawDelta % LEGACY_ANGLE_UNITS) + LEGACY_ANGLE_UNITS) % LEGACY_ANGLE_UNITS;
+        return d > LEGACY_ANGLE_UNITS / 2 ? d - LEGACY_ANGLE_UNITS : d;
+    }
+
+    private static double easeInOut(double t) {
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
     }
 
     /**
@@ -382,4 +469,3 @@ public class Rs2Camera {
         centerTileOnScreen(tile, 10.0);
     }
 }
-

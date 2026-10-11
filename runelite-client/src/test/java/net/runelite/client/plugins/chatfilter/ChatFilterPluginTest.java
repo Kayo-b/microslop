@@ -187,6 +187,17 @@ public class ChatFilterPluginTest
 	}
 
 	@Test
+	public void testFilterTags()
+	{
+		when(chatFilterConfig.filterType()).thenReturn(ChatFilterType.CENSOR_WORDS);
+		when(chatFilterConfig.filteredWords()).thenReturn("@");
+		when(chatFilterConfig.stripAccents()).thenReturn(true);
+
+		chatFilterPlugin.updateFilteredPatterns();
+		assertEquals("* <lt>lt<gt> <lt>", chatFilterPlugin.censorMessage("Blue", "<at> <lt>lt<gt> <lt>"));
+	}
+
+	@Test
 	public void testFilterUnicode()
 	{
 		when(chatFilterConfig.filterType()).thenReturn(ChatFilterType.CENSOR_WORDS);
@@ -463,5 +474,19 @@ public class ChatFilterPluginTest
 
 		String message = chatFilterPlugin.censorMessage("Adam", "start f<lt>ilte<gt>r end");
 		assertEquals("start ******** end", message);
+	}
+
+	@Test
+	public void testSelfFilterChatbox()
+	{
+		when(chatFilterConfig.filteredWords()).thenReturn("test");
+		when(localPlayer.getName()).thenReturn("Logic Knot");
+
+		chatFilterPlugin.updateFilteredPatterns();
+
+		// messagenode names have nbsp but actor names do not
+		ScriptCallbackEvent event = createCallbackEvent("Logic\u00A0Knot", "test", ChatMessageType.PUBLICCHAT);
+		chatFilterPlugin.onScriptCallbackEvent(event);
+		assertEquals("test", client.getObjectStack()[client.getObjectStackSize() - 1]);
 	}
 }

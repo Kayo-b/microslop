@@ -220,6 +220,7 @@ public class DevToolsPlugin extends Plugin
 	private DevToolsButton uiDefaultsInspector;
 	private DevToolsButton mouseClick;
 	private DevToolsButton mouseMovement;
+	private DevToolsButton worldEntities;
 	private NavigationButton navButton;
 
 	//custom devtools from microbot
@@ -279,6 +280,8 @@ public class DevToolsPlugin extends Plugin
 		mouseClick = new DevToolsButton("Bot Clicks");
 		mouseMovement = new DevToolsButton("Bot Mouse");
 		mouseMovement.setActive(true);
+
+		worldEntities = new DevToolsButton("World Entities");
 
 		overlayManager.add(overlay);
 		overlayManager.add(locationOverlay);
@@ -496,6 +499,16 @@ public class DevToolsPlugin extends Plugin
 				player.getPlayerComposition().getEquipmentIds()[KitType.HAIR.getIndex()] = -1;
 				player.getPlayerComposition().getEquipmentIds()[KitType.HANDS.getIndex()] = ItemID.SECRET_GHOST_GLOVES + PlayerComposition.ITEM_OFFSET;
 				player.getPlayerComposition().getEquipmentIds()[KitType.BOOTS.getIndex()] = ItemID.SECRET_GHOST_BOOTS + PlayerComposition.ITEM_OFFSET;
+				player.getPlayerComposition().setHash();
+				break;
+			}
+			case "zsort":
+			{
+				Player player = client.getLocalPlayer();
+				player.getPlayerComposition().getEquipmentIds()[KitType.AMULET.getIndex()] = ItemID.ENCHANTED_ONYX_AMULET + PlayerComposition.ITEM_OFFSET;
+				player.getPlayerComposition().getEquipmentIds()[KitType.CAPE.getIndex()] = ItemID.SKILLCAPE_CONSTRUCTION + PlayerComposition.ITEM_OFFSET;
+				player.getPlayerComposition().getEquipmentIds()[KitType.TORSO.getIndex()] = ItemID.TORVA_CHEST + PlayerComposition.ITEM_OFFSET;
+				player.getPlayerComposition().getEquipmentIds()[KitType.LEGS.getIndex()] = ItemID.BARROWS_AHRIM_LEGS + PlayerComposition.ITEM_OFFSET;
 				player.getPlayerComposition().setHash();
 				break;
 			}

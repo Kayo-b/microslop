@@ -24,6 +24,7 @@
  */
 package net.runelite.client;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -53,8 +54,9 @@ public class ClientSessionManager
 	private ScheduledFuture<?> scheduledFuture;
 	private ScheduledFuture<?> scheduledFutureMicroBot;
 
-	private UUID sessionId;
-	private UUID microbotSessionId;
+	private UUID sessionId = UUID.randomUUID();
+	@Getter
+	private volatile UUID microbotSessionId;
 	private MicrobotApi microbotApi;
 
 	@Inject
@@ -89,9 +91,7 @@ public class ClientSessionManager
 				log.warn("error opening session", ex);
 			}
 		});
-
-		scheduledFuture = executorService.scheduleWithFixedDelay(
-				RunnableExceptionLogger.wrap(this::ping), 1, 10, TimeUnit.MINUTES);
+        scheduledFuture = executorService.scheduleWithFixedDelay(RunnableExceptionLogger.wrap(this::ping), (int) (5 * 60 * Math.random()), 10 * 60, TimeUnit.SECONDS);
 		scheduledFutureMicroBot = executorService.scheduleWithFixedDelay(
 				RunnableExceptionLogger.wrap(this::microbotPing), 1, 10, TimeUnit.MINUTES);
 	}
@@ -132,21 +132,6 @@ public class ClientSessionManager
 			return;
 		}
 
-		try
-		{
-			if (sessionId == null)
-			{
-				sessionId = sessionClient.open();
-				log.debug("Opened session {}", sessionId);
-				return;
-			}
-		}
-		catch (IOException ex)
-		{
-			log.warn("unable to open session", ex);
-			return;
-		}
-
 		GameState gameState = client.getGameState();
 		boolean loggedIn = gameState.getState() >= GameState.LOADING.getState();
 
@@ -156,8 +141,7 @@ public class ClientSessionManager
 		}
 		catch (IOException ex)
 		{
-			log.warn("Resetting session", ex);
-			sessionId = null;
+			log.warn("Unable to ping session service", ex);
 		}
 	}
 
@@ -190,7 +174,7 @@ public class ClientSessionManager
 		catch (IOException ex)
 		{
 			log.warn("Resetting session", ex);
-			sessionId = null;
+			microbotSessionId = null;
 		}
 
 	}

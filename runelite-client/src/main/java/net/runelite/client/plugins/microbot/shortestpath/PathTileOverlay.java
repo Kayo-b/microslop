@@ -8,6 +8,7 @@ import net.runelite.api.Tile;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.shortestpath.pathfinder.CollisionMap;
+import net.runelite.client.plugins.microbot.shortestpath.pathfinder.Pathfinder;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -35,9 +36,9 @@ public class PathTileOverlay extends Overlay {
 
     private void renderTransports(Graphics2D graphics) {
         if (plugin == null) return;
-        if (plugin.getTransports() == null) return;
-        if (plugin.getPathfinderFuture() == null || !plugin.getPathfinderFuture().isDone()) return;
-        for (WorldPoint a : plugin.getTransports().keySet()) {
+        if (ShortestPathPlugin.getTransports() == null) return;
+        if (ShortestPathPlugin.getPathfinderFuture() == null || !ShortestPathPlugin.getPathfinderFuture().isDone()) return;
+        for (WorldPoint a : ShortestPathPlugin.getTransports().keySet()) {
             drawTile(graphics, a, plugin.colourTransports, -1, true);
 
             Point ca = tileCenter(a);
@@ -47,7 +48,7 @@ public class PathTileOverlay extends Overlay {
             }
 
             StringBuilder s = new StringBuilder();
-            for (Transport b : plugin.getTransports().getOrDefault(a, new HashSet<>())) {
+            for (Transport b : ShortestPathPlugin.getTransports().getOrDefault(a, new HashSet<>())) {
                 for (WorldPoint destination : WorldPoint.toLocalInstance(client, b.getDestination())) {
                     Point cb = tileCenter(destination);
                     if (cb != null) {
@@ -116,23 +117,10 @@ public class PathTileOverlay extends Overlay {
             this.renderCollisionMap(graphics);
         }
 
-        if (plugin.drawTiles && plugin.getPathfinder() != null && plugin.getPathfinder().getPath() != null) {
-            Color color;
-            if (plugin.getPathfinder().isDone()) {
-                color = new Color(
-                        plugin.colourPath.getRed(),
-						plugin.colourPath.getGreen(),
-						plugin.colourPath.getBlue(),
-					 plugin.colourPath.getAlpha() / 2);
-            } else {
-                color = new Color(
-                        plugin.colourPathCalculating.getRed(),
-						plugin.colourPathCalculating.getGreen(),
-						plugin.colourPathCalculating.getBlue(),
-					 plugin.colourPathCalculating.getAlpha() / 2);
-            }
+        final Pathfinder pathfinder = ShortestPathPlugin.getPathfinder();
+        if (plugin.drawTiles && pathfinder != null) {
+            final List<WorldPoint> path = pathfinder.getPath();
 
-            List<WorldPoint> path = plugin.getPathfinder().getPath();
             int counter = 0;
             if (TileStyle.LINES.equals(plugin.pathStyle)) {
                 for (int i = 1; i < path.size(); i++) {
@@ -248,10 +236,10 @@ public class PathTileOverlay extends Overlay {
     }
 
     private void drawCounter(Graphics2D graphics, double x, double y, int counter) {
-        if (plugin.getPathfinder() == null) return;
+        if (ShortestPathPlugin.getPathfinder() == null) return;
         if (counter >= 0 && !TileCounter.DISABLED.equals(plugin.showTileCounter)) {
             int n = plugin.tileCounterStep > 0 ? plugin.tileCounterStep : 1;
-            int s = plugin.getPathfinder().getPath().size();
+            int s = ShortestPathPlugin.getPathfinder().getPath().size();
             if ((counter % n != 0) && (s != (counter + 1))) {
                 return;
             }
@@ -281,7 +269,7 @@ public class PathTileOverlay extends Overlay {
                 }
 
                 int vertical_offset = 0;
-                for (Transport transport : plugin.getTransports().getOrDefault(point, new HashSet<>())) {
+                for (Transport transport : ShortestPathPlugin.getTransports().getOrDefault(point, new HashSet<>())) {
                     if (pointEnd == null || !pointEnd.equals(transport.getDestination())) {
                         continue;
                     }

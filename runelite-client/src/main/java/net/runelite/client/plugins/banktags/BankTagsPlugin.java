@@ -29,7 +29,9 @@ package net.runelite.client.plugins.banktags;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Shorts;
 import com.google.inject.Binder;
+import com.google.inject.Module;
 import com.google.inject.Provides;
+import com.google.inject.util.Providers;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -40,17 +42,16 @@ import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Named;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
-import net.runelite.api.VarClientStr;
 import net.runelite.api.events.GrandExchangeSearched;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.ScriptCallbackEvent;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -76,7 +77,6 @@ import net.runelite.client.util.Text;
 	description = "Enable tagging of bank items and searching of bank tags",
 	tags = {"searching", "tagging"}
 )
-@Slf4j
 public class BankTagsPlugin extends Plugin implements BankTagsService
 {
 	// banktags:item_<id>=tag,tag,tag,...
@@ -167,7 +167,20 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	@Override
 	public void configure(Binder binder)
 	{
-		binder.bind(BankTagsService.class).toInstance(this);
+		// do not leak this to the global injector
+		binder.bind(TagManager.class);
+	}
+
+	@Override
+	protected Module getPublicModule()
+	{
+		return b ->
+		{
+			b.bind(BankTagsPlugin.class).toProvider(Providers.of(this));
+			b.bind(BankTagsService.class).toProvider(Providers.of(this));
+			b.bind(LayoutManager.class).toProvider(Providers.of(layoutManager));
+			b.bind(TagManager.class).toProvider(Providers.of(tagManager));
+		};
 	}
 
 	@Provides
@@ -233,8 +246,9 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		Widget w = client.getWidget(InterfaceID.Bankmain.UNIVERSE);
 		if (w != null)
 		{
-			client.createScriptEvent(w.getOnLoadListener())
+			client.createScriptEventBuilder(w.getOnLoadListener())
 				.setSource(w)
+				.build()
 				.run();
 		}
 	}
@@ -295,7 +309,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	@Subscribe
 	public void onGrandExchangeSearched(GrandExchangeSearched event)
 	{
-		final String input = client.getVarcStrValue(VarClientStr.INPUT_TEXT);
+		final String input = client.getVarcStrValue(VarClientID.MESLAYERINPUT);
 		if (!input.startsWith(TAG_SEARCH))
 		{
 			return;
@@ -310,7 +324,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 			.mapToObj(ItemVariationMapping::getVariations)
 			.flatMap(Collection::stream)
 			.distinct()
-			.filter(i -> itemManager.getItemComposition(i).isTradeable())
+			.filter(i -> itemManager.getItemComposition(i).isGeTradeable())
 			.limit(MAX_RESULT_COUNT)
 			.collect(Collectors.toCollection(TreeSet::new));
 
@@ -403,12 +417,14 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	@Subscribe
 	public void onMenuEntryAdded(MenuEntryAdded event)
 	{
-		if (event.getActionParam1() == InterfaceID.Bankmain.ITEMS
+		if ((event.getActionParam1() == InterfaceID.Bankmain.ITEMS
 			&& (event.getOption().equals("Examine")
 			// Potion storage has no Examine
 			|| (event.getOption().equals("Withdraw-All-but-1") && !client.getItemContainer(InventoryID.BANK).contains(event.getItemId()))))
+			// Shared bank (group storage) items
+			|| (event.getActionParam1() == InterfaceID.SharedBank.ITEMS && event.getOption().equals("Examine")))
 		{
-			Widget container = client.getWidget(InterfaceID.Bankmain.ITEMS);
+			Widget container = client.getWidget(event.getActionParam1());
 			Widget item = container.getChild(event.getActionParam0());
 			int itemId = item.getItemId();
 

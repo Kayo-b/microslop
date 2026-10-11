@@ -268,12 +268,12 @@ public class DarknessOfHallowvale extends BasicQuestHelper
 		inVanstromFight = new Conditions(onDrakanWalls, new InInstanceRequirement());
 		inLab = new ZoneRequirement(lab);
 
-		pushedBoat = new VarbitRequirement(2587, 1);
-		knockedDownBoard = new VarbitRequirement(2589, 1);
+		pushedBoat = new VarbitRequirement(VarbitID.MYQ3_SEA_BOAT_VISIBLE, 1);
+		knockedDownBoard = new VarbitRequirement(VarbitID.MYQ3_WALL_FLOORBOARDS_DOWN, 1);
 
-		pathDoorOpen = new VarbitRequirement(2578, 1);
+		pathDoorOpen = new VarbitRequirement(VarbitID.MYQ3_AGIL_GHETTO_LOCKED_DOOR, 1);
 
-		fixedLadder = new VarbitRequirement(2598, 2);
+		fixedLadder = new VarbitRequirement(VarbitID.MYQ3_AGIL_LADDERTOP_WALL, 2);
 		wallPressed = new VarbitRequirement(VarbitID.MYQ3_HIDEOUT_TRAPDOOR, 1, Operation.GREATER_EQUAL);
 
 		searchedRockySurface = new Conditions(true, new WidgetTextRequirement(229, 1, "a mechanical click."));
@@ -282,11 +282,11 @@ public class DarknessOfHallowvale extends BasicQuestHelper
 
 		cutPortrait = new VarbitRequirement(VarbitID.MYQ3_STATUE_KEY_PAINTING_STATE, 1, Operation.GREATER_EQUAL);
 
-		handedInSketches = new VarbitRequirement(2575, 1);
-		tapestryCut = new VarbitRequirement(2594, 1);
-		keyPlaced = new VarbitRequirement(2596, 1);
+		handedInSketches = new VarbitRequirement(VarbitID.MYQ3_SKETCHES_GIVEN, 1);
+		tapestryCut = new VarbitRequirement(VarbitID.MYQ3_TAPESTRY_STATE, 1);
+		keyPlaced = new VarbitRequirement(VarbitID.MYQ3_STATUE_STATE, 1);
 
-		searchedRuneCase = new VarbitRequirement(2584, 1);
+		searchedRuneCase = new VarbitRequirement(VarbitID.MYQ3_RUNECASE_SEARCHED, 1);
 		hasTeleGrabRunesOrSearchedCase = new Conditions(LogicType.OR, searchedRuneCase, new ItemRequirements(lawRune, airRune));
 
 		// Repaired boat, 2585 = 1
@@ -499,8 +499,8 @@ public class DarknessOfHallowvale extends BasicQuestHelper
 		searchBushes = new ObjectStep(this, ObjectID.MYQ_PT3_CUTSCENE_WEREWOLF_BUSH, new WorldPoint(3390, 3480, 0), "Search the bushes west of Paterdomus.");
 		searchBushes.addSubSteps(leaveDrezelToBushes);
 		returnFromBushesToDrezel = new ObjectStep(this, ObjectID.TRAPDOOR, new WorldPoint(3405, 3507, 0), "");
-		talkToRoald = new NpcStep(this, NpcID.KING_ROALD_CUTSCENE, new WorldPoint(3222, 3473, 0), "Talk to King Roald in Varrock Castle.");
-		talkToRoald.addDialogSteps("Talk to the king about Morytania.", "What should I do now?", "Yes thanks. I'll accept the free teleport.");
+		talkToRoald = new NpcStep(this, new int[] {NpcID.KING_ROALD, NpcID.KING_ROALD_CUTSCENE}, new WorldPoint(3222, 3473, 0), "Talk to King Roald in Varrock Castle.");
+		talkToRoald.addDialogSteps("I must speak with you on a matter of grave importance.","Talk to the king about Morytania.", "What should I do now?", "Yes thanks. I'll accept the free teleport.");
 
 		goToMines = new NpcStep(this, NpcID.SANG_MYQ3_FEMALE_WALK_VYREWATCH_1, new WorldPoint(3615, 3263, 0), "Talk to a Vyrewatch to be sent to the mines.", true);
 		goToMines.addDialogSteps("Send me to the mines.", "Send me to the mines! (Do a bit of menial work)");

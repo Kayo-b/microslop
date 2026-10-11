@@ -87,8 +87,9 @@ public enum PlayStyle {
     private int primaryTickInterval;
     @Getter
     private int secondaryTickInterval;
-    private double phase; // Phase angle for the sine function
     private int attentionSpan; // Attention span for the current playstyle
+
+    static final double OU_MEAN_REVERSION = 0.3;
 
     PlayStyle(String name, int primaryTickInterval, int secondaryTickInterval, int baseDuration, double refocusProbability) {
         this.name = name;
@@ -97,7 +98,6 @@ public enum PlayStyle {
         this.primaryTickInterval = primaryTickInterval;
         this.secondaryTickInterval = secondaryTickInterval;
         this.refocusProbability = refocusProbability;
-        this.phase = 0.0;
         this.frequency = 0.2;
         this.amplitude = 2.0;
         this.startTime = Instant.now();
@@ -111,35 +111,36 @@ public enum PlayStyle {
     }
 
     public int getRandomTickInterval() {
-        return ThreadLocalRandom.current().nextInt(primaryTickInterval, secondaryTickInterval + 1);
+        // primaryTickInterval and secondaryTickInterval drift independently in evolvePlayStyle()
+        // and can cross (primary > secondary). nextInt(origin, bound) requires bound > origin, so
+        // order the bounds defensively to avoid IllegalArgumentException. The bound is computed in
+        // long so an inclusive upper bound of Integer.MAX_VALUE cannot overflow.
+        int lo = Math.min(primaryTickInterval, secondaryTickInterval);
+        int hi = Math.max(primaryTickInterval, secondaryTickInterval);
+        return (int) ThreadLocalRandom.current().nextLong(lo, (long) hi + 1L);
     }
 
-    // Method to evolve the play style over time using a sine function
     public void evolvePlayStyle() {
-        phase += frequency;
-        primaryTickInterval = adjustInterval(primaryTickInterval, amplitude);
-        log.info("Primary tick interval: {}", primaryTickInterval);
-        secondaryTickInterval = adjustInterval(secondaryTickInterval, amplitude);
-        log.info("Secondary tick interval: {}", secondaryTickInterval);
+        primaryTickInterval = nextOrnsteinUhlenbeck(primaryTickInterval, originalPrimaryTickInterval, amplitude);
+        log.debug("Primary tick interval: {}", primaryTickInterval);
+        secondaryTickInterval = nextOrnsteinUhlenbeck(secondaryTickInterval, originalSecondaryTickInterval, amplitude);
+        log.debug("Secondary tick interval: {}", secondaryTickInterval);
         if(Rs2AntibanSettings.devDebug)
             Microbot.log("Slightly adjusting playStyle intervals.");
     }
 
-    // Helper method to adjust intervals using the sine of the phase
-    private int adjustInterval(int interval, double amplitude) {
-        int change = (int) (amplitude * Math.sin(phase));
-        interval += change;
-        // Ensure intervals remain within logical boundaries
-        return Math.max(1, interval);
+    static int nextOrnsteinUhlenbeck(int current, int mean, double volatility) {
+        double drift = -OU_MEAN_REVERSION * (current - mean);
+        double noise = ThreadLocalRandom.current().nextGaussian() * volatility;
+        int change = (int) Math.round(drift + noise);
+        return Math.max(1, current + change);
     }
 
-    // Method to reset the intervals to their original values
     public void resetPlayStyle() {
         this.primaryTickInterval = originalPrimaryTickInterval;
         this.secondaryTickInterval = originalSecondaryTickInterval;
-        this.phase = 0.0; // Reset the phase as well
-        this.startTime = Instant.now(); // Reset start time
-        this.attentionSpan = generateAttentionSpan(this.baseDuration); // Generate new attention span
+        this.startTime = Instant.now();
+        this.attentionSpan = generateAttentionSpan(this.baseDuration);
     }
 
     // Switch profile to a new play style either one step up or down

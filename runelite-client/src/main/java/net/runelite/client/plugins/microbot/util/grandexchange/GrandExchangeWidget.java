@@ -6,12 +6,14 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.widget.Rs2Widget;
-
+@Slf4j
 public class GrandExchangeWidget
 {
 
@@ -259,40 +261,9 @@ public class GrandExchangeWidget
 	 * @param basePrice the price to compare against
 	 * @return {@code true} if the current offer price differs from the base price; {@code false} otherwise
 	 */
-	static boolean hasOfferPriceChanged(int basePrice)
+	static boolean hasOfferPriceChanged(long basePrice)
 	{
-		return basePrice != getItemPrice();
-	}
-
-	/**
-	 * Retrieves the widget displaying the current item price in the Grand Exchange offer interface.
-	 *
-	 * @return the {@link Widget} representing the item price display, or {@code null} if unavailable
-	 */
-	static Widget getItemPriceWidget()
-	{
-		return getOfferChild(41);
-	}
-
-	/**
-	 * Gets the current price of the item in the Grand Exchange offer interface.
-	 * <p>
-	 * Parses the text of the item price widget to extract the numeric price value.
-	 *
-	 * @return the current item price as an integer
-	 * @throws NumberFormatException if the widget text cannot be parsed as an integer
-	 */
-	static int getItemPrice()
-	{
-		try
-		{
-			return Integer.parseInt(getItemPriceWidget().getText().replace(" coins", ""));
-		}
-		catch (NumberFormatException e)
-		{
-			Microbot.log("Invailid item price format in Grand Exchange: " + getItemPriceWidget().getText());
-			return -1;
-		}
+		return basePrice != Rs2GrandExchange.getOfferPrice();
 	}
 
 	/**
@@ -336,7 +307,12 @@ public class GrandExchangeWidget
 	 * @return an array of {@link Widget} objects representing collect buttons; empty if none found
 	 */
 	static Widget[] getCollectButtons()
-	{
+	{		
+		if (!Rs2Widget.isWidgetVisible(InterfaceID.GE_OFFERS,24))
+		{
+			log.info("Grand Exchange offers interface is not open, cannot retrieve collect buttons.");
+			return new Widget[0];
+		}
 		Widget parent = Rs2Widget.getWidget(InterfaceID.GE_OFFERS, 24);
 		List<Widget> buttons = new ArrayList<>();
 		if (parent != null && parent.getChildren() != null)
@@ -347,6 +323,7 @@ public class GrandExchangeWidget
 				{
 					continue;
 				}
+				
 
 				if (Arrays.stream(child.getActions()).filter(Objects::nonNull).anyMatch(act -> act.toLowerCase().contains("collect")))
 				{

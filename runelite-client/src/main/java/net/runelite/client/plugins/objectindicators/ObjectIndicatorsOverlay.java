@@ -41,6 +41,8 @@ import net.runelite.api.GroundObject;
 import net.runelite.api.ObjectComposition;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
+import net.runelite.api.WorldEntity;
+import net.runelite.api.WorldView;
 import static net.runelite.client.plugins.objectindicators.ColorTileObject.HF_CLICKBOX;
 import static net.runelite.client.plugins.objectindicators.ColorTileObject.HF_HULL;
 import static net.runelite.client.plugins.objectindicators.ColorTileObject.HF_OUTLINE;
@@ -81,7 +83,10 @@ class ObjectIndicatorsOverlay extends Overlay
 			return null;
 		}
 
-		Stroke stroke = new BasicStroke((float) config.borderWidth());
+		WorldView toplevel = client.getTopLevelWorldView();
+		double borderWidth = config.borderWidth();
+		Stroke stroke = new BasicStroke((float) borderWidth);
+		Stroke tileStroke = new BasicStroke((float) Math.min(borderWidth, 2));
 		final var defaultFlags =
 				(config.highlightHull() ? HF_HULL : 0) |
 						(config.highlightOutline() ? HF_OUTLINE : 0) |
@@ -90,8 +95,15 @@ class ObjectIndicatorsOverlay extends Overlay
 		for (ColorTileObject obj : objects)
 		{
 			TileObject object = obj.getTileObject();
+			WorldView wv = object.getWorldView();
 
-			if (object.getPlane() != client.getPlane())
+			if (wv == null || object.getPlane() != wv.getPlane())
+			{
+				continue;
+			}
+
+			WorldEntity we = toplevel.worldEntities().byIndex(wv.getId());
+			if (we != null && we.isHiddenForOverlap())
 			{
 				continue;
 			}
@@ -147,7 +159,7 @@ class ObjectIndicatorsOverlay extends Overlay
 				if (tilePoly != null)
 				{
 					Color fillColor = MoreObjects.firstNonNull(obj.getFillColor(), ColorUtil.colorWithAlpha(borderColor, borderColor.getAlpha() / 12));
-					OverlayUtil.renderPolygon(graphics, tilePoly, borderColor, fillColor, stroke);
+					OverlayUtil.renderPolygon(graphics, tilePoly, borderColor, fillColor, tileStroke);
 				}
 			}
 		}

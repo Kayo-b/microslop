@@ -28,6 +28,7 @@ import com.google.inject.Guice;
 import com.google.inject.testing.fieldbinder.Bind;
 import com.google.inject.testing.fieldbinder.BoundFieldModule;
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.BooleanSupplier;
 import javax.inject.Inject;
@@ -35,8 +36,6 @@ import javax.inject.Named;
 import net.runelite.api.ChatMessageType;
 import static net.runelite.api.ChatMessageType.GAMEMESSAGE;
 import net.runelite.api.Client;
-import net.runelite.api.EnumComposition;
-import net.runelite.api.EnumID;
 import net.runelite.api.GameState;
 import net.runelite.api.MessageNode;
 import net.runelite.api.NPC;
@@ -45,7 +44,9 @@ import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.Notifier;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatClient;
@@ -66,6 +67,7 @@ import org.junit.runner.RunWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.Mock;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
@@ -78,8 +80,6 @@ import org.mockito.junit.MockitoJUnitRunner;
 @RunWith(MockitoJUnitRunner.class)
 public class SlayerPluginTest
 {
-	private static final String SUPERIOR_MESSAGE = "A superior foe has appeared...";
-
 	@Mock
 	@Bind
 	Client client;
@@ -163,9 +163,8 @@ public class SlayerPluginTest
 			return b.getAsBoolean();
 		}).when(clientThread).invoke(any(BooleanSupplier.class));
 
-		EnumComposition e = mock(EnumComposition.class);
-		when(e.getStringVals()).thenReturn(new String[]{"The Abyss"});
-		when(client.getEnum(EnumID.SLAYER_TASK_LOCATION)).thenReturn(e);
+		when(client.getDBTableRows(DBTableID.SlayerArea.ID)).thenReturn(List.of(1234));
+		when(client.getDBTableField(1234, DBTableID.SlayerArea.COL_AREA_NAME_IN_HELPER, 0)).thenReturn(new String[]{"The Abyss"});
 
 		slayerPlugin.startUp();
 	}
@@ -179,11 +178,20 @@ public class SlayerPluginTest
 	@Test
 	public void testSuperiorNotification()
 	{
-		ChatMessage chatMessageEvent = new ChatMessage(null, GAMEMESSAGE, "Superior", SUPERIOR_MESSAGE, null, 0);
+		ChatMessage chatMessageEvent = new ChatMessage(null, GAMEMESSAGE, "Superior", "@mes_hl_red@A superior foe has appeared...</col>", null, 0);
 
 		when(slayerConfig.showSuperiorNotification()).thenReturn(Notification.ON);
 		slayerPlugin.onChatMessage(chatMessageEvent);
-		verify(notifier).notify(Notification.ON, SUPERIOR_MESSAGE);
+		verify(notifier).notify(Notification.ON, "A superior foe has appeared...");
+	}
+
+	@Test
+	public void testSuperiorNotificationRejectsContainingMessage()
+	{
+		ChatMessage chatMessageEvent = new ChatMessage(null, GAMEMESSAGE, "Superior", "Warning: A superior foe has appeared... nearby", null, 0);
+
+		slayerPlugin.onChatMessage(chatMessageEvent);
+		verify(notifier, never()).notify(any(Notification.class), anyString());
 	}
 
 	@Test
@@ -248,13 +256,7 @@ public class SlayerPluginTest
 
 		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT)).thenReturn(42);
 		when(client.getVarpValue(VarPlayerID.SLAYER_TARGET)).thenReturn(1);
-		when(client.getEnum(EnumID.SLAYER_TASK_CREATURE))
-			.thenAnswer(a ->
-			{
-				EnumComposition e = mock(EnumComposition.class);
-				when(e.getStringValue(anyInt())).thenReturn("mocked npc");
-				return e;
-			});
+		mockDBTable(113, 0, 10, "mocked npc");
 
 		VarbitChanged varbitChanged = new VarbitChanged();
 		varbitChanged.setVarpId(VarPlayerID.SLAYER_COUNT);
@@ -267,6 +269,26 @@ public class SlayerPluginTest
 		slayerPlugin.onGameTick(new GameTick());
 
 		verify(infoBoxManager, never()).addInfoBox(any());
+	}
+
+	@Test
+	public void loginInitializesMortimerStreak()
+	{
+		GameStateChanged loggingIn = new GameStateChanged();
+		loggingIn.setGameState(GameState.LOGGING_IN);
+		slayerPlugin.onGameStateChanged(loggingIn);
+
+		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT)).thenReturn(42);
+		when(client.getVarpValue(VarPlayerID.SLAYER_TARGET)).thenReturn(1);
+		when(client.getVarbitValue(VarbitID.SLAYER_MASTER)).thenReturn(10);
+		when(client.getVarpValue(VarPlayerID.SLAYER_MORTIMER_TASKS_COMPLETED)).thenReturn(17);
+		mockDBTable(113, 0, 10, "mocked npc");
+
+		VarbitChanged taskSizeChanged = new VarbitChanged();
+		taskSizeChanged.setVarpId(VarPlayerID.SLAYER_COUNT);
+		slayerPlugin.onVarbitChanged(taskSizeChanged);
+
+		verify(configManager).setRSProfileConfiguration(SlayerConfig.GROUP_NAME, SlayerConfig.STREAK_KEY, 17);
 	}
 
 	@Test
@@ -285,6 +307,19 @@ public class SlayerPluginTest
 		assertTrue(matches("Loar shade", Task.SHADES));
 		assertTrue(matches("Loar shadow", Task.SHADES));
 		assertTrue(matches("Urium shadow", Task.SHADES));
+		assertTrue(matches("Juvenile custodian stalker", Task.CUSTODIAN_STALKERS));
+		assertTrue(matches("Mature custodian stalker", Task.CUSTODIAN_STALKERS));
+		assertTrue(matches("Elder custodian stalker", Task.CUSTODIAN_STALKERS));
+		assertTrue(matches("Ancient Custodian", Task.CUSTODIAN_STALKERS));
+		assertTrue(matches("Gryphon", Task.GRYPHONS));
+		assertTrue(matches("Dire gryphon", Task.GRYPHONS));
+		assertTrue(matches("The Shellbane Gryphon", Task.GRYPHONS));
+		assertTrue(matches("The Shellbane Gryphon", Task.SHELLBANE_GRYPHON));
+		assertTrue(matches("Lava Strykewyrm", Task.WYRMS));
+		assertTrue(matches("Magma strykewyrm", Task.WYRMS));
+		assertTrue(matches("Aquanite", Task.AQUANITES));
+		assertTrue(matches("Elder Aquanite", Task.AQUANITES));
+		assertTrue(matches("Frost dragon", Task.FROST_DRAGONS));
 
 		assertFalse(matches("Rat", Task.PIRATES));
 		assertFalse(matches("Wolf", Task.WEREWOLVES));
@@ -309,16 +344,7 @@ public class SlayerPluginTest
 	{
 		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT)).thenReturn(42);
 		when(client.getVarpValue(VarPlayerID.SLAYER_TARGET)).thenReturn(1);
-		when(client.getEnum(EnumID.SLAYER_TASK_CREATURE))
-			.thenAnswer(a ->
-			{
-				EnumComposition e = mock(EnumComposition.class);
-				when(e.getStringValue(anyInt())).thenReturn("mocked npc");
-				return e;
-			});
-
-		// initial amount is fetched from config at sync
-		when(configManager.getRSProfileConfiguration("slayer", "initialAmount", int.class)).thenReturn(99);
+		mockDBTable(113, 0, 10, "mocked npc");
 
 		slayerPlugin.setTaskName("mocked npc");
 		slayerPlugin.setAmount(42);
@@ -340,6 +366,7 @@ public class SlayerPluginTest
 
 		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT)).thenReturn(0);
 		when(client.getVarpValue(VarPlayerID.SLAYER_TARGET)).thenReturn(0);
+		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT_ORIGINAL)).thenReturn(0);
 
 		VarbitChanged taskSizeChanged = new VarbitChanged();
 		taskSizeChanged.setVarpId(VarPlayerID.SLAYER_COUNT);
@@ -349,14 +376,28 @@ public class SlayerPluginTest
 		taskCreatureChanged.setVarpId(VarPlayerID.SLAYER_TARGET);
 		slayerPlugin.onVarbitChanged(taskCreatureChanged);
 
+		VarbitChanged taskOriginalAmountChanged = new VarbitChanged();
+		taskOriginalAmountChanged.setVarpId(VarPlayerID.SLAYER_COUNT_ORIGINAL);
+		slayerPlugin.onVarbitChanged(taskOriginalAmountChanged);
+
 		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT)).thenReturn(42);
 		when(client.getVarpValue(VarPlayerID.SLAYER_TARGET)).thenReturn(1);
+		when(client.getVarpValue(VarPlayerID.SLAYER_COUNT_ORIGINAL)).thenReturn(99);
 
 		slayerPlugin.onVarbitChanged(taskSizeChanged);
 		slayerPlugin.onVarbitChanged(taskCreatureChanged);
+		slayerPlugin.onVarbitChanged(taskOriginalAmountChanged);
 
 		assertEquals("mocked npc", slayerPlugin.getTaskName());
 		assertEquals(42, slayerPlugin.getAmount());
 		assertEquals(99, slayerPlugin.getInitialAmount());
+	}
+
+	void mockDBTable(int table, int keycol, int valcol, String str)
+	{
+		int mockRow = (table << 8) | keycol;
+		when(client.getDBRowsByValue(eq(table), eq(keycol), eq(0), anyInt()))
+			.thenReturn(List.of(mockRow));
+		when(client.getDBTableField(mockRow, valcol, 0)).thenReturn(new String[]{str});
 	}
 }

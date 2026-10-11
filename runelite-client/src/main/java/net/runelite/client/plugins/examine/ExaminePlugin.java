@@ -122,13 +122,13 @@ public class ExaminePlugin extends Plugin
 			return;
 		}
 
-		PendingExamine pendingExamine = pending.poll();
+		PendingExamine pendingExamine = pending.peek();
 		if (pendingExamine.getResponseType() != event.getType())
 		{
 			log.debug("Type mismatch for pending examine: {} != {}", pendingExamine.getResponseType(), event.getType());
-			pending.clear(); // eh
 			return;
 		}
+		pending.pop();
 
 		log.debug("Got examine type {} {}: {}", pendingExamine.getResponseType(), pendingExamine.getId(), event.getMessage());
 
@@ -194,7 +194,7 @@ public class ExaminePlugin extends Plugin
 	{
 		// quantity is at least 1
 		quantity = Math.max(1, quantity);
-		final int gePrice = itemManager.getItemPrice(id);
+		final long gePrice = itemManager.getItemPrice(id);
 		final int alchPrice = itemComposition.getHaPrice();
 
 		if (gePrice > 0 || alchPrice > 0)
@@ -222,7 +222,7 @@ public class ExaminePlugin extends Plugin
 					.append(ChatColorType.NORMAL)
 					.append(" GE average ")
 					.append(ChatColorType.HIGHLIGHT)
-					.append(QuantityFormatter.formatNumber((long) gePrice * quantity));
+					.append(QuantityFormatter.formatNumber(gePrice * quantity));
 
 				if (quantity > 1)
 				{

@@ -163,6 +163,7 @@ public class KandarinHard extends ComplexStateQuestHelper
 		piety = new PrayerRequirement("Piety", Prayer.PIETY);
 
 		barbRod = new ItemRequirement("Barbarian fishing rod", ItemID.BRUT_FISHING_ROD).showConditioned(notCatchSturgeon).isNotConsumed();
+		barbRod.addAlternates(ItemID.FISHINGROD_PEARL_BRUT);
 		feather = new ItemRequirement("Feathers", ItemID.FEATHER).showConditioned(notCatchSturgeon);
 		axe = new ItemRequirement("Any axe", ItemCollections.AXES).showConditioned(notYewLong).isNotConsumed();
 		bowString = new ItemRequirement("Bow string", ItemID.BOW_STRING).showConditioned(notYewLong);
@@ -212,12 +213,12 @@ public class KandarinHard extends ComplexStateQuestHelper
 
 		choppedLogs = new ChatMessageRequirement(
 			inSeers,
-			"<col=0040ff>Achievement Diary Stage Task - Current stage: 1.</col>"
+			"Achievement Diary Stage Task - Current stage: 1."
 		);
 		((ChatMessageRequirement) choppedLogs).setInvalidateRequirement(
 			new ChatMessageRequirement(
 				new Conditions(LogicType.NOR, inSeers),
-				"<col=0040ff>Achievement Diary Stage Task - Current stage: 1.</col>"
+				"Achievement Diary Stage Task - Current stage: 1."
 			)
 		);
 

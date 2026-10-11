@@ -49,6 +49,17 @@ public interface NPCComposition extends ParamHolder
 	int[] getModels();
 
 	/**
+	 * Gets the model IDs that compose this NPC's chathead.
+	 */
+	@Nullable
+	int[] getChatheadModels();
+
+	/**
+	 * The menu ops associated with this object
+	 */
+	EntityOps getOps();
+
+	/**
 	 * The 5 menuops this NPC has when in world. Index 0 corresponds to
 	 * {@link MenuAction#NPC_FIRST_OPTION}, Index 2 to
 	 * {@link MenuAction#NPC_SECOND_OPTION} and so on.
@@ -65,8 +76,6 @@ public interface NPCComposition extends ParamHolder
 	 * Gets whether the NPC is visible on the mini-map.
 	 */
 	boolean isMinimapVisible();
-
-	boolean isVisible();
 
 	/**
 	 * Gets the ID of the NPC.

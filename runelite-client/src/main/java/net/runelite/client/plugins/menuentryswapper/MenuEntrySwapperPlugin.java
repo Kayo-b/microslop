@@ -48,6 +48,7 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.EntityOps;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.KeyCode;
 import net.runelite.api.Menu;
@@ -61,7 +62,6 @@ import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.PostMenuSort;
 import net.runelite.api.gameval.InterfaceID;
-import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.api.widgets.WidgetConfig;
 import net.runelite.api.widgets.WidgetConfigNode;
@@ -527,6 +527,11 @@ public class MenuEntrySwapperPlugin extends Plugin
 		configureUiSwap(event);
 	}
 
+	private int packSubID(int opIdx, int subID)
+	{
+		return (subID + 1) << 8 | opIdx;
+	}
+
 	private void configureObjectClick(MenuOpened event)
 	{
 		if (!shiftModifier() || !config.objectCustomization())
@@ -541,15 +546,10 @@ public class MenuEntrySwapperPlugin extends Plugin
 			if (entry.getType() == MenuAction.EXAMINE_OBJECT)
 			{
 				final ObjectComposition composition = client.getObjectDefinition(entry.getIdentifier());
-				final String[] actions = composition.getActions();
+				final EntityOps ops = composition.getOps();
 
 				final Integer swapConfig = getObjectSwapConfig(false, composition.getId());
-				final MenuAction currentAction = swapConfig == null ? defaultAction(composition) :
-					(swapConfig == -1 ? MenuAction.WALK : OBJECT_MENU_TYPES.get(swapConfig));
-
 				final Integer shiftSwapConfig = getObjectSwapConfig(true, composition.getId());
-				final MenuAction currentShiftAction = shiftSwapConfig == null ? defaultAction(composition) :
-					(shiftSwapConfig == -1 ? MenuAction.WALK : OBJECT_MENU_TYPES.get(shiftSwapConfig));
 
 				MenuEntry swapLeftClick = client.createMenuEntry(idx)
 					.setOption("Swap left-click")
@@ -562,47 +562,55 @@ public class MenuEntrySwapperPlugin extends Plugin
 				Menu subLeft = swapLeftClick.createSubMenu();
 				Menu subShift = swapShiftClick.createSubMenu();
 
-				for (int actionIdx = 0; actionIdx < OBJECT_MENU_TYPES.size(); ++actionIdx)
+				for (int opIdx = 0; opIdx < EntityOps.MAX_OPS; ++opIdx)
 				{
-					if (Strings.isNullOrEmpty(actions[actionIdx]))
+					String op = ops.getOp(opIdx);
+					if (Strings.isNullOrEmpty(op))
 					{
 						continue;
 					}
 
-					final MenuAction menuAction = OBJECT_MENU_TYPES.get(actionIdx);
-					if (menuAction != currentAction)
-					{
-						subLeft.createMenuEntry(0)
-							.setOption(actions[actionIdx])
-							.setType(MenuAction.RUNELITE)
-							.onClick(objectConsumer(composition, actions, actionIdx, menuAction, false));
-					}
+					subLeft.createMenuEntry(0)
+						.setOption(op)
+						.setType(MenuAction.RUNELITE)
+						.onClick(objectConsumer(composition, op, opIdx, false));
+					subShift.createMenuEntry(0)
+						.setOption(op)
+						.setType(MenuAction.RUNELITE)
+						.onClick(objectConsumer(composition, op, opIdx, true));
 
-					if (menuAction != currentShiftAction && menuAction != currentAction)
+					EntityOps subops = ops.getSubOps(opIdx);
+					if (subops != null)
 					{
-						subShift.createMenuEntry(0)
-							.setOption(actions[actionIdx])
-							.setType(MenuAction.RUNELITE)
-							.onClick(objectConsumer(composition, actions, actionIdx, menuAction, true));
+						int numSubOps = subops.getNumOps();
+						for (int subIdx = 0; subIdx < numSubOps; subIdx++)
+						{
+							String subOp = subops.getOp(subIdx);
+
+							if (subOp != null)
+							{
+								subLeft.createMenuEntry(0)
+									.setOption(subOp)
+									.setType(MenuAction.RUNELITE)
+									.onClick(objectConsumer(composition, subOp, packSubID(opIdx, subIdx), false));
+								subShift.createMenuEntry(0)
+									.setOption(subOp)
+									.setType(MenuAction.RUNELITE)
+									.onClick(objectConsumer(composition, subOp, packSubID(opIdx, subIdx), true));
+							}
+						}
 					}
 				}
 
 				// Walk here
-				if (currentAction != MenuAction.WALK)
-				{
-					subLeft.createMenuEntry(0)
-						.setOption("Walk here")
-						.setType(MenuAction.RUNELITE)
-						.onClick(walkHereConsumer(false, composition));
-				}
-
-				if (currentShiftAction != MenuAction.WALK)
-				{
-					subShift.createMenuEntry(0)
-						.setOption("Walk here")
-						.setType(MenuAction.RUNELITE)
-						.onClick(walkHereConsumer(true, composition));
-				}
+				subLeft.createMenuEntry(0)
+					.setOption("Walk here")
+					.setType(MenuAction.RUNELITE)
+					.onClick(walkHereConsumer(false, composition));
+				subShift.createMenuEntry(0)
+					.setOption("Walk here")
+					.setType(MenuAction.RUNELITE)
+					.onClick(walkHereConsumer(true, composition));
 
 				// Reset
 				if (swapConfig != null)
@@ -624,14 +632,13 @@ public class MenuEntrySwapperPlugin extends Plugin
 		}
 	}
 
-	private Consumer<MenuEntry> objectConsumer(ObjectComposition composition, String[] actions, int menuIdx,
-		MenuAction menuAction, boolean shift)
+	private Consumer<MenuEntry> objectConsumer(ObjectComposition composition, String text, int menuIdx, boolean shift)
 	{
 		return e ->
 		{
 			final String message = new ChatMessageBuilder()
 				.append("The default ").append(shift ? "shift" : "left").append(" click option for '").append(Text.removeTags(composition.getName())).append("' ")
-				.append("has been set to '").append(actions[menuIdx]).append("'.")
+				.append("has been set to '").append(text).append("'.")
 				.build();
 
 			chatMessageManager.queue(QueuedMessage.builder()
@@ -639,7 +646,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 				.runeLiteFormattedMessage(message)
 				.build());
 
-			log.debug("Set object swap for {} to {}", composition.getId(), menuAction);
+			log.debug("Set object swap for {} to {}", composition.getId(), menuIdx);
 
 			setObjectSwapConfig(shift, composition.getId(), menuIdx);
 		};
@@ -752,20 +759,13 @@ public class MenuEntrySwapperPlugin extends Plugin
 				Menu subLeft = swapLeftClick.createSubMenu();
 				Menu subShift = swapShiftClick.createSubMenu();
 
-				for (int actionIdx = 0; actionIdx < NPC_MENU_TYPES.size(); ++actionIdx)
+				for (int actionIdx = 0; actionIdx < actions.length; ++actionIdx)
 				{
 					// Attack can be swapped with the in-game settings, and this becomes very confusing if we try
 					// to swap Attack and the game also tries to swap it (by deprioritizing), so just use the in-game
 					// setting.
 					if (Strings.isNullOrEmpty(actions[actionIdx]) || "Attack".equalsIgnoreCase(actions[actionIdx]))
 					{
-						continue;
-					}
-
-					if ("Knock-Out".equals(actions[actionIdx])
-						|| "Lure".equals(actions[actionIdx]))
-					{
-						// https://secure.runescape.com/m=news/third-party-client-guidelines?oldschool=1
 						continue;
 					}
 
@@ -1222,13 +1222,13 @@ public class MenuEntrySwapperPlugin extends Plugin
 				{
 					final int componentId = w.getId(); // on dynamic components, this is the parent layer id
 					final int itemId = w.getIndex() == -1 ? -1 : ItemVariationMapping.map(w.getItemId());
-					final int identifier = getMungedId(entry);
+					final int identifier = entry.getIdentifier();
 					final Integer leftClick = getUiSwapConfig(false, componentId, itemId);
 					final Integer shiftClick = getUiSwapConfig(true, componentId, itemId);
 
 					// find lowest op from the widget actions, to prevent setting a swap to the default left click
 					// action regardless of what is swapped.
-					final int lowestOp = getMungedId(findLowestOp(w), w.getId(), w.getIndex());
+					final int lowestOp = findLowestOp(w);
 
 					// find highest op from the current menu, post any existing swaps, for inserting Reset
 					int highestOp = 10;
@@ -1240,7 +1240,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 							continue;
 						}
 
-						highestOp = getMungedId(opEntry);
+						highestOp = opEntry.getIdentifier();
 					}
 
 					if (!initialized)
@@ -1350,14 +1350,14 @@ public class MenuEntrySwapperPlugin extends Plugin
 
 	private boolean testOpMask(Widget w, int op)
 	{
-		WidgetConfigNode n = client.getWidgetFlags().get((long) w.getId() << 32 | w.getIndex());
+		WidgetConfigNode n = client.getWidgetConfig(w);
 		int mask = n != null ? n.getClickMask() : w.getClickMask();
 		return (mask >> op + 1 & 1) != 0;
 	}
 
 	private boolean isOpTarget(Widget w)
 	{
-		WidgetConfigNode n = client.getWidgetFlags().get((long) w.getId() << 32 | w.getIndex());
+		WidgetConfigNode n = client.getWidgetConfig(w);
 		int mask = n != null ? n.getClickMask() : w.getClickMask();
 		return (mask & (WidgetConfig.USE_GROUND_ITEM | WidgetConfig.USE_NPC | WidgetConfig.USE_OBJECT | WidgetConfig.USE_PLAYER | WidgetConfig.USE_ITEM | WidgetConfig.USE_WIDGET)) != 0;
 	}
@@ -1392,13 +1392,12 @@ public class MenuEntrySwapperPlugin extends Plugin
 		final boolean isDepositBoxPlayerInventory = widgetGroupId == InterfaceID.BANK_DEPOSITBOX;
 		final boolean isChambersOfXericStorageUnitPlayerInventory = widgetGroupId == InterfaceID.RAIDS_STORAGE_SIDE;
 		final boolean isGroupStoragePlayerInventory = widgetGroupId == InterfaceID.SHARED_BANK_SIDE;
-		int ident = getMungedId(menuEntry);
 		// Swap to shift-click deposit behavior
 		// Deposit- op 1 is the current withdraw amount 1/5/10/x for deposit box interface and chambers of xeric storage unit.
 		// Deposit- op 2 is the current withdraw amount 1/5/10/x for bank interface
 		if (shiftModifier() && config.bankDepositShiftClick() != ShiftDepositMode.OFF
 			&& type == MenuAction.CC_OP
-			&& ident == (isDepositBoxPlayerInventory || isGroupStoragePlayerInventory || isChambersOfXericStorageUnitPlayerInventory ? 1 : 2)
+			&& menuEntry.getIdentifier() == (isGroupStoragePlayerInventory || isChambersOfXericStorageUnitPlayerInventory ? 1 : 2)
 			&& (menuEntry.getOption().startsWith("Deposit-") || menuEntry.getOption().startsWith("Store") || menuEntry.getOption().startsWith("Donate")))
 		{
 			ShiftDepositMode shiftDepositMode = config.bankDepositShiftClick();
@@ -1414,7 +1413,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 		// Swap to shift-click withdraw behavior
 		// Deposit- op 1 is the current withdraw amount 1/5/10/x
 		if (shiftModifier() && config.bankWithdrawShiftClick() != ShiftWithdrawMode.OFF
-			&& type == MenuAction.CC_OP && ident == 1
+			&& type == MenuAction.CC_OP && menuEntry.getIdentifier() == 1
 			&& menuEntry.getOption().startsWith("Withdraw"))
 		{
 			ShiftWithdrawMode shiftWithdrawMode = config.bankWithdrawShiftClick();
@@ -1445,7 +1444,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 		{
 			MenuEntry entry = menuEntries[i];
 
-			if (entry.getType() == entryType && getMungedId(entry) == entryIdentifier)
+			if (entry.getType() == entryType && entry.getIdentifier() == entryIdentifier)
 			{
 				// Raise the priority of the op so it doesn't get sorted later
 				entry.setType(MenuAction.CC_OP);
@@ -1496,16 +1495,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 				// Submenu swap. The swapIndex is actually the option hashCode.
 				else if (parent != null && menuEntry.getOption().hashCode() == swapIndex)
 				{
-					// Since it isn't possible to reparent the menu to the top level, just copy it
-					client.createMenuEntry(-1)
-						.setOption(menuEntry.getOption())
-						.setTarget(menuEntry.getTarget())
-						.setIdentifier(menuEntry.getIdentifier())
-						.setType(menuEntry.getType() == MenuAction.CC_OP_LOW_PRIORITY ? MenuAction.CC_OP : menuEntry.getType())
-						.setItemId(menuEntry.getItemId())
-						.setParam0(menuEntry.getParam0())
-						.setParam1(menuEntry.getParam1())
-						.onClick(menuEntry.onClick());
+					clone(menuEntry);
 				}
 				return;
 			}
@@ -1527,26 +1517,18 @@ public class MenuEntrySwapperPlugin extends Plugin
 					// Submenu swap.
 					else if (parent != null && menuEntry.getOption().hashCode() == wornItemSwapConfig)
 					{
-						// Since it isn't possible to reparent the menu to the top level, just copy it
-						client.createMenuEntry(-1)
-							.setOption(menuEntry.getOption())
-							.setTarget(menuEntry.getTarget())
-							.setIdentifier(menuEntry.getIdentifier())
-							.setType(menuEntry.getType() == MenuAction.CC_OP_LOW_PRIORITY ? MenuAction.CC_OP : menuEntry.getType())
-							.setItemId(menuEntry.getItemId())
-							.setParam0(menuEntry.getParam0())
-							.setParam1(menuEntry.getParam1())
-							.onClick(menuEntry.onClick());
+						clone(menuEntry);
 					}
 					return;
 				}
 			}
 		}
 
-		if (OBJECT_MENU_TYPES.contains(menuAction))
+		int objMenuIdx = OBJECT_MENU_TYPES.indexOf(menuAction);
+		if (objMenuIdx != -1)
 		{
 			// Get multiloc id
-			int objectId = eventId;
+			int objectId = eventId & 0xFFFF;
 			ObjectComposition objectComposition = client.getObjectDefinition(objectId);
 			if (objectComposition.getImpostorIds() != null)
 			{
@@ -1557,12 +1539,15 @@ public class MenuEntrySwapperPlugin extends Plugin
 			Integer customOption = getObjectSwapConfig(shiftModifier(), objectId);
 			if (customOption != null && customOption >= 0)
 			{
-				MenuAction swapAction = OBJECT_MENU_TYPES.get(customOption);
-				if (swapAction == menuAction)
+				if (customOption == objMenuIdx)
 				{
 					swap(menu, menuEntries, index, menuEntries.length - 1);
-					return;
 				}
+				else if (parent != null && customOption == packSubID(objMenuIdx, menuEntry.getIdentifier() >> 16))
+				{
+					clone(menuEntry);
+				}
+				return;
 			}
 		}
 
@@ -1606,8 +1591,8 @@ public class MenuEntrySwapperPlugin extends Plugin
 			{
 				final int componentId = w.getId(); // on dynamic components, this is the parent layer id
 				final int itemId = w.getIndex() == -1 ? -1 : ItemVariationMapping.map(w.getItemId());
-				final Integer op = getUiSwapConfig(shiftModifier(), componentId, itemId);
-				if (op != null && op == getMungedId(menuEntry))
+				final Integer op = getMigratedUiSwapConfig(shiftModifier(), componentId, itemId);
+				if (op != null && op == menuEntry.getIdentifier())
 				{
 					swap(menu, menuEntries, index, menuEntries.length - 1);
 					return;
@@ -1880,6 +1865,20 @@ public class MenuEntrySwapperPlugin extends Plugin
 		}
 	}
 
+	private MenuEntry clone(MenuEntry menuEntry)
+	{
+		// Since it isn't possible to reparent the menu to the top level, just copy it
+		return client.createMenuEntry(-1)
+			.setOption(menuEntry.getOption())
+			.setTarget(menuEntry.getTarget())
+			.setIdentifier(menuEntry.getIdentifier())
+			.setType(menuEntry.getType() == MenuAction.CC_OP_LOW_PRIORITY ? MenuAction.CC_OP : menuEntry.getType())
+			.setItemId(menuEntry.getItemId())
+			.setParam0(menuEntry.getParam0())
+			.setParam1(menuEntry.getParam1())
+			.onClick(menuEntry.onClick());
+	}
+
 	private static <T extends Comparable<? super T>> void sortedInsert(List<T> list, T value)
 	{
 		int idx = Collections.binarySearch(list, value);
@@ -1912,21 +1911,6 @@ public class MenuEntrySwapperPlugin extends Plugin
 		configManager.unsetConfiguration(MenuEntrySwapperConfig.GROUP, (shift ? OBJECT_SHIFT_KEY_PREFIX : OBJECT_KEY_PREFIX) + objectId);
 	}
 
-	private static MenuAction defaultAction(ObjectComposition objectComposition)
-	{
-		String[] actions = objectComposition.getActions();
-		// GAME_OBJECT_FIFTH_OPTION is never the default, even if it is the only option, because it
-		// gets depriotizied below Walk here
-		for (int i = 0; i < OBJECT_MENU_TYPES.size() - 1; ++i)
-		{
-			if (!Strings.isNullOrEmpty(actions[i]))
-			{
-				return OBJECT_MENU_TYPES.get(i);
-			}
-		}
-		return null;
-	}
-
 	private Integer getNpcSwapConfig(boolean shift, int npcId)
 	{
 		String config = configManager.getConfiguration(MenuEntrySwapperConfig.GROUP,
@@ -1952,7 +1936,7 @@ public class MenuEntrySwapperPlugin extends Plugin
 	private static MenuAction defaultAction(NPCComposition composition)
 	{
 		String[] actions = composition.getActions();
-		for (int i = 0; i < NPC_MENU_TYPES.size(); ++i)
+		for (int i = 0; i < actions.length && i < NPC_MENU_TYPES.size(); ++i)
 		{
 			if (!Strings.isNullOrEmpty(actions[i]) && !actions[i].equalsIgnoreCase("Attack"))
 			{
@@ -1987,6 +1971,30 @@ public class MenuEntrySwapperPlugin extends Plugin
 		return -1; // use
 	}
 
+	private Integer getMigratedUiSwapConfig(boolean shift, int componentId, int itemId)
+	{
+		Integer swap = getUiSwapConfig(shift, componentId, itemId);
+		if (componentId == InterfaceID.Bankmain.ITEMS)
+		{
+			// remap 12.13 -> 12.12 for 1/28/2026 game update
+			if (swap == null)
+			{
+				swap = getUiSwapConfig(shift, InterfaceID.Bankmain.SCROLLBAR, itemId);
+				if (swap != null)
+				{
+					unsetUiSwapConfig(shift, InterfaceID.Bankmain.SCROLLBAR, itemId);
+					setUiSwapConfig(shift, InterfaceID.Bankmain.ITEMS, itemId, swap);
+					log.debug("Migrated swap {} for {} from scrollbar to items", swap, itemId);
+				}
+			}
+			else
+			{
+				unsetUiSwapConfig(shift, InterfaceID.Bankmain.SCROLLBAR, itemId);
+			}
+		}
+		return swap;
+	}
+
 	private Integer getUiSwapConfig(boolean shift, int componentId, int itemId)
 	{
 		String config = configManager.getConfiguration(MenuEntrySwapperConfig.GROUP,
@@ -2010,80 +2018,5 @@ public class MenuEntrySwapperPlugin extends Plugin
 	{
 		configManager.unsetConfiguration(MenuEntrySwapperConfig.GROUP,
 			(shift ? UI_SHIFT_KEY_PREFIX : UI_KEY_PREFIX) + componentId + (itemId != -1 ? "_" + itemId : ""));
-	}
-
-	private int getMungedId(MenuEntry entry)
-	{
-		if ((entry.getType() == MenuAction.CC_OP || entry.getType() == MenuAction.CC_OP_LOW_PRIORITY))
-		{
-			return getMungedId(entry.getIdentifier(), entry.getParam1(), entry.getParam0());
-		}
-
-		return entry.getIdentifier();
-	}
-
-	private int getMungedId(int ident, int widgetId, int childIdx)
-	{
-		if (widgetId == InterfaceID.Bankmain.ITEMS
-			&& childIdx >= 0)
-		{
-			int delta = ident;
-			int exclude = client.getVarbitValue(VarbitID.BANK_QUANTITY_TYPE);
-			if (delta == 1)
-			{
-				return 1;
-			}
-			if (exclude != 0)
-			{
-				// Withdraw-1
-				if (--delta == 1)
-				{
-					return 2;
-				}
-			}
-			if (exclude != 1)
-			{
-				// Withdraw-5
-				if (--delta == 1)
-				{
-					return 3;
-				}
-			}
-			if (exclude != 2)
-			{
-				// Withdraw-10
-				if (--delta == 1)
-				{
-					return 4;
-				}
-			}
-			if (exclude != 3 && client.getVarbitValue(VarbitID.BANK_REQUESTEDQUANTITY) > 0)
-			{
-				// Withdraw-<>
-				if (--delta == 1)
-				{
-					return 5;
-				}
-			}
-			// Withdraw-X
-			if (--delta == 1)
-			{
-				return 6;
-			}
-			if (exclude != 4)
-			{
-				// Withdraw-All
-				if (--delta == 1)
-				{
-					return 7;
-				}
-			}
-			// Withdraw-All-but-1
-			if (--delta == 1)
-			{
-				return 8;
-			}
-		}
-		return ident;
 	}
 }

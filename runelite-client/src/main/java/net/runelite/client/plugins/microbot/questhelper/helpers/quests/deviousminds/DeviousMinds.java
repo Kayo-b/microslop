@@ -83,16 +83,16 @@ public class DeviousMinds extends BasicQuestHelper
 		steps.put(0, talkToMonk);
 
 		ConditionalStep makeEntireBowSword = new ConditionalStep(this, makeBlade);
-		makeEntireBowSword.addStep(bowSword.alsoCheckBank(questBank), talkToMonk2);
-		makeEntireBowSword.addStep(slenderBlade.alsoCheckBank(questBank), makeBowSword);
+		makeEntireBowSword.addStep(bowSword.alsoCheckBank(), talkToMonk2);
+		makeEntireBowSword.addStep(slenderBlade.alsoCheckBank(), makeBowSword);
 		steps.put(10, makeEntireBowSword);
 		steps.put(20, talkToMonk2);   //Finished talking
 
 		ConditionalStep entranaAltarPouch = new ConditionalStep(this, makeIllumPouch);
-		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(questBank), onEntrana), usePouchOnAltar);
-		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(questBank), inLawAlter), leaveLawAltar);
-		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(questBank), inAbyss), enterLawRift);
-		entranaAltarPouch.addStep(illumPouch.alsoCheckBank(questBank), teleToAbyss);
+		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(), onEntrana), usePouchOnAltar);
+		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(), inLawAlter), leaveLawAltar);
+		entranaAltarPouch.addStep(new Conditions(illumPouch.alsoCheckBank(), inAbyss), enterLawRift);
+		entranaAltarPouch.addStep(illumPouch.alsoCheckBank(), teleToAbyss);
 		steps.put(30, entranaAltarPouch);
 		steps.put(40, entranaAltarPouch);   //Cutscene finished
 
@@ -112,9 +112,9 @@ public class DeviousMinds extends BasicQuestHelper
 	protected void setupRequirements()
 	{
 		//Recommended
-		fallyTele = new ItemRequirement("Falador Teleports", ItemID.POH_TABLET_FALADORTELEPORT);
-		lumberTele = new ItemRequirement("Lumberyard Teleports", ItemID.TELEPORTSCROLL_LUMBERYARD);
-		glory = new ItemRequirement("Amulet of Glory", ItemCollections.AMULET_OF_GLORIES);
+		fallyTele = new ItemRequirement("Falador Teleports", ItemID.POH_TABLET_FALADORTELEPORT, 2);
+		lumberTele = new ItemRequirement("Lumberyard Teleports", ItemID.TELEPORTSCROLL_LUMBERYARD, 3);
+		glory = new ItemRequirement("Amulet of Glory (Teleports to Port Sarim and Edgeville)", ItemCollections.AMULET_OF_GLORIES);
 
 		//Required
 		mith2h = new ItemRequirement("Mithril 2h Sword", ItemID.MITHRIL_2H_SWORD);

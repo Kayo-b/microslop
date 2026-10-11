@@ -167,9 +167,15 @@ public enum ItemCollections
 		ItemID.IMCANDO_HAMMER_OFFHAND
 	)),
 
+	CHISEL("Chisel", ImmutableList.of(
+		ItemID.CHISEL,
+		ItemID.JEWELLERS_CHISEL
+	)),
+
 	SAW("Saw", ImmutableList.of(
 		ItemID.POH_SAW,
 		ItemID.WEARABLE_SAW,
+		ItemID.WEARABLE_SAW_OFFHAND,
 		ItemID.EYEGLO_CRYSTAL_SAW
 	)),
 
@@ -218,6 +224,18 @@ public enum ItemCollections
 		ItemID.XBOWS_CROSSBOW_BRONZE,
 		ItemID.PHOENIX_CROSSBOW,
 		ItemID.CROSSBOW
+	)),
+
+	DARTS("Darts", ImmutableList.of(
+		ItemID.BRONZE_DART, ItemID.BRONZE_DART_P, ItemID.BRONZE_DART_P_, ItemID.BRONZE_DART_P__,
+		ItemID.IRON_DART, ItemID.IRON_DART_P, ItemID.IRON_DART_P_, ItemID.IRON_DART_P__,
+		ItemID.STEEL_DART, ItemID.STEEL_DART_P, ItemID.STEEL_DART_P_, ItemID.STEEL_DART_P__,
+		ItemID.BLACK_DART, ItemID.BLACK_DART_P, ItemID.BLACK_DART_P_, ItemID.BLACK_DART_P__,
+		ItemID.MITHRIL_DART, ItemID.MITHRIL_DART_P, ItemID.MITHRIL_DART_P_, ItemID.MITHRIL_DART_P__,
+		ItemID.ADAMANT_DART, ItemID.ADAMANT_DART_P, ItemID.ADAMANT_DART_P_, ItemID.ADAMANT_DART_P__,
+		ItemID.RUNE_DART, ItemID.RUNE_DART_P, ItemID.RUNE_DART_P_, ItemID.RUNE_DART_P__,
+		ItemID.AMETHYST_DART, ItemID.AMETHYST_DART_P, ItemID.AMETHYST_DART_P_, ItemID.AMETHYST_DART_P__,
+		ItemID.DRAGON_DART, ItemID.DRAGON_DART_P, ItemID.DRAGON_DART_P_, ItemID.DRAGON_DART_P__
 	)),
 
 	SWORDS("Swords", ImmutableList.of(
@@ -485,7 +503,14 @@ public enum ItemCollections
 		ItemID._4DOSEPRAYERRESTORE,
 		ItemID._3DOSEPRAYERRESTORE,
 		ItemID._2DOSEPRAYERRESTORE,
-		ItemID._1DOSEPRAYERRESTORE
+		ItemID._1DOSEPRAYERRESTORE,
+		ItemID._4DOSE2RESTORE,
+		ItemID._3DOSE2RESTORE,
+		ItemID._2DOSE2RESTORE,
+		ItemID._1DOSE2RESTORE,
+		ItemID.HUNTER_MIX_MOONMOTH_2DOSE,
+		ItemID.HUNTER_MIX_MOONMOTH_1DOSE,
+		ItemID.BUTTERFLY_JAR_MOONMOTH
 	)),
 
 	RESTORE_POTIONS(ImmutableList.of(
@@ -1218,16 +1243,15 @@ public enum ItemCollections
 		ItemID.DRAMEN_STAFF
 	)),
 
-	ESSENCE_LOW(ImmutableList.of(
-		ItemID.BLANKRUNE_DAEYALT,
-		ItemID.BLANKRUNE_HIGH,
-		ItemID.BLANKRUNE
-	)),
-
 	ESSENCE_HIGH(ImmutableList.of(
 		ItemID.BLANKRUNE_DAEYALT,
 		ItemID.BLANKRUNE_HIGH
 	)),
+
+	ESSENCE_LOW(new ImmutableList.Builder<Integer>()
+			.addAll(ESSENCE_HIGH.items).add(
+			ItemID.BLANKRUNE).build()
+	),
 
 	COINS(ImmutableList.of(
 		ItemID.COINS,
@@ -1410,7 +1434,7 @@ public enum ItemCollections
 			ItemID.TIARA_ELEMENTAL
 		).build()),
 	FIRE_ALTAR(new ImmutableList.Builder<Integer>()
-		.addAll(AIR_ALTAR_WEARABLE.getItems()).add(
+		.addAll(FIRE_ALTAR_WEARABLE.getItems()).add(
 			ItemID.ELEMENTAL_TALISMAN,
 			ItemID.FIRE_TALISMAN
 		).build()),
@@ -2249,6 +2273,16 @@ public enum ItemCollections
 		ItemID.MOTHERLODE_REWARD_HAT,
 		ItemID.FOSSIL_MOTHERLODE_REWARD_HAT,
 		ItemID.MOTHERLODE_REWARD_HAT_GOLD
+	)),
+
+	BOAT_REPAIR_KITS(ImmutableList.of(
+		ItemID.BOAT_REPAIR_KIT_ROSEWOOD,
+		ItemID.BOAT_REPAIR_KIT_IRONWOOD,
+		ItemID.BOAT_REPAIR_KIT_CAMPHOR,
+		ItemID.BOAT_REPAIR_KIT_MAHOGANY,
+		ItemID.BOAT_REPAIR_KIT_TEAK,
+		ItemID.BOAT_REPAIR_KIT_OAK,
+		ItemID.BOAT_REPAIR_KIT
 	));
 
 	private final List<Integer> items;

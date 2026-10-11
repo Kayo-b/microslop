@@ -28,6 +28,7 @@ import net.runelite.client.plugins.microbot.questhelper.QuestHelperConfig;
 import net.runelite.client.plugins.microbot.questhelper.QuestHelperPlugin;
 import net.runelite.client.plugins.microbot.questhelper.managers.QuestManager;
 import net.runelite.client.plugins.microbot.questhelper.panel.skillfiltering.SkillFilterPanel;
+import net.runelite.client.plugins.microbot.questhelper.questhelpers.BasicQuestHelper;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestDetails;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestHelper;
 import net.runelite.client.plugins.microbot.questhelper.questinfo.QuestHelperQuest;
@@ -54,10 +55,11 @@ import javax.swing.event.DocumentListener;
 import javax.swing.plaf.basic.BasicButtonUI;
 import java.awt.*;
 import java.awt.event.ItemEvent;
+import java.awt.event.ItemListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -73,6 +75,8 @@ public class QuestHelperPanel extends PluginPanel
 
 	private final JPanel allDropdownSections = new JPanel();
 	private final JComboBox<Enum> filterDropdown, difficultyDropdown, orderDropdown;
+	private final JComboBox<String> stateDropdown = new JComboBox<>();
+	private JPanel statePanel;
 
 	private final JButton skillExpandButton = new JButton();
 	private final IconTextField searchBar = new IconTextField();
@@ -94,6 +98,8 @@ public class QuestHelperPanel extends PluginPanel
 	private static final ImageIcon SETTINGS_ICON;
 	private static final ImageIcon COLLAPSED_ICON;
 	private static final ImageIcon EXPANDED_ICON;
+
+	private int nextDesiredScrollValue = 0;
 
 	static
 	{
@@ -154,14 +160,14 @@ public class QuestHelperPanel extends PluginPanel
 
 			onSearchBarChanged();
 		});
-		settingsBtn.addMouseListener(new java.awt.event.MouseAdapter()
+		settingsBtn.addMouseListener(new MouseAdapter()
 		{
-			public void mouseEntered(java.awt.event.MouseEvent evt)
+			public void mouseEntered(MouseEvent evt)
 			{
 				settingsBtn.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
 			}
 
-			public void mouseExited(java.awt.event.MouseEvent evt)
+			public void mouseExited(MouseEvent evt)
 			{
 				if (settingsPanelActive())
 				{
@@ -183,14 +189,14 @@ public class QuestHelperPanel extends PluginPanel
 		discordBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		discordBtn.setUI(new BasicButtonUI());
 		discordBtn.addActionListener((ev) -> LinkBrowser.browse("https://discord.gg/XCfwNnz6RB"));
-		discordBtn.addMouseListener(new java.awt.event.MouseAdapter()
+		discordBtn.addMouseListener(new MouseAdapter()
 		{
-			public void mouseEntered(java.awt.event.MouseEvent evt)
+			public void mouseEntered(MouseEvent evt)
 			{
 				discordBtn.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
 			}
 
-			public void mouseExited(java.awt.event.MouseEvent evt)
+			public void mouseExited(MouseEvent evt)
 			{
 				discordBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 			}
@@ -205,14 +211,14 @@ public class QuestHelperPanel extends PluginPanel
 		githubBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		githubBtn.setUI(new BasicButtonUI());
 		githubBtn.addActionListener((ev) -> LinkBrowser.browse("https://github.com/Zoinkwiz/quest-helper"));
-		githubBtn.addMouseListener(new java.awt.event.MouseAdapter()
+		githubBtn.addMouseListener(new MouseAdapter()
 		{
-			public void mouseEntered(java.awt.event.MouseEvent evt)
+			public void mouseEntered(MouseEvent evt)
 			{
 				githubBtn.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
 			}
 
-			public void mouseExited(java.awt.event.MouseEvent evt)
+			public void mouseExited(MouseEvent evt)
 			{
 				githubBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 			}
@@ -227,14 +233,14 @@ public class QuestHelperPanel extends PluginPanel
 		patreonBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		patreonBtn.setUI(new BasicButtonUI());
 		patreonBtn.addActionListener((ev) -> LinkBrowser.browse("https://www.patreon.com/zoinkwiz"));
-		patreonBtn.addMouseListener(new java.awt.event.MouseAdapter()
+		patreonBtn.addMouseListener(new MouseAdapter()
 		{
-			public void mouseEntered(java.awt.event.MouseEvent evt)
+			public void mouseEntered(MouseEvent evt)
 			{
 				patreonBtn.setBackground(ColorScheme.DARK_GRAY_HOVER_COLOR);
 			}
 
-			public void mouseExited(java.awt.event.MouseEvent evt)
+			public void mouseExited(MouseEvent evt)
 			{
 				patreonBtn.setBackground(ColorScheme.DARK_GRAY_COLOR);
 			}
@@ -389,6 +395,64 @@ public class QuestHelperPanel extends PluginPanel
 		questOverviewWrapper.setLayout(new BorderLayout());
 		questOverviewWrapper.add(questOverviewPanel, BorderLayout.NORTH);
 
+		if (questHelperPlugin.isDeveloperMode())
+		{
+			// If in developer mode, add this "reload quest" button.
+			// It's always visible under the search bar, and reloads the currently
+			// active quest, and ensures you're scrolled back to where you were.
+
+			var devModePanel = new JPanel();
+			devModePanel.setLayout(new BorderLayout());
+
+
+			var reloadQuest = new JButton("reload quest");
+			reloadQuest.addActionListener((ev) -> {
+				nextDesiredScrollValue = scrollableContainer.getVerticalScrollBar().getValue();
+				var currentQuest = questHelperPlugin.getSelectedQuest();
+				if (currentQuest != null)
+				{
+					currentQuest.uninitializeRequirements();
+				}
+				setSelectedQuest(questHelperPlugin.getSelectedQuest());
+			});
+			devModePanel.add(reloadQuest, BorderLayout.SOUTH);
+
+			// State dropdown for BasicQuestHelper
+			stateDropdown.setFocusable(false);
+			stateDropdown.addItemListener((ev) -> {
+				if (ev.getStateChange() == ItemEvent.SELECTED)
+				{
+					var currentQuest = questHelperPlugin.getSelectedQuest();
+					if (currentQuest instanceof BasicQuestHelper)
+					{
+						BasicQuestHelper basicQuest = (BasicQuestHelper) currentQuest;
+						String selectedItem = (String) stateDropdown.getSelectedItem();
+						if ("none".equals(selectedItem))
+						{
+							basicQuest.setSelectedStateOverride(null);
+						}
+						else if (selectedItem != null)
+						{
+							try
+							{
+								Integer stateValue = Integer.parseInt(selectedItem);
+								basicQuest.setSelectedStateOverride(stateValue);
+							}
+							catch (NumberFormatException ignored) {}
+						}
+					}
+				}
+			});
+			
+			// Create a panel with label for the state dropdown
+			statePanel = makeDropdownPanel(stateDropdown, "Quest State");
+			statePanel.setPreferredSize(new Dimension(PANEL_WIDTH, DROPDOWN_HEIGHT));
+			statePanel.setVisible(false);
+			devModePanel.add(statePanel, BorderLayout.NORTH);
+
+			searchQuestsPanel.add(devModePanel, BorderLayout.SOUTH);
+		}
+
 		refreshSkillFiltering();
 	}
 
@@ -433,7 +497,7 @@ public class QuestHelperPanel extends PluginPanel
 		return dropdown;
 	}
 
-	private JPanel makeDropdownPanel(JComboBox dropdown, String name)
+	private JPanel makeDropdownPanel(JComboBox<?> dropdown, String name)
 	{
 		// Filters
 		JTextArea filterName = JGenerator.makeJTextArea(name);
@@ -532,9 +596,13 @@ public class QuestHelperPanel extends PluginPanel
 		scrollableContainer.setViewportView(questOverviewWrapper);
 
 		questOverviewPanel.addQuest(quest, isActive);
+		updateStateDropdown(quest);
 		questActive = true;
 
-		SwingUtilities.invokeLater(() -> scrollableContainer.getVerticalScrollBar().setValue(0));
+		SwingUtilities.invokeLater(() -> {
+			scrollableContainer.getVerticalScrollBar().setValue(nextDesiredScrollValue);
+			nextDesiredScrollValue = 0;
+		});
 
 		repaint();
 		revalidate();
@@ -563,6 +631,7 @@ public class QuestHelperPanel extends PluginPanel
 		questActive = false;
 		questOverviewPanel.removeQuest();
 		activateQuestList();
+		updateStateDropdown(null);
 
 		repaint();
 		revalidate();
@@ -606,6 +675,59 @@ public class QuestHelperPanel extends PluginPanel
 
 		repaint();
 		revalidate();
+	}
+
+	private void updateStateDropdown(QuestHelper questHelper)
+	{
+		if (!questHelperPlugin.isDeveloperMode()) return;
+
+		ItemListener[] listeners = stateDropdown.getItemListeners();
+		for (ItemListener listener : listeners)
+		{
+			stateDropdown.removeItemListener(listener);
+		}
+
+		stateDropdown.removeAllItems();
+
+		if (questHelper instanceof BasicQuestHelper)
+		{
+			BasicQuestHelper basicQuest = (BasicQuestHelper) questHelper;
+			Map<Integer, QuestStep> steps = basicQuest.getStepList();
+
+			if (steps != null && !steps.isEmpty())
+			{
+				stateDropdown.addItem("none");
+
+				steps.keySet().stream()
+					.sorted()
+					.forEach(state -> stateDropdown.addItem(state.toString()));
+
+				Integer currentOverride = basicQuest.getSelectedStateOverride();
+				if (currentOverride != null)
+				{
+					stateDropdown.setSelectedItem(currentOverride.toString());
+				}
+				else
+				{
+					stateDropdown.setSelectedItem("none");
+				}
+
+				statePanel.setVisible(true);
+			}
+			else
+			{
+				statePanel.setVisible(false);
+			}
+		}
+		else
+		{
+			statePanel.setVisible(false);
+		}
+
+		for (ItemListener listener : listeners)
+		{
+			stateDropdown.addItemListener(listener);
+		}
 	}
 
 	public void setSelectedQuest(QuestHelper questHelper)

@@ -1,19 +1,24 @@
 package net.runelite.client.plugins.microbot.util.misc;
 
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Point;
 import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
+import net.runelite.client.RuneLiteProperties;
 import net.runelite.client.plugins.microbot.Microbot;
 import net.runelite.client.plugins.microbot.util.antiban.Rs2AntibanSettings;
 import net.runelite.client.plugins.microbot.util.math.Rs2Random;
 import net.runelite.client.plugins.microbot.util.menu.NewMenuEntry;
+import net.runelite.client.plugins.microbot.util.text.Rs2TextSanitizer;
 
 import java.awt.*;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+@Slf4j
 public class Rs2UiHelper {
+
     public static boolean isRectangleWithinViewport(Rectangle rectangle) {
         int viewportHeight = Microbot.getClient().getViewportHeight();
         int viewportWidth = Microbot.getClient().getViewportWidth();
@@ -36,6 +41,21 @@ public class Rs2UiHelper {
         return main.contains(sub);
     }
 
+    private static final double CLICK_FORCE_MIN = 0.55;
+    private static final double CLICK_FORCE_MAX = 0.95;
+    private static volatile double sessionClickForce = 0.0;
+
+    static double getSessionClickForce() {
+        double cached = sessionClickForce;
+        if (cached != 0.0) return cached;
+        synchronized (Rs2UiHelper.class) {
+            if (sessionClickForce != 0.0) return sessionClickForce;
+            sessionClickForce = CLICK_FORCE_MIN + java.util.concurrent.ThreadLocalRandom.current().nextDouble()
+                    * (CLICK_FORCE_MAX - CLICK_FORCE_MIN);
+            return sessionClickForce;
+        }
+    }
+
     public static Point getClickingPoint(Rectangle rectangle, boolean randomize) {
         if (rectangle == null) return new Point(1, 1);
         if (rectangle.getX() == 1 && rectangle.getY() == 1) return new Point(1, 1);
@@ -43,13 +63,12 @@ public class Rs2UiHelper {
 
         if (!randomize) return new Point((int) rectangle.getCenterX(), (int) rectangle.getCenterY());
 
-        //check if mouse is already within the rectangle and return current position
+        double force = getSessionClickForce();
         if (Rs2AntibanSettings.naturalMouse) {
             java.awt.Point mousePos = Microbot.getMouse().getMousePosition();
-            if (isMouseWithinRectangle(rectangle)) return new Point(mousePos.x, mousePos.y);
-            else return Rs2Random.randomPointEx(new Point(mousePos.x, mousePos.y), rectangle, 0.78);
+            return Rs2Random.randomPointEx(new Point(mousePos.x, mousePos.y), rectangle, force);
         } else
-            return Rs2Random.randomPointEx(Microbot.getMouse().getLastClick(), rectangle, 0.78);
+            return Rs2Random.randomPointEx(Microbot.getMouse().getLastClick(), rectangle, force);
     }
 
     //check if mouse is already within the rectangle
@@ -63,12 +82,12 @@ public class Rs2UiHelper {
     public static Rectangle getActorClickbox(Actor actor) {
         LocalPoint lp = actor.getLocalLocation();
         if (lp == null) {
-            Microbot.log("LocalPoint is null");
+            log.warn("LocalPoint is null");
             return getDefaultRectangle();
         }
 
 
-        Shape clickbox = Microbot.getClientThread().runOnClientThreadOptional(() -> Perspective.getClickbox(Microbot.getClient(), actor.getModel(), actor.getCurrentOrientation(), lp.getX(), lp.getY(),
+        Shape clickbox = Microbot.getClientThread().runOnClientThreadOptional(() -> Perspective.getClickbox(Microbot.getClient(), Microbot.getClient().getTopLevelWorldView(), actor.getModel(), actor.getCurrentOrientation(), lp.getX(), lp.getY(),
                 Perspective.getTileHeight(Microbot.getClient(), lp, actor.getWorldLocation().getPlane())))
                 .orElse(null);
 
@@ -117,14 +136,30 @@ public class Rs2UiHelper {
     }
 
     /**
-     * Strips color tags from the provided text.
+     * Strips RuneLite/Jagex color tags from the provided text.
      *
      * @param text the text from which to strip color tags.
      * @return the text without color tags.
+	 *
+	 * @deprecated Use {@link #stripTags(String)} or {@link net.runelite.client.plugins.microbot.util.text.Rs2TextSanitizer#stripTags(String)}
+	 * for full tag removal.
      */
+	@Deprecated
     public static String stripColTags(String text) {
-        return text != null ? text.replaceAll("<col=[^>]+>|</col>", "") : "";
+        return Rs2TextSanitizer.stripColorTags(text);
     }
+
+	/** Strip RuneLite/Jagex markup tags from text. */
+	public static String stripTags(String text)
+	{
+		return Rs2TextSanitizer.stripTags(text);
+	}
+
+	/** Strip tags and normalize whitespace to single spaces. */
+	public static String stripTagsToSpace(String text)
+	{
+		return Rs2TextSanitizer.stripTagsToSpace(text);
+	}
 
 	public static Rectangle getDefaultRectangle() {
 		int randomValue = ThreadLocalRandom.current().nextInt(3) - 1;
@@ -150,5 +185,73 @@ public class Rs2UiHelper {
 
 		// Return -1 if no number is found
 		return -1;
+	}
+
+	/**
+	 * Check if the current client version is compatible with the required minimum version
+	 */
+	public static boolean isClientVersionCompatible(String minClientVersion) {
+		if (Microbot.isDebug()) {
+			return true; // return true if we are developing
+		}
+		if (minClientVersion == null || minClientVersion.isEmpty()) {
+			return true;
+		}
+
+		String currentVersion = RuneLiteProperties.getMicrobotVersion();
+		if (currentVersion == null) {
+			log.warn("Unable to determine current Microbot version");
+			return false;
+		}
+
+		return compareVersions(currentVersion, minClientVersion) >= 0;
+	}
+
+	/**
+	 * Compare two version strings using semantic versioning with support for 4-part versions
+	 * Supports formats like: 1.9.7, 1.9.7.1, 1.9.8, 1.9.8.1
+	 * @param version1 The first version to compare
+	 * @param version2 The second version to compare
+	 * @return -1 if version1 < version2, 0 if equal, 1 if version1 > version2
+	 */
+	public static int compareVersions(String version1, String version2) {
+		if (version1 == null && version2 == null) return 0;
+		if (version1 == null) return -1;
+		if (version2 == null) return 1;
+
+		// Split versions by dots and handle up to 4 parts (major.minor.patch.build)
+		String[] v1Parts = version1.split("\\.");
+		String[] v2Parts = version2.split("\\.");
+
+		int maxLength = Math.max(v1Parts.length, v2Parts.length);
+
+		for (int i = 0; i < maxLength; i++) {
+			int v1Part = i < v1Parts.length ? parseVersionPart(v1Parts[i]) : 0;
+			int v2Part = i < v2Parts.length ? parseVersionPart(v2Parts[i]) : 0;
+
+			if (v1Part < v2Part) return -1;
+			if (v1Part > v2Part) return 1;
+		}
+
+		return 0;
+	}
+
+	/**
+	 * Parse a version part, extracting only the numeric portion
+	 */
+	public static int parseVersionPart(String part) {
+		if (part == null || part.isEmpty()) return 0;
+
+		StringBuilder numericPart = new StringBuilder();
+		for (char c : part.toCharArray()) {
+			if (!Character.isDigit(c)) break;
+			numericPart.append(c);
+		}
+
+		try {
+			return numericPart.length() > 0 ? Integer.parseInt(numericPart.toString()) : 0;
+		} catch (NumberFormatException e) {
+			return 0;
+		}
 	}
 }

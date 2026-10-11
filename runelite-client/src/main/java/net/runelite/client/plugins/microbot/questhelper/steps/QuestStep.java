@@ -27,7 +27,6 @@ package net.runelite.client.plugins.microbot.questhelper.steps;
 import com.google.inject.Binder;
 import com.google.inject.Inject;
 import com.google.inject.Module;
-import net.runelite.client.plugins.microbot.questhelper.QuestHelperConfig;
 import net.runelite.client.plugins.microbot.questhelper.QuestHelperPlugin;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestHelper;
 import net.runelite.client.plugins.microbot.questhelper.questhelpers.QuestUtil;
@@ -35,24 +34,25 @@ import net.runelite.client.plugins.microbot.questhelper.requirements.Requirement
 import net.runelite.client.plugins.microbot.questhelper.requirements.item.ItemRequirement;
 import net.runelite.client.plugins.microbot.questhelper.steps.choice.*;
 import net.runelite.client.plugins.microbot.questhelper.steps.overlay.IconOverlay;
-import net.runelite.client.plugins.microbot.questhelper.steps.tools.QuestPerspective;
+import net.runelite.client.plugins.microbot.questhelper.steps.tools.DefinedPoint;
 import net.runelite.client.plugins.microbot.questhelper.steps.widget.AbstractWidgetHighlight;
 import net.runelite.client.plugins.microbot.questhelper.steps.widget.Spell;
 import net.runelite.client.plugins.microbot.questhelper.steps.widget.SpellWidgetHighlight;
 import net.runelite.client.plugins.microbot.questhelper.steps.widget.WidgetHighlight;
 import net.runelite.client.plugins.microbot.questhelper.tools.VisibilityHelper;
+import net.runelite.client.plugins.microbot.questhelper.util.QuestStepIcon;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
-import net.runelite.api.SpriteID;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.SpriteID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -68,8 +68,8 @@ import net.runelite.client.util.ImageUtil;
 
 import java.awt.*;
 import java.awt.image.BufferedImage;
-import java.util.List;
 import java.util.*;
+import java.util.List;
 import java.util.regex.Pattern;
 
 import static net.runelite.client.plugins.microbot.questhelper.overlays.QuestHelperOverlay.TITLED_CONTENT_COLOR;
@@ -137,6 +137,9 @@ public abstract class QuestStep implements Module
 	protected int iconItemID = -1;
 	protected BufferedImage icon;
 
+	@NonNull
+	protected final List<QuestStepIcon> customIcons = new ArrayList<>();
+
 	@Getter
 	protected final QuestHelper questHelper;
 
@@ -156,6 +159,9 @@ public abstract class QuestStep implements Module
 	private Requirement conditionToHide;
 
 	@Getter
+	private Requirement fadeCondition;
+
+	@Getter
 	@Setter
 	private boolean showInSidebar = true;
 
@@ -172,6 +178,10 @@ public abstract class QuestStep implements Module
 	@Getter
 	@Setter
 	protected boolean shouldOverlayWidget;
+
+	@Getter
+	@Setter
+	protected List<Integer> geInterfaceIcon;
 
 	public QuestStep(QuestHelper questHelper)
 	{
@@ -221,6 +231,10 @@ public abstract class QuestStep implements Module
 	public QuestStep withId(Integer id)
 	{
 		this.id = id;
+		for (QuestStep substep : substeps)
+		{
+			substep.withId(id);
+		}
 		return this;
 	}
 
@@ -231,6 +245,7 @@ public abstract class QuestStep implements Module
 
 	public void addSubSteps(Collection<QuestStep> substeps)
 	{
+		if (substeps == null) return;
 		this.substeps.addAll(substeps);
 	}
 
@@ -359,10 +374,16 @@ public abstract class QuestStep implements Module
 		return this;
 	}
 
-	public QuestStep addDialogConsideringLastLineCondition(String dialogString, String choiceValue)
+	public QuestStep addDialogStep(DialogChoiceStep dialogStep)
 	{
-		DialogChoiceStep choice = new DialogChoiceStep(questHelper.getConfig(), dialogString);
-		choice.setExpectedPreviousLine(choiceValue);
+		choices.addChoice(dialogStep);
+		return this;
+	}
+
+	public QuestStep addDialogConsideringLastLineAndVarbit(String dialogString, int varbitId, Map<Integer, String> valueToAnswer)
+	{
+		DialogChoiceStep choice = new DialogChoiceStep(questHelper.getConfig(), varbitId, valueToAnswer);
+		choice.setExpectedPreviousLine(dialogString);
 		choices.addChoice(choice);
 		return this;
 	}
@@ -462,7 +483,7 @@ public abstract class QuestStep implements Module
 			.filter(s -> !s.isEmpty())
 			.forEach(line -> addTextToPanel(panelComponent, line));
 
-		if (text != null && (text.size() > 0 && !text.get(0).isEmpty()))
+		if (text != null && (!text.isEmpty() && !text.get(0).isEmpty()))
 		{
 			addTextToPanel(panelComponent, "");
 		}
@@ -494,6 +515,11 @@ public abstract class QuestStep implements Module
 			.left(line)
 			.leftColor(TITLED_CONTENT_COLOR)
 			.build());
+	}
+
+	public void addCustomIcon(QuestStepIcon questStepIcon)
+	{
+		customIcons.add(questStepIcon);
 	}
 
 	public QuestStep addIcon(int iconItemID)
@@ -568,6 +594,11 @@ public abstract class QuestStep implements Module
 		{
 			icon = getQuestImage();
 		}
+
+		for (var customIcon : customIcons)
+		{
+			customIcon.setup(itemManager);
+		}
 	}
 
 	public void conditionToHideInSidebar(Requirement hideCondition)
@@ -575,9 +606,14 @@ public abstract class QuestStep implements Module
 		conditionToHide = hideCondition;
 	}
 
+	public void conditionToFadeInSidebar(Requirement fadeCondition)
+	{
+		this.fadeCondition = fadeCondition;
+	}
+
 	public BufferedImage getQuestImage()
 	{
-		return spriteManager.getSprite(SpriteID.TAB_QUESTS, 0);
+		return spriteManager.getSprite(SpriteID.SideiconsInterface.QUESTS, 0);
 	}
 
 
@@ -601,7 +637,7 @@ public abstract class QuestStep implements Module
 		return client.getWidget(InterfaceID.Inventory.ITEMS);
 	}
 
-	protected void renderInventory(Graphics2D graphics, WorldPoint worldPoint, List<ItemRequirement> passedRequirements, boolean distanceLimit)
+	protected void renderInventory(Graphics2D graphics, DefinedPoint definedPoint, List<ItemRequirement> passedRequirements, boolean distanceLimit)
 	{
 		Widget inventoryWidget = getInventoryWidget();
 		if (inventoryWidget == null || inventoryWidget.isHidden())
@@ -622,8 +658,7 @@ public abstract class QuestStep implements Module
 				if (distanceLimit)
 				{
 					WorldPoint playerLocation = client.getLocalPlayer().getWorldLocation();
-					WorldPoint goalWp = QuestPerspective.getInstanceWorldPointFromReal(client, worldPoint);
-					if (goalWp != null && playerLocation.distanceTo(goalWp) <= 100) continue;
+					if (definedPoint == null || definedPoint.distanceTo(playerLocation) <= 100) continue;
 				}
 
 				if (isValidRequirementForRenderInInventory(requirement, item))
@@ -664,9 +699,9 @@ public abstract class QuestStep implements Module
 		return requirement instanceof ItemRequirement && isValidRenderRequirementInInventory((ItemRequirement) requirement, item);
 	}
 
-	private boolean isValidRenderRequirementInInventory(ItemRequirement requirement, Widget item)
+	protected boolean isValidRenderRequirementInInventory(ItemRequirement requirement, Widget item)
 	{
-		return requirement.shouldHighlightInInventory(client) && requirement.getAllIds().contains(item.getItemId());
+		return (requirement.shouldHighlightInInventory(client)) && requirement.getAllIds().contains(item.getItemId());
 	}
 
 	protected void renderHoveredItemTooltip(String tooltipText)
@@ -694,8 +729,29 @@ public abstract class QuestStep implements Module
 		return new PuzzleWrapperStep(getQuestHelper(), this);
 	}
 
+	public PuzzleWrapperStep puzzleWrapStep(QuestStep questStep)
+	{
+		return new PuzzleWrapperStep(getQuestHelper(), this, questStep);
+	}
+
+	public PuzzleWrapperStep puzzleWrapStep(QuestStep questStep, boolean hiddenInSidebar)
+	{
+		return new PuzzleWrapperStep(getQuestHelper(), this, questStep).withNoHelpHiddenInSidebar(hiddenInSidebar);
+	}
+
 	public PuzzleWrapperStep puzzleWrapStep(String alternateText)
 	{
 		return new PuzzleWrapperStep(getQuestHelper(), this, alternateText);
+	}
+
+	/// Wraps this step in a PuzzleWrapperStep with the given alternate text and the default text on a new line.
+	public PuzzleWrapperStep puzzleWrapStepWithDefaultText(String alternateText)
+	{
+		return new PuzzleWrapperStep(getQuestHelper(), this, alternateText + "\n" + PuzzleWrapperStep.DEFAULT_TEXT);
+	}
+
+	public PuzzleWrapperStep puzzleWrapStep(boolean hiddenInSidebar)
+	{
+		return new PuzzleWrapperStep(getQuestHelper(), this).withNoHelpHiddenInSidebar(hiddenInSidebar);
 	}
 }
