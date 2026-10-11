@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Starts a regular client (full rendering, default heap) from the shaded jar with its own client
+# home, for running a second character next to the one microbot-run starts:
+#
+#   CLIENT_HOME=~/.microbot-char2-home MICROBOT_CHARACTER=<char2-name> \
+#   MICROBOT_SESSION_FILE=~/.config/microbot-jx/session-char2.env AGENT_PORT=8082 microbot-run-jar
+#
+# The client home is seeded once from ~/.runelite with the agent server moved to AGENT_PORT.
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="${MICROBOT_DIR:-$(cd "$HERE/../../.." && pwd)}"
+: "${CLIENT_HOME:?set CLIENT_HOME}"
+: "${MICROBOT_SESSION_FILE:?set MICROBOT_SESSION_FILE (the default one belongs to microbot-run)}"
+J17="$(mise where java@temurin-17)"
+
+MICROBOT_SESSION_FILE="$MICROBOT_SESSION_FILE" "$HERE/microbot-run" --refresh
+# shellcheck disable=SC1090
+source "$MICROBOT_SESSION_FILE"
+
+jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar 2>/dev/null | head -1 || true)"
+if [[ -z "$jar" || "${REBUILD:-0}" == 1 ]]; then
+  (cd "$DIR" && JAVA_HOME="$J17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$J17")
+  jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar | head -1)"
+fi
+
+if [[ ! -d "$CLIENT_HOME/.runelite" ]]; then
+  mkdir -p "$CLIENT_HOME"
+  cp -a --reflink=auto "$HOME/.runelite" "$CLIENT_HOME/.runelite"
+  rm -rf "$CLIENT_HOME/.runelite/logs"
+  sed -i "s/^agentServer.port=.*/agentServer.port=${AGENT_PORT:-8082}/" "$CLIENT_HOME"/.runelite/microbot-profiles/*.properties
+fi
+
+# Same JVM flags as the regular gradle :client:run.
+exec "$J17/bin/java" -Duser.home="$CLIENT_HOME" -Dfile.encoding=UTF-8 -ea -jar "$jar"

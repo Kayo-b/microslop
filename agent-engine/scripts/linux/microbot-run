@@ -14,7 +14,8 @@
 # MICROBOT_CHARACTER=<display name> picks the character when the account has several; otherwise
 # the previously used character is kept, or the first one is taken.
 set -euo pipefail
-SESSION_FILE="$HOME/.config/microbot-jx/session.env"
+# A second client (another character) keeps its own session file.
+SESSION_FILE="${MICROBOT_SESSION_FILE:-$HOME/.config/microbot-jx/session.env}"
 BOLT_CREDS="${BOLT_CREDS:-$HOME/.local/share/bolt-launcher/creds}"
 
 refresh_session() {
