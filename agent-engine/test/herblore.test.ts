@@ -165,3 +165,13 @@ test('herblore: a refused price with too few coins ends as impossible, not a GE 
   const st = await p.next({ goal: 'herb', snapshot: ge(7220), kb: null, reports: [refused] });
   assert.equal(st.kind, 'impossible', text(st));
 });
+
+test('herblore: herbs already banked are worked off before any more are bought', async () => {
+  const p = new HerblorePlanner({ price: noRanarr });
+  await next(p, state(22, [coins(5_000_000)]));
+  const bank = [{ id: 200, name: 'Grimy harralander', quantity: 13_000 }];
+  await next(p, bankOpen(22, [coins(5_000_000)], bank));
+  const a = act(await next(p, state(22, [coins(5_000_000)], { grandExchange: { open: true } } as Partial<Snapshot>)));
+  assert.notEqual(a && 'name' in a && a.name, 'Harralander', 'no second herb purchase');
+  assert.notEqual(a && 'name' in a && a.name, 'Grimy harralander');
+});

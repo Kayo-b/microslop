@@ -191,6 +191,15 @@ export class HerblorePlanner implements Planner {
     if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && s.grandExchange?.open)) {
       const wallet = carriedCoins(s) + (bank?.get('Coins') ?? 0);
       this.recipe = this.o.train ? trainingRecipe(level, this.o.price, wallet) : nextRecipe(level, this.o.price, wallet);
+      // Herbs already owned (in any form) are worked off before more are bought: a recipe change
+      // used to leave 13,000 grimy harralander (~4.5m gp) in the bank while it bought more.
+      const owned = (n: string) => count(n) + (bank?.get(n) ?? 0);
+      // Only raw inputs (grimy herbs): products waiting to be sold are not stock to mix.
+      const raw = (n: string) => n.startsWith('Grimy ');
+      const stocked = HERB_RECIPES.filter((x) => x.level <= level && x.inputs.some(raw) && x.inputs.every((n) => n === VIAL || (raw(n) && owned(n) >= MIN_BUY)))
+        .map((x) => ({ ...x, profit: recipeProfit(x, this.o.price) ?? -1, cost: x.inputs.reduce((n, i) => n + (this.o.price(i) ?? 0), 0) }))
+        .sort((x, y) => y.profit * y.perHour - x.profit * x.perHour)[0];
+      if (stocked) this.recipe = stocked;
     }
     const r = this.recipe;
     const products = [...new Set(HERB_RECIPES.map((x) => x.output))];
@@ -207,7 +216,7 @@ export class HerblorePlanner implements Planner {
           // Buy the first input, then top the others up to it.
           const lead = r.inputs[0]!;
           if (have(lead) < Math.min(MIN_BUY, r.perTrip)) {
-            const n = Math.min(MAX_BUY, Math.floor(((coins - RESERVE) * scale) / Math.ceil(r.cost * OVERBID)));
+            const n = Math.min(MAX_BUY, r.perHour, Math.floor(((coins - RESERVE) * scale) / Math.ceil(r.cost * OVERBID)));
             if (n >= Math.min(MIN_BUY, r.perTrip)) return { kind: 'act', action: { op: 'ge_buy', name: lead, quantity: n }, reason: `buy ${n} ${lead} (${r.id}, ~${r.profit} gp profit each)` };
             // Too poor even with the banked coins (after the refused-price scale-down): closing the GE
             // only made the flow reopen it forever.
