@@ -8,18 +8,20 @@
 #   gold-run watch  [1|2|both]     start the Sonnet run watcher alone (also started by `start`)
 #   gold-run rebuild-char2          merge feat/agent-engine into feat/char2 and rebuild its shaded jar
 #
-# Character 1 (<char1-name>): ~/projects/Microbot_,       unit microbot-jev-data, port 8081, world 316
-# Character 2 (<char2-name>):  ~/projects/Microbot_-char2, unit microbot-char2,    port 8082, world 302
+# Character 1 (<char1-name>): ~/projects/microslop,      unit microbot-jev-data, port 8081, world 316
+# Character 2 (<char2-name>):  ~/.microbot-char2-home (data home), unit microbot-char2,    port 8082, world 302
 #
 # Env overrides: CHAR1_CONFIG, CHAR2_CONFIG (campaign JSON, relative to each checkout's agent-engine/),
 # CHAR1_WORLD, CHAR2_WORLD, LLM_ARGS (default: --llm claude-code --rescue-model haiku --rescue),
 # DISPLAY (passed to the units; use :1 after an Xwayland crash). See docs/TWO_CHARACTERS.md.
 set -uo pipefail
 
-ROOT1="${MICROBOT_DIR:-$HOME/projects/Microbot_}"
-ROOT2="${MICROBOT_DIR_CHAR2:-$HOME/projects/Microbot_-char2}"
-ENGINE1="$ROOT1/agent-engine"
-ENGINE2="$ROOT2/agent-engine"
+# One checkout runs both characters; character 2 gets its own data/logs/cwd (MICROBOT_ENGINE_HOME).
+ROOT="${MICROBOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+ENGINE="$ROOT/agent-engine"
+ENGINE1="$ENGINE"
+HOME2="${MICROBOT_ENGINE_HOME_CHAR2:-$HOME/.microbot-char2-home/agent-engine}"
+CLIENT2="$HOME/.microbot-char2-home"
 UNIT1=microbot-jev-data
 UNIT2=microbot-char2
 CONFIG1="${CHAR1_CONFIG:-data/campaign/smelt-2026-10-06.json}"
@@ -58,28 +60,29 @@ start1() {
   free_unit "$UNIT1"
   mapfile -t env < <(setenv_common)
   systemd-run --user --unit="$UNIT1" --working-directory="$ENGINE1" \
-    --setenv=MICROBOT_DIR="$ROOT1" --setenv=MICROBOT_CAMPAIGN_HOURS="$hours" "${env[@]}" \
+    --setenv=MICROBOT_DIR="$ROOT" --setenv=MICROBOT_CAMPAIGN_HOURS="$hours" "${env[@]}" \
     "$ENGINE1/scripts/linux/microbot-campaign" --config "$CONFIG1" --world "$WORLD1" "${LLM[@]}" "$@"
 }
 
 start2() {
   local hours="$1"; shift
-  [[ -d "$ENGINE2" ]] || die "second checkout missing: $ENGINE2"
+  [[ -d "$HOME2/data" ]] || die "character 2 home missing: $HOME2/data (see docs/TWO_CHARACTERS.md)"
   free_unit "$UNIT2"
   mapfile -t env < <(setenv_common)
   # runner.ts directly: the wrapper's lock and session refresh belong to character 1.
-  systemd-run --user --unit="$UNIT2" --working-directory="$ENGINE2" \
-    --setenv=MICROBOT_PORT=8082 --setenv=MICROBOT_TOKEN_FILE="$TOKEN2" \
+  systemd-run --user --unit="$UNIT2" --working-directory="$HOME2" \
+    --setenv=MICROBOT_ENGINE_HOME="$HOME2" --setenv=MICROBOT_PORT=8082 --setenv=MICROBOT_TOKEN_FILE="$TOKEN2" \
     --setenv=MICROBOT_RUN="$HOME/.config/microbot-jx/run-char2.sh" "${env[@]}" \
-    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists=../.env \
-    src/campaign/runner.ts --config "$CONFIG2" --hours "$hours" --world "$WORLD2" --restart-client \
+    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists="$ROOT/.env" \
+    "$ENGINE/src/campaign/runner.ts" --config "$CONFIG2" --hours "$hours" --world "$WORLD2" --restart-client \
     "${LLM[@]}" "$@"
 }
 
 rebuild2() {
   local j17; j17="$(mise where java@temurin-17)" || die "mise java@temurin-17 missing"
-  (cd "$ROOT2" && git merge feat/agent-engine && \
-    JAVA_HOME="$j17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$j17")
+  # Build in the shared tree, then copy: a later rebuild must not replace the jar a running client uses.
+  (cd "$ROOT" && JAVA_HOME="$j17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$j17") || return 1
+  mkdir -p "$CLIENT2" && cp "$(ls -t "$ROOT"/runelite-client/build/libs/*-shaded.jar | head -1)" "$CLIENT2/client.jar"
 }
 
 # A Haiku reviewer watches each started run (findings: data/watch/reviews.jsonl, journal of watch-charN).
@@ -90,9 +93,10 @@ start_watch() {
   systemctl --user stop "watch-char$n" 2>/dev/null; systemctl --user reset-failed "watch-char$n" 2>/dev/null
   mapfile -t env < <(setenv_common)
   local port=(); [[ "$n" == 2 ]] && port=(--setenv=MICROBOT_PORT=8082 --setenv=MICROBOT_TOKEN_FILE="$TOKEN2")
-  systemd-run --user --unit="watch-char$n" --working-directory="$engine" "${port[@]}" "${env[@]}" \
-    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists=../.env \
-    src/campaign/watcher.ts --char "$n" --interval "${WATCH_INTERVAL:-180}" ${WATCH_MODEL:+--model "$WATCH_MODEL"} >/dev/null 2>&1 \
+  local home=(); [[ "$n" == 2 ]] && home=(--setenv=MICROBOT_ENGINE_HOME="$HOME2")
+  systemd-run --user --unit="watch-char$n" --working-directory="$engine" "${port[@]}" "${home[@]}" "${env[@]}" \
+    "$(command -v node)" --disable-warning=ExperimentalWarning --env-file-if-exists="$ROOT/.env" \
+    "$ENGINE/src/campaign/watcher.ts" --char "$n" --interval "${WATCH_INTERVAL:-180}" ${WATCH_MODEL:+--model "$WATCH_MODEL"} >/dev/null 2>&1 \
     || echo "gold-run: could not start the watcher for char $n" >&2
 }
 
@@ -113,7 +117,7 @@ case "$cmd" in
       esac
     done
     [[ "$which" != 2 ]] && { start1 "$hours" "${extra[@]}" || exit 1; start_watch 1 "$ENGINE1"; }
-    [[ "$which" != 1 ]] && { start2 "$hours" "${extra[@]}" || exit 1; start_watch 2 "$ENGINE2"; }
+    [[ "$which" != 1 ]] && { start2 "$hours" "${extra[@]}" || exit 1; start_watch 2 "$HOME2"; }
     echo "started for ${hours}h. Watch: gold-run status | gold-run logs 1|2"
     ;;
   stop)
@@ -124,7 +128,7 @@ case "$cmd" in
   status)
     which="$(pick "${1:-both}")"
     [[ "$which" != 2 ]] && { echo "char 1: $(systemctl --user is-active $UNIT1)"; (cd "$ENGINE1" && npm run --silent agent -- monitor --hours 1); }
-    [[ "$which" != 1 ]] && { echo "char 2: $(systemctl --user is-active $UNIT2)"; (cd "$ENGINE2" && MICROBOT_PORT=8082 MICROBOT_TOKEN_FILE="$TOKEN2" npm run --silent agent -- monitor --hours 1); }
+    [[ "$which" != 1 ]] && { echo "char 2: $(systemctl --user is-active $UNIT2)"; (cd "$HOME2" && MICROBOT_ENGINE_HOME="$HOME2" MICROBOT_PORT=8082 MICROBOT_TOKEN_FILE="$TOKEN2" node --disable-warning=ExperimentalWarning --env-file-if-exists="$ROOT/.env" "$ENGINE/src/cli.ts" monitor --hours 1); }
     ;;
   logs)
     case "$(pick "${1:-}")" in 1) exec journalctl --user -u "$UNIT1" -f;; 2) exec journalctl --user -u "$UNIT2" -f;; *) die "logs needs 1 or 2";; esac
@@ -132,7 +136,7 @@ case "$cmd" in
   watch)
     which="$(pick "${1:-both}")"
     [[ "$which" != 2 ]] && start_watch 1 "$ENGINE1"
-    [[ "$which" != 1 ]] && start_watch 2 "$ENGINE2"
+    [[ "$which" != 1 ]] && start_watch 2 "$HOME2"
     echo "watchers started: journalctl --user -u watch-char1|2 -f ; findings in data/watch/reviews.jsonl"
     ;;
   rebuild-char2) rebuild2;;

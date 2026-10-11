@@ -5,11 +5,11 @@
 #
 #   microbot-campaign [campaign args...]       e.g. microbot-campaign --hours 3 --only fish-shrimp
 #
-# Env: MICROBOT_CAMPAIGN_HOURS (default 3), MICROBOT_DIR (default ~/projects/Microbot_),
+# Env: MICROBOT_CAMPAIGN_HOURS (default 3), MICROBOT_DIR (default: the checkout this script is in),
 # MICROBOT_KEEP_CLIENT=1 leaves the client running afterwards, MICROBOT_CHARACTER (see microbot-run).
 # Exit 3: the Jagex session expired; sign in again with bolt-microbot (Play is not needed).
 set -uo pipefail
-ROOT="${MICROBOT_DIR:-$HOME/projects/Microbot_}"
+ROOT="${MICROBOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 ENGINE="$ROOT/agent-engine"
 LOCK="${XDG_RUNTIME_DIR:-/tmp}/microbot-campaign.lock"
 
@@ -32,10 +32,10 @@ stop() { [[ -n "$child" ]] && kill -TERM "$child" 2>/dev/null; }
 trap stop TERM INT
 
 log "campaign start"
-cd "$ENGINE" || exit 1
+cd "${MICROBOT_ENGINE_HOME:-$ENGINE}" || exit 1
 # MICROBOT_RUN: relaunch through this checkout's script even when ~/.local/bin has an older copy.
 MICROBOT_RUN="$ENGINE/scripts/linux/microbot-run" \
-  node --disable-warning=ExperimentalWarning --env-file-if-exists=../.env src/campaign/runner.ts \
+  node --disable-warning=ExperimentalWarning --env-file-if-exists="$ENGINE/../.env" "$ENGINE/src/campaign/runner.ts" \
   --hours "${MICROBOT_CAMPAIGN_HOURS:-3}" --restart-client "$@" &
 child=$!
 wait "$child"; status=$?

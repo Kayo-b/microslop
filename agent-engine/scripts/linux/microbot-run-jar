@@ -17,8 +17,9 @@ MICROBOT_SESSION_FILE="$MICROBOT_SESSION_FILE" "$HERE/microbot-run" --refresh
 # shellcheck disable=SC1090
 source "$MICROBOT_SESSION_FILE"
 
-jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar 2>/dev/null | head -1 || true)"
-if [[ -z "$jar" || "${REBUILD:-0}" == 1 ]]; then
+# CLIENT_JAR: a private copy (gold-run rebuild-char2 makes one) so rebuilding the tree never swaps the jar under a running client.
+jar="${CLIENT_JAR:-$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar 2>/dev/null | head -1 || true)}"
+if [[ -z "$jar" || (-z "${CLIENT_JAR:-}" && "${REBUILD:-0}" == 1) ]]; then
   (cd "$DIR" && JAVA_HOME="$J17" ./gradlew --no-daemon :client:shadowJar -q -Dorg.gradle.java.installations.paths="$J17")
   jar="$(ls -t "$DIR"/runelite-client/build/libs/*-shaded.jar | head -1)"
 fi

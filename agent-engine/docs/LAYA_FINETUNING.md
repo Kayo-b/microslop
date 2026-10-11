@@ -51,7 +51,7 @@ Every line of `train.jsonl` / `eval.jsonl` is a `/v1/systemone` request plus lab
 ## 2. Build and freeze the dataset
 
 ```bash
-cd ~/projects/Microbot_/agent-engine
+cd ~/projects/microslop/agent-engine
 npm run dataset:build && cat data/dataset/mix-stats.json
 ```
 

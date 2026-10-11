@@ -25,8 +25,9 @@ done
 name="${name:-job-$(date +%H%M%S)}"
 self="$(readlink -f "${BASH_SOURCE[0]}")"
 engine_main="$(cd "$(dirname "$self")/../.." && pwd)"
-if [[ "$char" == 2 ]]; then engine="${MICROBOT_DIR_CHAR2:-$HOME/projects/Microbot_-char2}/agent-engine"; else engine="$engine_main"; fi
-[[ -d "$engine" ]] || { echo "agent-job: missing checkout $engine" >&2; exit 1; }
+# Job configs go into the character's data home (char 2 has its own; see docs/TWO_CHARACTERS.md).
+if [[ "$char" == 2 ]]; then engine="${MICROBOT_ENGINE_HOME_CHAR2:-$HOME/.microbot-char2-home/agent-engine}"; else engine="$engine_main"; fi
+[[ -d "$engine" ]] || { echo "agent-job: missing data home $engine" >&2; exit 1; }
 rel="data/campaign/jobs/$name.json"
 mkdir -p "$engine/data/campaign/jobs"
 python3 - "$engine/$rel" "$name" "$@" <<'PY'

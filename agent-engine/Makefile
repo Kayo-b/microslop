@@ -9,17 +9,18 @@ KAGGLE_USER ?= $(error set KAGGLE_USER to your Kaggle username)
 # CHAR=1|2 picks the character for agent-*/data-* targets (checkout, agent-server port, token).
 CHAR ?= 1
 ifeq ($(CHAR),2)
-  CHAR_ROOT := $(HOME_DIR)/projects/Microbot_-char2
-  CHAR_ENV  := MICROBOT_PORT=8082 MICROBOT_TOKEN_FILE=$(HOME_DIR)/.microbot-char2-home/.runelite/.agent-token
+  CE := $(HOME_DIR)/.microbot-char2-home/agent-engine
+  CHAR_ENV  := MICROBOT_ENGINE_HOME=$(CE) MICROBOT_PORT=8082 MICROBOT_TOKEN_FILE=$(HOME_DIR)/.microbot-char2-home/.runelite/.agent-token
   CHAR_WORLD := 302
 else
-  CHAR_ROOT := $(HOME_DIR)/projects/Microbot_
+  CE := $(ENGINE)
   CHAR_ENV  :=
   CHAR_WORLD := 316
 endif
-CE := $(CHAR_ROOT)/agent-engine
+# One checkout serves both characters: CE is the character's data/logs home (char 1: the checkout itself).
+CHAR_ROOT := $(abspath $(ENGINE)/..)
 RUN := cd $(CE) && $(CHAR_ENV)
-AGENT := $(RUN) npm run -s agent --
+AGENT := $(RUN) node --disable-warning=ExperimentalWarning --env-file-if-exists=$(CHAR_ROOT)/.env $(ENGINE)/src/cli.ts
 AGENTJOB := $(ENGINE)/scripts/linux/agent-job
 # level job: unattended unless FG=1; FORCE=1 replaces a run already going on CHAR (LLM flags then come from gold-run's LLM_ARGS); $(call lvl,<name>,<agent run args>)
 lvl = $(if $(FG),$(AGENT) run $(2) $(LLM) $(ARGS),$(AGENTJOB) --char $(CHAR) --name $(1)-char$(CHAR) $(if $(FORCE),--force) $(if $(HOURS),--hours $(HOURS)) -- $(2) $(ARGS))
@@ -119,7 +120,7 @@ agent-run-task: ## run a scripted task preset; TASK=kill-barbarians
 	$(AGENT) run --task $(TASK) $(LLM) $(ARGS)
 agent-campaign-plan: ## foreground campaign for a plan (starts the client); PLAN= HOURS=6
 	$(call need,PLAN,plans/gold-1-hunter.json)
-	$(RUN) npm run campaign -- --plan $(PLAN) --hours $(or $(HOURS),6) --restart-client --world $(CHAR_WORLD) $(LLM) $(ARGS)
+	$(RUN) npm --prefix $(ENGINE) run campaign -- --plan $(PLAN) --hours $(or $(HOURS),6) --restart-client --world $(CHAR_WORLD) $(LLM) $(ARGS)
 
 ##@ data - Data gathering: unattended sessions and the Laya dataset
 ##? vars: HOURS=3  ONLY=<activity,...>  CHAR=1|2  ARGS=<extra campaign flags>
@@ -132,25 +133,25 @@ data-gather-members: ## diverse data-gathering rotation for a MEMBERS account (a
 	CHAR$(CHAR)_CONFIG=data/campaign/gather-members.json $(GOLDRUN) start $(CHAR) $(if $(HOURS),--hours $(HOURS))
 data-dataset-all: ## build the dataset from BOTH characters' step logs (into data/dataset of char 1's checkout)
 	rm -rf $(ENGINE)/data/merged-logs && mkdir -p $(ENGINE)/data/merged-logs
-	for d in $(HOME_DIR)/projects/Microbot_/agent-engine/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c1-$$(basename $$d); done
-	for d in $(HOME_DIR)/projects/Microbot_-char2/agent-engine/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c2-$$(basename $$d); done
+	for d in $(ENGINE)/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c1-$$(basename $$d); done
+	for d in $(HOME_DIR)/.microbot-char2-home/agent-engine/logs/agent/*; do ln -s $$d $(ENGINE)/data/merged-logs/c2-$$(basename $$d); done
 	cd $(ENGINE) && npm run dataset:build -- --logs data/merged-logs $(ARGS)
 data-campaign: ## foreground campaign rotation (client must be running or --restart-client)
-	$(RUN) npm run campaign -- --hours $(or $(HOURS),3) --world $(CHAR_WORLD) --restart-client $(if $(ONLY),--only $(ONLY)) $(ARGS)
+	$(RUN) npm --prefix $(ENGINE) run campaign -- --hours $(or $(HOURS),3) --world $(CHAR_WORLD) --restart-client $(if $(ONLY),--only $(ONLY)) $(ARGS)
 data-dry-run: ## show the rotation, run nothing
-	$(RUN) npm run campaign -- --dry-run $(ARGS)
+	$(RUN) npm --prefix $(ENGINE) run campaign -- --dry-run $(ARGS)
 data-monitor: ## running campaign status
 	$(AGENT) monitor $(if $(HOURS),--hours $(HOURS))
 data-logs: ## tail the latest campaign log
 	$(RUN) tail -f logs/campaign/$$(ls logs/campaign | tail -1)/campaign.log
 data-dataset: ## build train/eval from all sources
-	$(RUN) npm run dataset:build
+	$(RUN) npm --prefix $(ENGINE) run dataset:build
 data-export: ## only logged decisions
-	$(RUN) npm run dataset:export
+	$(RUN) npm --prefix $(ENGINE) run dataset:export
 data-reverse: ## only reverse-generated samples
-	$(RUN) npm run dataset:reverse
+	$(RUN) npm --prefix $(ENGINE) run dataset:reverse
 data-synth: ## only rule-labelled samples
-	$(RUN) npm run dataset:synth
+	$(RUN) npm --prefix $(ENGINE) run dataset:synth
 data-stats: ## dataset mix stats
 	cat $(CE)/data/dataset/mix-stats.json
 
@@ -162,9 +163,9 @@ laya-freeze: ## snapshot dataset + step logs into data/dataset/<date>/
 laya-serve: ## serve a Laya checkpoint on 127.0.0.1:8000 (CUDA)
 	LAYA_CHECKPOINT=$(or $(CHECKPOINT),$(HOME)/laya_models/laya-osrs-agent-v1) $(HOME)/projects/laya/.venv/bin/python $(HOME)/laya_models/serve_osrs.py
 laya-eval: ## eval the served Laya model on eval.jsonl
-	$(RUN) npm run dataset:eval -- --engine laya --model $(or $(MODEL),osrs-v1) $(if $(LIMIT),--limit $(LIMIT)) $(ARGS)
+	$(RUN) npm --prefix $(ENGINE) run dataset:eval -- --engine laya --model $(or $(MODEL),osrs-v1) $(if $(LIMIT),--limit $(LIMIT)) $(ARGS)
 laya-teacher-eval: ## Jev ceiling on eval.jsonl (costs API calls)
-	$(RUN) npm run dataset:eval -- --engine jev --limit $(or $(LIMIT),400)
+	$(RUN) npm --prefix $(ENGINE) run dataset:eval -- --engine jev --limit $(or $(LIMIT),400)
 laya-kaggle-version: ## push train/eval as a new Kaggle dataset version
 	$(RUN) bash -c 'D=$$(mktemp -d); cp data/dataset/{train,eval}.jsonl $$D/; kaggle datasets metadata $(KAGGLE_USER)/osrs-agent-decisions-v1 -p $$D && kaggle datasets version -p $$D -m "$$(date +%F): $$(jq -c .train data/dataset/mix-stats.json)"'
 laya-kernel-status: ## status of the fine-tune kernel

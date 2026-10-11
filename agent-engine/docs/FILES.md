@@ -25,7 +25,7 @@
 
 | Path | What |
 |---|---|
-| `~/projects/Microbot_-char2` | second character's checkout (branch `feat/char2`) |
+| `~/.microbot-char2-home/agent-engine` | second character's data/logs home (`MICROBOT_ENGINE_HOME`) |
 | `~/.config/microbot-jx/{session.env,session-char2.env,run-char2.sh}` | Jagex sessions (tokens) and the char 2 launcher |
 | `~/.local/share/bolt-launcher/creds` | Bolt's login (source of the sessions) |
 | `~/.runelite/`, `~/.microbot-char2-home/.runelite/` | client homes, tokens, logs |
@@ -42,7 +42,7 @@ endpoints in `docs/AGENT_SERVER.md`, CLI in `docs/MICROBOT_CLI.md`.
 
 - At most 2 characters logged in at once (one per client).
 - Members content on world 302; F2P world 316 hides members GE items.
-- Always pass `MICROBOT_CAMPAIGN_HOURS` and `MICROBOT_DIR=~/projects/Microbot_` to the wrapper,
+- Always pass `MICROBOT_CAMPAIGN_HOURS` and `MICROBOT_DIR=~/projects/microslop` to the wrapper,
   and `PATH`/`HOME` to `systemd-run`.
 - Char 2 runs a shaded jar: rebuild it after Java changes.
 - Never self-train: Laya's own decisions are excluded from the dataset; evaluate Laya through A/B.

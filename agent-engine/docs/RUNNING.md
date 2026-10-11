@@ -12,7 +12,7 @@ account, and Microbot started from this repository's source tree.
 
 ```bash
 mise install java@temurin-17      # Microbot's Gradle daemon requires JDK 17 specifically
-cd ~/projects/Microbot_/agent-engine
+cd ~/projects/microslop/agent-engine
 npm install
 npm run kb:dump && npm run kb:wiki && npm run kb:build   # knowledge base -> data/kb.sqlite
 ```
@@ -54,7 +54,7 @@ still works as a fallback.
 ## Every session
 
 ```bash
-microbot-run          # starts Microbot from ~/projects/Microbot_ on JDK 17 and auto-logs in
+microbot-run          # starts Microbot from ~/projects/microslop on JDK 17 and auto-logs in
 ```
 
 First run only: in the client open **Configuration** (wrench icon), search `Agent Server`, and
@@ -63,7 +63,7 @@ enable **[M] Agent Server**. Keep Bind mode = TCP and Stealth bind = off. The se
 Check the server:
 
 ```bash
-cd ~/projects/Microbot_ && ./microbot-cli state          # logged in? position?
+cd ~/projects/microslop && ./microbot-cli state          # logged in? position?
 cd agent-engine
 npm run agent -- inspect --goal "chop trees" --targets Tree --decide   # decides, never clicks
 ```

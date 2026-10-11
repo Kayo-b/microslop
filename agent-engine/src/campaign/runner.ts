@@ -18,6 +18,7 @@ import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { CODE_DIR, ENGINE_HOME } from '../paths.ts';
 
 export interface Activity {
   name: string;
@@ -227,7 +228,7 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
 // Process wiring
 // ---------------------------------------------------------------------------------------------
 
-const ENGINE_DIR = path.resolve(import.meta.dirname, '..', '..');
+const ENGINE_DIR = ENGINE_HOME;
 
 /** The watcher's reason when it ended agent `pid` (see SKIP_FILE in watcher.ts), else undefined. */
 function watcherSkip(pid: number | undefined): string | undefined {
@@ -299,7 +300,7 @@ function processDeps(cfg: CampaignConfig, dir: string, hasLlm: boolean, stop: { 
     runActivity: (a, minutes) =>
       new Promise((resolve) => {
         n++;
-        const args = ['--disable-warning=ExperimentalWarning', '--env-file-if-exists=../.env', 'src/cli.ts', 'run', ...a.args, '--max-subgoals', '1000'];
+        const args = ['--disable-warning=ExperimentalWarning', `--env-file-if-exists=${path.join(CODE_DIR, '..', '.env')}`, path.join(CODE_DIR, 'src', 'cli.ts'), 'run', ...a.args, '--max-subgoals', '1000'];
         if (cfg.rescue && hasLlm) args.push('--rescue');
         if (cfg.llm) args.push('--llm', cfg.llm);
         if (cfg.llmModel) args.push('--llm-model', cfg.llmModel);
@@ -329,7 +330,7 @@ function processDeps(cfg: CampaignConfig, dir: string, hasLlm: boolean, stop: { 
       }),
     rebuildDataset: () =>
       new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/dataset/build.ts'], { cwd: ENGINE_DIR, stdio: ['ignore', 'pipe', 'inherit'] });
+        const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', path.join(CODE_DIR, 'src', 'dataset', 'build.ts')], { cwd: ENGINE_DIR, stdio: ['ignore', 'pipe', 'inherit'] });
         let out = '';
         child.stdout.on('data', (d) => (out += d));
         child.on('close', (code) => {

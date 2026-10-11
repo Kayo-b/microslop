@@ -1,7 +1,7 @@
 /**
  * One screen for every running character: unit state, current activity and recent results, the
  * latest agent steps, how many decisions Jev made, the watcher's last verdict and the rescues of the
- * last hour. Reads both checkouts (char 1 here, char 2 in ../Microbot_-char2), so nothing needs to be
+ * last hour. Reads both data homes (char 1 in the checkout, char 2 in ~/.microbot-char2-home/agent-engine), so nothing needs to be
  * opened one character at a time.
  *
  *   node src/campaign/dashboard.ts [--hours 1] [--live [--interval 5]]
@@ -32,7 +32,7 @@ const HOME = os.homedir();
 const MAIN = path.resolve(import.meta.dirname, '..', '..');
 const CHARS: Char[] = [
   { n: 1, name: 'char 1 (free)', root: MAIN, unit: 'microbot-jev-data', watcher: 'watch-char1', port: 8081, tokenFile: path.join(HOME, '.runelite', '.agent-token') },
-  { n: 2, name: 'char 2 (members)', root: path.join(HOME, 'projects', 'Microbot_-char2', 'agent-engine'), unit: 'microbot-char2', watcher: 'watch-char2', port: 8082, tokenFile: path.join(HOME, '.microbot-char2-home', '.runelite', '.agent-token') },
+  { n: 2, name: 'char 2 (members)', root: process.env.MICROBOT_ENGINE_HOME_CHAR2 ?? path.join(HOME, '.microbot-char2-home', 'agent-engine'), unit: 'microbot-char2', watcher: 'watch-char2', port: 8082, tokenFile: path.join(HOME, '.microbot-char2-home', '.runelite', '.agent-token') },
 ];
 
 const hoursArg = process.argv.indexOf('--hours');

@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { codeFallback } from '../paths.ts';
 
 export const SKILLS = [
   'Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Prayer', 'Magic', 'Cooking', 'Woodcutting', 'Fletching', 'Fishing',
@@ -46,7 +47,7 @@ export function parsePlan(raw: unknown): PlanSpec {
 }
 
 export function loadPlan(file: string): PlanSpec {
-  return parsePlan(JSON.parse(readFileSync(file, 'utf8')));
+  return parsePlan(JSON.parse(readFileSync(codeFallback(file), 'utf8')));
 }
 
 /** data/accounts/<account> for a plan. */

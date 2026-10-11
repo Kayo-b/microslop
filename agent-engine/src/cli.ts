@@ -24,7 +24,6 @@ import { accountDir, loadPlan, type PlanSpec } from './goalplan/spec.ts';
 import { TutorialPlanner } from './goalplan/TutorialPlanner.ts';
 import { createTiers, GuardedLlm, HourlyBudget, jsonlCallLog, type LlmCallRecord, type LlmPurpose, TieredRescuer } from './llm/tiered.ts';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { Agent, type AgentEvent } from './agent/Agent.ts';
 import { MicrobotBackend } from './backend/MicrobotBackend.ts';
@@ -58,8 +57,9 @@ import { activityNeeds, catalogReqFor } from './prereq/needs.ts';
 import { counts as prereqCounts, PrereqPlanner } from './prereq/PrereqPlanner.ts';
 import { resolveSetup } from './prereq/resolve.ts';
 import type { Execution } from './strategy/catalog.ts';
+import { ENGINE_HOME } from './paths.ts';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = ENGINE_HOME;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
