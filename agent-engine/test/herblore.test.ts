@@ -148,3 +148,11 @@ test('herblore training: recipes are picked by XP per hour, finished potions inc
   assert.equal(trainingRecipe(3, price, 100), null, 'too poor for a first batch');
   assert.equal(trainingRecipe(1, price, 100_000), null, 'no recipe below level 3');
 });
+
+test('herblore: leftover vials with no herbs left are deposited, not kept (bank reopen loop)', async () => {
+  const p = new HerblorePlanner({ price: noRanarr });
+  await next(p, state(22, [coins(5145)], { grandExchange: { open: true } } as Partial<Snapshot>));
+  const vials = item(1, 227, 'Vial of water', { quantity: 13, stackable: true });
+  const s = bankOpen(22, [coins(5145), vials], [{ id: 995, name: 'Coins', quantity: 100 }]);
+  assert.deepEqual(act(await next(p, s)), { op: 'bank_deposit', itemId: 227, amount: 'all' });
+});
