@@ -209,6 +209,10 @@ export class HerblorePlanner implements Planner {
           if (have(lead) < Math.min(MIN_BUY, r.perTrip)) {
             const n = Math.min(MAX_BUY, Math.floor(((coins - RESERVE) * scale) / Math.ceil(r.cost * OVERBID)));
             if (n >= Math.min(MIN_BUY, r.perTrip)) return { kind: 'act', action: { op: 'ge_buy', name: lead, quantity: n }, reason: `buy ${n} ${lead} (${r.id}, ~${r.profit} gp profit each)` };
+            // Too poor even with the banked coins (after the refused-price scale-down): closing the GE
+            // only made the flow reopen it forever.
+            const reach = Math.floor(((coins + (bank?.get('Coins') ?? 0) - RESERVE) * scale) / Math.ceil(r.cost * OVERBID));
+            if (reach < Math.min(MIN_BUY, r.perTrip)) return { kind: 'impossible', reason: `coins (${coins + (bank?.get('Coins') ?? 0)}) do not buy ${Math.min(MIN_BUY, r.perTrip)} ${lead} at the Grand Exchange price` };
           } else {
             const short = r.inputs.find((i) => have(i) < have(lead));
             if (short) return { kind: 'act', action: { op: 'ge_buy', name: short, quantity: have(lead) - have(short) }, reason: `buy ${have(lead) - have(short)} ${short}` };

@@ -156,3 +156,12 @@ test('herblore: leftover vials with no herbs left are deposited, not kept (bank 
   const s = bankOpen(22, [coins(5145), vials], [{ id: 995, name: 'Coins', quantity: 100 }]);
   assert.deepEqual(act(await next(p, s)), { op: 'bank_deposit', itemId: 227, amount: 'all' });
 });
+
+test('herblore: a refused price with too few coins ends as impossible, not a GE close/reopen loop', async () => {
+  const p = new HerblorePlanner({ price: noRanarr });
+  const ge = (n: number) => state(22, [coins(n)], { grandExchange: { open: true } } as Partial<Snapshot>);
+  await next(p, ge(7220));
+  const refused = { subgoal: 'buy', result: 'blocked', reason: 'not_enough_coins (need 8160, have 7220)' } as never;
+  const st = await p.next({ goal: 'herb', snapshot: ge(7220), kb: null, reports: [refused] });
+  assert.equal(st.kind, 'impossible', text(st));
+});
