@@ -251,12 +251,14 @@ export function smithingSpec(): HubSpec {
       const perBar = (price(smelt.ore) ?? 0) + (price('Coal') ?? 0) * smelt.coal;
       const bars = Math.floor(Math.min(1500, (coins - 30_000) / (perBar * 1.3)));
       if (bars < 20) return `${coins} coins do not buy ore for ${smelt.bar}s`;
+      const batch = Math.floor(28 / (1 + smelt.coal));
       return {
         label: `${smelt.label} (+${Math.round(smelt.profitPerBar)} gp a bar)`,
         className: `${PKG}.smelting.AutoSmeltingPlugin`,
         group: 'Smithing',
         config: { Bar: smelt.enumBar },
-        supplies: [{ name: smelt.ore, want: bars, min: 1 }, { name: 'Coal', want: bars * smelt.coal, min: smelt.coal }],
+        // The plugin shuts itself down ("Bank lacks 9 iron ore") unless the bank holds a full inventory: 28 / (1 + coal) bars.
+        supplies: [{ name: smelt.ore, want: bars, min: batch }, { name: 'Coal', want: bars * smelt.coal, min: batch * smelt.coal }],
         sell: [smelt.bar],
         start: { name: 'the Edgeville furnace', point: { x: 3108, y: 3499, plane: 0 }, radius: 6 },
       };
