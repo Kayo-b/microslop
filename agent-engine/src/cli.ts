@@ -14,6 +14,9 @@ import { existsSync } from 'node:fs';
 import { freshProfile, roadmap } from './goalplan/compiler.ts';
 import { monitorReport, readMonitorInput } from './campaign/monitor.ts';
 import { chooseOption, FlowPlanner, FLOWS, flowStatus } from './flows/FlowPlanner.ts';
+import { transferCoins } from './tools/transfer.ts';
+import { inF2pArea } from './strategy/f2p.ts';
+import { readWatchHint } from './llm/watchFeed.ts';
 import { loadGePrices } from './prereq/prices.ts';
 import { accountPaths, appendLedger, type LedgerRecord, observedRates, readJsonl } from './goalplan/ledger.ts';
 import { llmReport } from './goalplan/report.ts';
@@ -43,7 +46,11 @@ import { recentFailures, recordFailure } from './strategy/skips.ts';
 import { compile, type DoneCondition } from './planner/conditions.ts';
 import { COMBAT_PRESETS, PRESETS, SingleSubGoalPlanner, TaskTreePlanner } from './planner/TaskTreePlanner.ts';
 import { SmithingPlanner } from './planner/SmithingPlanner.ts';
+import { HerblorePlanner } from './goalplan/HerblorePlanner.ts';
+import { JewelleryPlanner } from './goalplan/JewelleryPlanner.ts';
 import { StringingPlanner } from './goalplan/StringingPlanner.ts';
+import { HubPluginPlanner, stopRunningHubPlugin } from './goalplan/HubPluginPlanner.ts';
+import { HUB_SPECS } from './goalplan/hubSpecs.ts';
 import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
 import type { Planner } from './planner/types.ts';
@@ -61,6 +68,13 @@ const { values, positionals } = parseArgs({
     goal: { type: 'string' },
     since: { type: 'string' },
     flow: { type: 'string' },
+    'from-port': { type: 'string' },
+    'from-name': { type: 'string' },
+    'to-port': { type: 'string' },
+    'to-name': { type: 'string' },
+    'from-token': { type: 'string' },
+    'to-token': { type: 'string' },
+    'keep-coins': { type: 'string' },
     option: { type: 'string' },
     hours: { type: 'string' },
     subgoal: { type: 'string' },
@@ -132,6 +146,8 @@ function help(): void {
   npm run agent -- llm-report (--plan FILE | --account NAME)          (LLM use, rescue success, what to script next)
   npm run agent -- flow [gold]                                          (a flow's option tree and the sub-flows each option needs)
   npm run agent -- run --flow gold [--option ID]                      (strict: one option and only its own sub-flows)
+  npm run agent -- transfer --from-port P --from-name A --to-port P --to-name B [--from-token F] [--to-token F] [--keep-coins N]
+                                                                       (trade coins between the account's own characters at the GE)
   npm run agent -- monitor [--since ISO | --hours N]                  (running campaign: activity, rescues by model, gold, alerts)
   npm run agent -- run --subgoal TEXT [--targets A,B] [--actions X,Y] [--keep A,B]
                        [--done-lacks ITEM | --done-has ITEM[:COUNT] | --done-full | --done-near X,Y,PLANE]
@@ -334,6 +350,20 @@ function report(): void {
 async function run(): Promise<void> {
   const kb = openKb();
   const backend = new MicrobotBackend();
+  const isMember = async () => (await readAccount(backend)).members;
+  // The run watcher's verdicts about this process's run reach the rescue (src/llm/watchFeed.ts).
+  const startedAt = Date.now();
+  const watchFeed = () => readWatchHint(path.join(ROOT, 'data', 'watch', 'latest.json'), startedAt);
+  const bankCoins = () => new BankMemory().items.get('Coins') ?? 0;
+  /** Hub plugin methods (src/goalplan/hubSpecs.ts) for the strategy and plan runs. */
+  const hubPlanners = async (bank: BankMemory) => {
+    const price = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
+    const members = await isMember().catch(() => false);
+    return (spec: string, untilLevel?: number): Planner | null => {
+      const make = HUB_SPECS[spec];
+      return make ? new HubPluginPlanner(make(), { backend, untilLevel, price, members, bank: () => (bank.seenAt ? bank.items : null) }) : null;
+    };
+  };
   // Prerequisites flow (src/prereq/): an activity's tools, gear, food, coins and levels are met
   // before it starts; setups longer than --setup-budget minutes (default 30) skip the activity.
   const withPrereq = (exec: Execution, inner: Planner, o: { bank?: BankMemory; skip?: Set<string>; onFailed?: (id: string) => void } = {}): Planner => {
@@ -367,11 +397,17 @@ async function run(): Promise<void> {
     const gePrice = await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json'));
     planner = new TanningPlanner({ bank: () => (bank.seenAt ? bank.items : null), price: gePrice });
     goal = 'buy cowhides, tan them at Ellis in Al Kharid and sell the leather';
+  } else if (values.task === 'herblore') {
+    planner = new HerblorePlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
+    goal = 'clean herbs and mix unfinished potions at the Grand Exchange and sell them';
+  } else if (values.task === 'craft-jewellery') {
+    planner = new JewelleryPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
+    goal = 'craft jewellery at the Edgeville furnace from Grand Exchange bars and gems and sell it';
   } else if (values.task === 'string-amulets') {
     planner = new StringingPlanner({ price: await loadGePrices(path.join(ROOT, 'data', 'cache', 'ge-prices.json')) });
     goal = 'string amulets with wool at the Grand Exchange and sell them';
   } else if (values.task === 'smith-progression') {
-    const metal = values.metal === 'bronze' || values.metal === 'iron' ? values.metal : undefined;
+    const metal = (['bronze', 'iron', 'steel', 'mithril', 'adamant'] as const).find((m) => m === values.metal);
     planner = new SmithingPlanner({ untilLevel: values['until-level'] ? Number(values['until-level']) : undefined, metal });
     goal = `smithing progression to level ${values['until-level'] ?? 33}${metal ? ` (${metal})` : ''}`;
   } else if (values.task) {
@@ -444,8 +480,9 @@ async function run(): Promise<void> {
         bank: planBank,
         prereq: (phase, inner) => withPrereq(phase.exec, inner, { bank: planBank, skip: failing, onFailed: (id) => recordFailure(paths.failures, id) }),
         llmPlanner: () => (tiers ? new LlmPlanner({ llm: guarded(1, 'plan') }) : null),
-        questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') })) : null),
+        questPlanner: (q) => (tiers ? new QuestPlanner(q, backend, new LlmPlanner({ llm: guarded(1, 'quest') }), undefined, isMember, bankCoins) : null),
         tutorialPlanner: () => new TutorialPlanner(backend),
+        hub: await hubPlanners(planBank),
         onPhase: (phase, why) => {
           console.log(`[plan] ${phase.text} [${phase.exec.kind}]: ${why}`);
           if (why.startsWith('gave up')) strategyFailed?.(phase.id);
@@ -469,9 +506,10 @@ async function run(): Promise<void> {
       account: backend,
       kb,
       gePrice,
+      hub: await hubPlanners(new BankMemory()),
       prereq: (phase, inner) => withPrereq(phase.exec, inner, { skip: failing, onFailed: (id) => recordFailure(skipFile, id) }),
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
-      questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
+      questPlanner: (q) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! }), undefined, isMember, bankCoins) : null),
       onPhase: (phase, why) => {
         console.log(`[strategy] ${phase.text} [${phase.exec.kind}]: ${why}`);
         if (why.startsWith('gave up')) strategyFailed?.(phase.id);
@@ -495,7 +533,7 @@ async function run(): Promise<void> {
       bank,
       gePrice,
       llmPlanner: () => (hasLlm() ? new LlmPlanner({ llm: llm()! }) : null),
-      questPlanner: (q: string) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! })) : null),
+      questPlanner: (q: string) => (hasLlm() ? new QuestPlanner(q, backend, new LlmPlanner({ llm: llm()! }), undefined, isMember, bankCoins) : null),
     };
     planner = new FlowPlanner(flow, values.option, {
       view: async (ctx) => ({ profile: buildProfile(await readAccount(backend), ctx.snapshot, bank), counts: prereqCounts(ctx.snapshot, bank) }),
@@ -524,14 +562,14 @@ async function run(): Promise<void> {
 
   if (planRescue) {
     const log = new JsonlRescueLog(planRescue.log);
-    planner = new RescuingPlanner(planner, planRescue.rescuer, log);
+    planner = new RescuingPlanner(planner, planRescue.rescuer, log, { watchFeed });
     console.log(`[agent] tiered LLM rescue on (${planRescue.rescuer.name}); rescues logged to ${log.file}`);
   } else if (values.rescue) {
     if (!hasLlm()) throw new Error('--rescue needs an LLM: --llm PROVIDER or LLM_PROVIDER / an API key (see docs/STRATEGY.md)');
     const log = new JsonlRescueLog();
     // Rescues can run on their own (cheaper, faster) model while planning keeps --llm-model.
     const rescueLlm = values['rescue-model'] ? createLlmClient({ provider: values.llm, model: values['rescue-model'] })! : llm()!;
-    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: rescueLlm }), log);
+    planner = new RescuingPlanner(planner, new LlmRescuer({ llm: rescueLlm }), log, { watchFeed });
     console.log(`[agent] LLM rescue on (${rescueLlm.name}); rescues logged to ${log.file}`);
   }
   const logger = new JsonlStepLogger(values['log-dir']);
@@ -540,9 +578,12 @@ async function run(): Promise<void> {
     decisionEngine: createDecisionEngine(values.engine),
     kb,
     escalator: values.escalate ? new LlmEscalator({ llm: llm() ?? undefined }) : null,
+    fallbackEscalator: hasLlm() ? new LlmEscalator({ llm: llm() ?? undefined }) : null,
     logger,
     runId: logger.runId,
     minConfidence: values['min-confidence'] ? Number(values['min-confidence']) : undefined,
+    // Free accounts are never sent to members-only areas (a walk there never arrives).
+    candidates: (await isMember().catch(() => true)) ? undefined : { allowDestination: inF2pArea },
   });
   const agent = new Agent({
     backend,
@@ -563,15 +604,17 @@ async function run(): Promise<void> {
     console.log('\n[agent] stopping after the current step (Ctrl+C again to force)...');
     agent.stop();
     backend.act({ op: 'walk_cancel' }).catch(() => {});
+    void stopRunningHubPlugin();
   });
   // kill / service stop: a walk started by the agent keeps going in the client otherwise.
   process.on('SIGTERM', () => {
     agent.stop();
-    void backend.act({ op: 'walk_cancel' }).catch(() => {}).finally(() => process.exit(143));
+    void Promise.all([backend.act({ op: 'walk_cancel' }).catch(() => {}), stopRunningHubPlugin()]).finally(() => process.exit(143));
   });
 
   console.log(`[agent] goal: ${goal} | planner: ${planner.name} | log: ${logger.file}`);
   const outcome = await agent.run(goal);
+  await stopRunningHubPlugin();
   console.log(`[agent] ${outcome.status}: ${outcome.reason} (${outcome.subgoals} sub-goals, ${outcome.steps} steps)`);
   // The run itself gave up mid-phase (sub-goals kept failing): count it against that phase.
   const phase = strategy?.phase ?? null;
@@ -620,6 +663,18 @@ try {
   else if (command === 'prereq') await prereqShow();
   else if (command === 'llm-report') report();
   else if (command === 'flow') await flowShow();
+  else if (command === 'transfer') {
+    if (!values['from-name'] || !values['to-name'] || !values['from-port'] || !values['to-port']) {
+      throw new Error('transfer needs --from-port --from-name --to-port --to-name [--from-token F] [--to-token F] [--keep-coins N]');
+    }
+    const side = (port: string, name: string, tokenFile?: string) => ({ name, backend: new MicrobotBackend({ port: Number(port), tokenFile }) });
+    await transferCoins(
+      side(values['from-port'], values['from-name'], values['from-token']),
+      side(values['to-port'], values['to-name'], values['to-token']),
+      Number(values['keep-coins'] ?? 50_000),
+      (m) => console.log(`[transfer] ${m}`),
+    );
+  }
   else if (command === 'monitor') {
     const since = values.since ? Date.parse(values.since) : values.hours ? Date.now() - Number(values.hours) * 3_600_000 : undefined;
     console.log(monitorReport(readMonitorInput(ROOT, { since })).join('\n'));

@@ -4,13 +4,13 @@ import path from 'node:path';
 import { BankMemory, buildProfile, type Account } from '../src/strategy/account.ts';
 import { choosePhase, StrategyPlanner } from '../src/strategy/StrategyPlanner.ts';
 import { QuestPlanner } from '../src/strategy/QuestPlanner.ts';
-import type { Planner, PlannerContext } from '../src/planner/types.ts';
+import type { Planner, PlannerContext, PlanStep } from '../src/planner/types.ts';
 import type { Snapshot } from '../src/types.ts';
 import { item, snapshot } from './support/fixtures.ts';
 
 const tmp = process.env.CLAUDE_JOB_DIR ? path.join(process.env.CLAUDE_JOB_DIR, 'tmp') : '/tmp';
 const skills = (levels: Record<string, number>) =>
-  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
+  ['Attack', 'Strength', 'Defence', 'Hitpoints', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking', 'Runecraft'].map((name) => ({ name, level: levels[name] ?? 1, boosted: levels[name] ?? 1, xp: 0 }));
 
 function state(levels: Record<string, number>, extra: Partial<Snapshot> = {}): Snapshot {
   const s = snapshot(extra);
@@ -66,7 +66,7 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
   // Gear smithing just ran (it alternates with the routes; tested below).
   const lastRun = new Map([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const first = choosePhase({ kind: 'gold', lastRun }, p, new Set());
-  assert.ok(first && 'phase' in first && first.phase.id === 'gold:iron-ore', 'untried routes first, best estimate among them');
+  assert.ok(first && 'phase' in first && first.phase.id === 'gold:string-amulets', 'untried routes first, best estimate among them');
   lastRun.set('iron-ore', Date.now()).set('string-amulets', Date.now()).set('cowhides', Date.now()).set('feathers', Date.now()).set('guard-coins', Date.now());
   const wool = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(wool && 'phase' in wool && wool.phase.id === 'gold:wool' && wool.phase.text.startsWith('take shears'), 'llm routes run with their full goal');
@@ -81,7 +81,7 @@ test('strategy gold: sells banked goods once an hour, then rotates through route
 test('strategy gold: a fight below its recommended levels trains the weakest skill in its turn', () => {
   const s = state({ Attack: 40, Strength: 33, Defence: 24, Hitpoints: 35 }, { player: { ...snapshot().player!, combatLevel: 42 } });
   const p = buildProfile(account(false), s, bankWith(['Coins']));
-  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['gear', Date.now() + 3_600_000]]);
+  const lastRun = new Map<string, number>([['sell', Date.now()], ['tan-hides', Date.now()], ['string-amulets', Date.now()], ['gear', Date.now() + 3_600_000]]);
   const moss = choosePhase({ kind: 'gold', lastRun }, p, new Set());
   assert.ok(moss && 'phase' in moss && moss.phase.id === 'gold:moss-giants:train', JSON.stringify(moss));
   assert.deepEqual(moss.phase.until, { skill: 'Defence', level: 30 }, 'largest gap first, capped at its bracket');
@@ -237,4 +237,74 @@ test('quest planner rests to 80% HP before a step when low and without food', as
   s.player = { ...s.player!, hp: { current: 8, max: 33 } } as never;
   const step = await new QuestPlanner('Imp Catcher', api, llm, 1).next({ goal: 'g', snapshot: s, kb: null, reports: [] });
   assert.ok(step.kind === 'wait' && step.until.hpAtLeast === 0.8);
+});
+
+test('quest planner: a free account stops at a quest step in a members area; members continue', async () => {
+  const { inF2pArea } = await import('../src/strategy/f2p.ts');
+  assert.ok(inF2pArea({ x: 3210, y: 3215, plane: 0 }), 'Lumbridge');
+  assert.ok(inF2pArea({ x: 3110, y: 9570, plane: 0 }), 'Wizards Tower basement');
+  assert.ok(!inF2pArea({ x: 2650, y: 3300, plane: 0 }), 'Ardougne is members-only');
+  assert.ok(!inF2pArea({ x: 2590, y: 2975, plane: 0 }), 'Feldip Hills is members-only');
+
+  const llmStep: PlanStep = { kind: 'subgoal', subgoal: { text: 'go', targets: [], actions: [] } };
+  const llm: Planner = { name: 'llm', next: async () => llmStep };
+  const api = { questHelperStatus: async () => ({ selected: true, questName: 'Some Quest', stepText: 'Talk to the guide', stepPoint: { x: 2650, y: 3300, plane: 0 } }), questHelperStart: async () => undefined };
+  const free = await new QuestPlanner('Some Quest', api, llm, 1, async () => false).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.ok(free.kind === 'impossible' && /members-only area/.test(free.reason));
+  const paid = await new QuestPlanner('Some Quest', api, llm, 1, async () => true).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.equal(paid.kind, 'subgoal');
+});
+
+test('quest planner: a step that can be bought tells the planner to buy when coins are on hand', async () => {
+  let seen = '';
+  const llm: Planner = { name: 'llm', next: async (ctx) => ((seen = ctx.goal), { kind: 'subgoal', subgoal: { text: 'go', targets: [], actions: [] } }) };
+  const api = { questHelperStatus: async () => ({ selected: true, questName: 'Imp Catcher', stepText: ['Collect one of each bead. You can kill imps for these beads, or buy them on the Grand Exchange.'] }), questHelperStart: async () => undefined };
+  await new QuestPlanner('Imp Catcher', api, llm, 1, async () => true, () => 5_000_000).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.match(seen, /BUY them instead of grinding drops/);
+  await new QuestPlanner('Imp Catcher', api, llm, 1, async () => true, () => 0).next({ goal: 'g', snapshot: snapshot(), kb: null, reports: [] });
+  assert.doesNotMatch(seen, /BUY them/, 'broke: grind the drops');
+});
+
+test('strategy level: mining switches ore as the level rises; smithing gear follows Smithing and Mining', () => {
+  const method = (levels: Record<string, number>) => {
+    const p = buildProfile(account(), state(levels), bankWith([]));
+    const c = choosePhase({ kind: 'level', skill: 'Mining', level: 99 }, p, new Set());
+    return c && 'phase' in c ? c.phase.text : String(c);
+  };
+  assert.match(method({ Mining: 20 }), /iron/);
+  assert.match(method({ Mining: 40 }), /coal/);
+  assert.match(method({ Mining: 60 }), /mithril/);
+  assert.match(method({ Mining: 75 }), /adamantite/);
+  const smith = choosePhase({ kind: 'level', skill: 'Smithing', level: 70 }, buildProfile(account(), state({ Smithing: 52, Mining: 60 }), bankWith([])), new Set());
+  assert.ok(smith && 'phase' in smith && smith.phase.exec.kind === 'hub' && smith.phase.exec.spec === 'smithing', 'from 30: bought bars and ore (hub plugins)');
+  const early = choosePhase({ kind: 'level', skill: 'Smithing', level: 30 }, buildProfile(account(), state({ Smithing: 10, Mining: 20 }), bankWith([])), new Set());
+  assert.ok(early && 'phase' in early && early.phase.exec.kind === 'preset' && early.phase.exec.preset === 'smith-progression');
+});
+
+test('strategy level: fishing, woodcutting and cooking change method with the level, members taking better ones', () => {
+  const pick = (skill: string, levels: Record<string, number>, members = false, owned: string[] = []) => {
+    const p = buildProfile(account(members), state({ Fishing: 1, Cooking: 1, Woodcutting: 1, ...levels }), bankWith(owned));
+    const c = choosePhase({ kind: 'level', skill, level: 99 }, p, new Set());
+    return c && 'phase' in c ? c.phase.text : String(c);
+  };
+  assert.match(pick('Woodcutting', { Woodcutting: 20 }), /oaks/);
+  assert.match(pick('Woodcutting', { Woodcutting: 40 }), /willows/);
+  assert.match(pick('Woodcutting', { Woodcutting: 65 }), /yews/);
+  assert.match(pick('Woodcutting', { Woodcutting: 80 }), /yews/, 'free accounts stay on yews');
+  assert.match(pick('Woodcutting', { Woodcutting: 80 }, true), /magic trees/);
+  assert.match(pick('Cooking', { Cooking: 20 }, false, ['Raw trout']), /trout/);
+  assert.match(pick('Cooking', { Cooking: 35 }), /tuna/);
+  assert.match(pick('Cooking', { Cooking: 42 }), /lobsters/);
+  assert.match(pick('Cooking', { Cooking: 60 }), /swordfish/);
+  assert.match(pick('Fishing', { Fishing: 40 }, false, ['Harpoon', 'Coins']), /harpoon/);
+});
+
+test('strategy level: a scripted method that only lacks quests does the quest chain before an LLM method', () => {
+  const pick = (finished: string[]) => {
+    const c = choosePhase({ kind: 'level', skill: 'Runecraft', level: 90 }, buildProfile(account(true, finished), state({ Runecraft: 27 }), bankWith([])), new Set());
+    return c && 'phase' in c ? `${c.phase.exec.kind}:${c.phase.exec.kind === 'quest' ? c.phase.exec.quest : c.phase.exec.kind === 'hub' ? c.phase.exec.spec : ''}` : String(c);
+  };
+  assert.equal(pick(['Rune Mysteries']), 'quest:Enter the Abyss');
+  assert.equal(pick(['Rune Mysteries', 'Enter the Abyss']), 'quest:Temple of the Eye');
+  assert.equal(pick(['Rune Mysteries', 'Enter the Abyss', 'Temple of the Eye']), 'hub:gotr');
 });

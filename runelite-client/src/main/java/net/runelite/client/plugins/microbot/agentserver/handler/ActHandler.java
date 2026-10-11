@@ -7,6 +7,7 @@ import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.plugins.microbot.Microbot;
+import net.runelite.client.plugins.microbot.agentserver.AgentTrade;
 import net.runelite.client.plugins.microbot.agentserver.AgentWidgets;
 import net.runelite.client.plugins.microbot.api.npc.models.Rs2NpcModel;
 import net.runelite.client.plugins.microbot.api.tileitem.models.Rs2TileItemModel;
@@ -67,7 +68,8 @@ public class ActHandler extends AgentHandler {
 			"interact", "use_item_on", "walk", "walk_cancel", "dialogue_continue", "dialogue_select",
 			"production_select", "bank_open", "bank_close", "bank_deposit_all", "bank_deposit", "bank_withdraw",
 			"drop", "toggle_run", "attack_style", "autocast", "shop_buy", "shop_close", "ge_buy", "ge_sell", "ge_collect", "ge_close",
-			"tab_open", "widget_click", "type_text", "cast_on"));
+			"tab_open", "widget_click", "type_text", "cast_on",
+			"trade_player", "trade_offer", "trade_accept", "trade_decline"));
 
 	/** Longest text {@code type_text} accepts (display names are at most 12 characters). */
 	private static final int MAX_TYPED = 32;
@@ -159,6 +161,7 @@ public class ActHandler extends AgentHandler {
 					String quantity = amount instanceof Number ? String.valueOf(((Number) amount).intValue()) : "All";
 					return AgentWidgets.smith(client, option, quantity) ? Result.ok() : Result.fail("option_not_found");
 				}
+				if (AgentWidgets.isJewelleryOpen()) return AgentWidgets.jewellery(client, option) ? Result.ok() : Result.fail("option_not_found");
 				// The tanner always tans every carried hide of that leather ("Tan All").
 				if (AgentWidgets.isTanningOpen()) return AgentWidgets.tanAll(client, option) ? Result.ok() : Result.fail("option_not_found");
 				if (!Rs2Widget.isProductionWidgetOpen()) return Result.fail("production_not_open");
@@ -312,6 +315,21 @@ public class ActHandler extends AgentHandler {
 				Rs2Tab.switchTo(tab);
 				return sleepUntil(() -> Rs2Tab.getCurrentTab() == tab, 2_000) ? Result.ok() : Result.fail("tab_not_opened");
 			}
+			case "trade_player": {
+				// Only the player the caller names (the account's own other character).
+				String name = requireString(body, "name");
+				return AgentTrade.tradePlayer(client, name) ? Result.ok() : Result.fail("player_not_found");
+			}
+			case "trade_offer": {
+				if (AgentTrade.stage() == null) return Result.fail("trade_not_open");
+				String name = requireString(body, "name");
+				String option = body.get("option") instanceof String ? (String) body.get("option") : "Offer-All";
+				return AgentTrade.offer(client, name, option) ? Result.ok() : Result.fail("item_not_offered");
+			}
+			case "trade_accept":
+				return AgentTrade.accept() ? Result.ok() : Result.fail("trade_not_open");
+			case "trade_decline":
+				return AgentTrade.decline() ? Result.ok() : Result.fail("trade_not_open");
 			case "widget_click": {
 				// Buttons on interfaces with no world target: character design "Confirm", name lookup, etc.
 				String text = requireString(body, "text");

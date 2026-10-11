@@ -13,6 +13,14 @@ Each guide lists known pitfalls when working with one specific game entity type.
 | Death (graves, Death's Office, recovery) | [death.md](death.md) | Any code calling or modifying `Rs2Death`, `DeathRecoveryEvent`, `DeathEvent`, or handling graves, retrieval fees, and post-death item recovery |
 | Worlds (selection, ping, hopping) | [worlds.md](worlds.md) | Any code measuring world latency, testing world reachability, or selecting worlds based on network availability |
 
+Ground-item pickup: [propagate dispatch failures](items.md#11-propagate-ground-item-dispatch-failures) and [preserve explicit Take](items.md#12-preserve-an-explicit-ground-item-take-when-a-widget-is-selected).
+
+Run-orb energy, geometry, and pending-click semantics: [movement gotcha 21](movement.md#21-apply-the-shared-energy-policy-before-clicking-the-run-orb).
+
+Scene walk-click render validity and destination confirmation: [movement gotcha 22](movement.md#22-a-scene-walk-click-is-only-valid-on-a-tile-rendered-at-click-time).
+
+Route camera turns only for unreachable targets: [movement gotcha 23](movement.md#23-route-camera-turns-are-for-targets-the-scene-cannot-reach).
+
 ## Format
 
 Each entity guide is a numbered list of gotchas. Each entry follows this structure:

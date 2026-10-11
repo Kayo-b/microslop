@@ -1,0 +1,8 @@
+{
+  "name": "gold-2-smithing",
+  "account": "char2",
+  "targets": { "Smithing": 50 },
+  "quests": [],
+  "items": [],
+  "policy": { "boosterQuests": true, "levelsPerPhase": 10, "llm": { "tier1PerHour": 20, "tier2PerHour": 4 } }
+}

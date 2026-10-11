@@ -44,8 +44,11 @@ Each sub-goal you write is executed by a fast classifier that sees the player's 
 - Set "destination_name" to a place name (town, bank, area) when the player must travel; the agent resolves it with a map database. Leave it null when the targets are already nearby.
 - Always give a deterministic "done_when" condition when one exists (inventory full, has/lacks an item, bank open, skill level, near a point). Only leave every field null when completion can only be judged by looking.
 - Items no shop nearby sells can be bought at the Grand Exchange (north-west Varrock): one sub-goal "buy N <item> at the Grand Exchange" with targets ["Grand Exchange Clerk", "<item>"], action "Exchange", done_when has_item <item> with the count. It costs the guide price +30%, so carry enough coins.
+- Never drop items on the floor. Free inventory space by banking: walk to the nearest bank (or deposit box) and deposit; only burnt food, ashes and similar junk may be dropped. Materials (potions, herbs, ore, bars, logs, raw food) always go to the bank.
+- Shops do not sell rune essence or pure essence (Aubury sells runes, not essence): buy essence at the Grand Exchange or mine it. Each mysterious ruins is one specific altar; name the altar and its coordinates (air 2984,3291; mind 2981,3513; water 3184,3164; earth 3305,3473; fire 3312,3254; body 3052,3444) and carry the matching talisman.
 - Use the reports of previous sub-goals: if one was blocked, change approach (different place, get the missing tool, open a door or gate first) rather than repeating it.
 - Answer "complete" when the overall goal is achieved and "impossible" when it cannot be achieved from here without human help (missing membership, quest requirement, money you cannot obtain).
+- Never start a fight with food missing: any monster that can hurt (anything but chickens, cows, rats) needs at least 5 cooked food in the inventory, listed in "keep_items". With none carried, first get some (bank, shop, or buy at the Grand Exchange) or pick a method without combat.
 - Keep the account safe: avoid the Wilderness and monsters far above the player's combat level unless the goal requires them.`;
 
 const DoneWhenSchema = z.object({
@@ -258,8 +261,16 @@ export class LlmRescuer implements Rescuer {
             '',
             'The agent has been going in circles across several sub-goals. Work out what is actually happening (a locked door or trapdoor that needs a key or another route first, a quest step done out of order, a one-way door, an item that must be obtained elsewhere, a wrong place). Look up the quest or location if you can. Then propose ONE sub-goal that does something different and breaks the loop, or answer "impossible" if this goal cannot progress from here and should be abandoned.',
           ].join('\n')
-        : [plannerPrompt(ctx), '', `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`, 'Propose one sub-goal that gets past this.'].join('\n');
-    const res = await this.llm.structured({ system: RESCUE_SYSTEM, user, schema: PlanSchema, schemaName: 'plan', effort: req.trigger === 'loop' ? 'high' : 'medium' });
+        : [
+            plannerPrompt(ctx),
+            '',
+            req.trigger === 'watcher'
+              ? `A SUPERVISING REVIEWER watching this run says: ${req.reason}`
+              : `RESCUE (${req.trigger}): the scripted "${req.planner}" planner reports: ${req.reason}`,
+            ...(req.evidence ?? []),
+            'Propose one sub-goal that gets past this.',
+          ].join('\n');
+    const res = await this.llm.structured({ system: RESCUE_SYSTEM, user, schema: PlanSchema, schemaName: 'plan', effort: req.trigger === 'loop' || req.trigger === 'watcher' ? 'high' : 'medium' });
     if (res.kind === 'refusal') return { kind: 'impossible', reason: `rescue request declined: ${res.reason}` };
     return planToStep(res.value);
   }

@@ -1,0 +1,8 @@
+{
+  "name": "gold-3-crafting",
+  "account": "char2",
+  "targets": { "Crafting": 45 },
+  "quests": [],
+  "items": [],
+  "policy": { "boosterQuests": true, "levelsPerPhase": 10, "llm": { "tier1PerHour": 20, "tier2PerHour": 4 } }
+}

@@ -12,7 +12,8 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
-import { carriedCoins, GRAND_EXCHANGE_BANK } from './SellPlanner.ts';
+import { GE_DISTRACTIONS } from './HerblorePlanner.ts';
+import { carriedCoins, GRAND_EXCHANGE_BANK, coinTopUp } from './SellPlanner.ts';
 
 const WOOL = 'Ball of wool';
 /** Free-to-play gem tiers whose unstrung amulets can be strung with wool. */
@@ -23,7 +24,8 @@ const RESERVE = 500;
 const OVERBID = 1.35;
 /** Amulets per GE purchase (20 inventories). */
 const MAX_BUY = 280;
-const PER_TRIP = 14;
+/** 13 amulets + 13 balls of wool: coins take a slot. */
+const PER_TRIP = 13;
 
 export interface StringingOptions {
   price: (item: string) => number | null;
@@ -97,23 +99,29 @@ export class StringingPlanner implements Planner {
     const unstrung = c?.unstrung;
     if (s.bank.open) {
       const keepUnnoted = (name: string, noted: boolean) => !noted && (name === WOOL || name === unstrung);
-      const junk = s.inventory.items.find((i) => i.name !== 'Coins' && !keepUnnoted(i.name, Boolean(i.noted)));
+      // Strung-amulet notes stay once nothing is left to string: they were withdrawn to be sold.
+      const inputsLeft = !!unstrung && (count(unstrung) > 0 || s.bank.items.some((b) => b.name === unstrung));
+      const junk = s.inventory.items.find(
+        (i) => i.name !== 'Coins' && !keepUnnoted(i.name, Boolean(i.noted)) && !(i.noted && !inputsLeft && strungNames.includes(i.name)),
+      );
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
       for (const name of unstrung ? [unstrung, WOOL] : []) {
         const stack = s.bank.items.find((b) => b.name === name);
-        if (stack && count(name) < PER_TRIP) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount: Math.min(PER_TRIP - count(name), stack.quantity) }, reason: `withdraw ${name} to string` };
+        const amount = Math.min(PER_TRIP - count(name), stack?.quantity ?? 0, s.inventory.freeSlots);
+        if (stack && amount > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount }, reason: `withdraw ${name} to string` };
       }
       if (!unstrung || count(unstrung) === 0) {
         const strung = s.bank.items.find((b) => strungNames.includes(b.name));
         if (strung) return { kind: 'act', action: { op: 'bank_withdraw', itemId: strung.id, amount: 'all', noted: true }, reason: `withdraw the ${strung.name}s as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
-        if (coinStack && coinStack.quantity > coins) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: 'all' }, reason: 'withdraw coins to buy amulets' };
+        if (coinStack && coinTopUp(coinStack.quantity, coins, 300_000) > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: coinStack.id, amount: coinTopUp(coinStack.quantity, coins, 300_000) }, reason: 'withdraw coins to buy amulets' };
       }
       return { kind: 'act', action: { op: 'bank_close' }, reason: 'close the bank' };
     }
 
     if (unstrung && count(unstrung, false) > 0 && count(WOOL, false) > 0) {
-      return step(`use a ball of wool on a ${unstrung} and string them all`, [WOOL, unstrung], ['Use', 'Make'], { lacksItem: unstrung }, 80, [WOOL, unstrung]);
+      const scarcer = count(unstrung, false) <= count(WOOL, false) ? unstrung : WOOL;
+      return step(`use a ball of wool on a ${unstrung} and string them all`, [WOOL, unstrung], ['Use', 'Make'], { lacksItem: scarcer }, 80, [WOOL, unstrung], { avoid: GE_DISTRACTIONS });
     }
     // Only coins and strung amulet notes carried: off to sell them.
     const others = s.inventory.items.filter((i) => i.name !== 'Coins');

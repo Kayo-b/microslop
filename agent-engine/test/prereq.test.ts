@@ -5,6 +5,7 @@ import { PrereqPlanner } from '../src/prereq/PrereqPlanner.ts';
 import { resolveSetup, type AccountView } from '../src/prereq/resolve.ts';
 import type { Planner, PlanStep } from '../src/planner/types.ts';
 import { BankMemory, type Profile } from '../src/strategy/account.ts';
+import type { Snapshot } from '../src/types.ts';
 import { item, snapshot } from './support/fixtures.ts';
 
 function view(o: { levels?: Record<string, number>; counts?: Record<string, number>; coins?: number; members?: boolean } = {}): AccountView {
@@ -125,4 +126,58 @@ test('prereq planner: an unseen bank is surveyed first', async () => {
   const p = new PrereqPlanner(new Inner(), needs, { account, bank: new BankMemory('/nonexistent/bank-seen.json') });
   const step = await p.next({ goal: 'x', snapshot: snapshot(), kb: null, reports: [] });
   assert.ok(step.kind === 'subgoal' && /to see what the account owns/.test(step.subgoal.text));
+});
+
+test('loadout: every non-combat activity wants gear, softly; owned gear is wielded, banked upgrades fetched', async () => {
+  const quest = activityNeeds({ kind: 'quest', quest: "Cook's Assistant" })!;
+  assert.ok(quest.gear?.soft && quest.gear.slots.includes('weapon'));
+  assert.ok(activityNeeds({ kind: 'llm', goal: 'pickpocket men' })?.gear?.soft, 'llm phases get a loadout too');
+  assert.equal(activityNeeds({ kind: 'sell', items: ['Cowhide'] }), null, 'selling starts without a loadout');
+
+  // Soft: a poor account is neither blocked nor sent to earn coins for armour.
+  const poor = resolveSetup(quest, view({ counts: { Shrimps: 1 }, coins: 5 }), { shop, earnCoins: false });
+  assert.deepEqual(poor.blocked, []);
+  assert.deepEqual(ids(poor.steps), []);
+  // Affordable pieces are bought.
+  const rich = resolveSetup(quest, view({ counts: { Shrimps: 1 }, coins: 5000 }), { shop });
+  assert.ok(ids(rich.steps).includes('acquire:Bronze full helm'));
+
+  const { nextLoadoutStep } = await import('../src/prereq/loadout.ts');
+  const carried = snapshot({ inventory: { freeSlots: 26, items: [item(0, 1323, 'Iron scimitar')] } });
+  const wield = nextLoadoutStep(carried, [], null);
+  assert.ok(wield?.kind === 'subgoal' && /wield the Iron scimitar/.test(wield.subgoal.text));
+  assert.equal(nextLoadoutStep(snapshot(), [], null), null, 'nothing to wear: done');
+});
+
+test('no-drop: materials are banked, never offered for dropping; quests start with materials banked', async () => {
+  const { isDroppable, isMaterial } = await import('../src/engine/drops.ts');
+  assert.ok(!isDroppable('Harralander potion (unf)') && !isDroppable('Oak logs') && !isDroppable('Raw shrimps'));
+  assert.ok(isDroppable('Burnt shrimp') && isDroppable('Ashes'));
+  assert.ok(isMaterial('Harralander potion (unf)') && !isMaterial('Wool') && !isMaterial('Shears'));
+
+  const { nextLoadoutStep } = await import('../src/prereq/loadout.ts');
+  const carrying = snapshot({ inventory: { freeSlots: 20, items: [item(0, 97, 'Harralander potion (unf)'), item(1, 1735, 'Shears'), item(2, 1737, 'Wool')] }, bank: { open: true, items: [] } });
+  const step = nextLoadoutStep(carrying, [], null, { bankMaterials: true });
+  assert.ok(step?.kind === 'subgoal' && /deposit the Harralander potion \(unf\)/.test(step.subgoal.text) && !step.subgoal.targets?.includes('Wool'));
+  assert.equal(nextLoadoutStep(carrying, [], null)?.kind === 'subgoal' && /deposit/.test((nextLoadoutStep(carrying, [], null) as { subgoal: { text: string } }).subgoal.text), false, 'materials are only banked when asked');
+});
+
+test('coin guard: a bag with millions is banked down to 25k before the activity goes on; trading loops manage their own', async () => {
+  const { nextCoinStep, COIN_KEEP } = await import('../src/prereq/loadout.ts');
+  const { coinTopUp } = await import('../src/goalplan/SellPlanner.ts');
+  const rich = (open: boolean) => snapshot({ inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 6_658_312, stackable: true })] }, ...(open ? { bank: { open: true, items: [] } } : {}) } as Partial<Snapshot>);
+  const kb = { nearestBanks: () => [{ name: 'Varrock West bank', kind: 'bank', point: { x: 3185, y: 3436, plane: 0 } }] } as never;
+  const walk = nextCoinStep(rich(false), kb);
+  assert.ok(walk?.kind === 'subgoal' && /bank the surplus coins/.test(walk.subgoal.text) && walk.subgoal.doneWhen?.bankOpen);
+  const deposit = nextCoinStep(rich(true), kb);
+  assert.ok(deposit?.kind === 'act' && deposit.action.op === 'bank_deposit' && deposit.action.amount === 6_658_312 - COIN_KEEP);
+  assert.equal(nextCoinStep(snapshot({ inventory: { freeSlots: 27, items: [item(0, 995, 'Coins', { quantity: 30_000, stackable: true })] } }), kb), null);
+
+  assert.equal(activityNeeds({ kind: 'preset', preset: 'runecraft' })?.coinsManaged, true);
+  assert.equal(activityNeeds({ kind: 'quest', quest: "Cook's Assistant" })?.coinsManaged, undefined);
+
+  // Withdrawals are capped and stop once enough is carried (no 6M, no loop of repeated withdrawals).
+  assert.equal(coinTopUp(6_000_000, 0, 300_000), 300_000);
+  assert.equal(coinTopUp(6_000_000, 200_000, 300_000), 0);
+  assert.equal(coinTopUp(5_000, 0, 300_000), 5_000);
 });

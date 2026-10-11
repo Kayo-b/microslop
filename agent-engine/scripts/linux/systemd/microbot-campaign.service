@@ -6,7 +6,7 @@ After=graphical-session.target network-online.target
 
 [Service]
 Type=exec
-ExecStart=%h/projects/Microbot/agent-engine/scripts/linux/microbot-campaign
+ExecStart=%h/projects/Microbot_/agent-engine/scripts/linux/microbot-campaign
 Environment=MICROBOT_CAMPAIGN_HOURS=3
 # SIGTERM goes to the wrapper only: it ends the current activity (cancelling any walk), stops the
 # client and rebuilds the dataset. Whatever is left (client, Gradle) is killed after the timeout.

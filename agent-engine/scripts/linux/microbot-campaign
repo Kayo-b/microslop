@@ -5,11 +5,11 @@
 #
 #   microbot-campaign [campaign args...]       e.g. microbot-campaign --hours 3 --only fish-shrimp
 #
-# Env: MICROBOT_CAMPAIGN_HOURS (default 3), MICROBOT_DIR (default ~/projects/Microbot),
+# Env: MICROBOT_CAMPAIGN_HOURS (default 3), MICROBOT_DIR (default ~/projects/Microbot_),
 # MICROBOT_KEEP_CLIENT=1 leaves the client running afterwards, MICROBOT_CHARACTER (see microbot-run).
 # Exit 3: the Jagex session expired; sign in again with bolt-microbot (Play is not needed).
 set -uo pipefail
-ROOT="${MICROBOT_DIR:-$HOME/projects/Microbot}"
+ROOT="${MICROBOT_DIR:-$HOME/projects/Microbot_}"
 ENGINE="$ROOT/agent-engine"
 LOCK="${XDG_RUNTIME_DIR:-/tmp}/microbot-campaign.lock"
 

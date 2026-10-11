@@ -5,6 +5,7 @@
  * The gathering template covers the classic loop: gather until full -> bank (or drop) -> repeat,
  * optionally until a skill level is reached.
  */
+import { isDroppable } from '../engine/drops.ts';
 import type { Snapshot, WorldPoint } from '../types.ts';
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import { FOOD_HEAL, foodSupply, RESOURCES } from '../kb/resources.ts';
@@ -41,9 +42,14 @@ export const PRESETS: Record<string, Omit<GatherTask, 'bank' | 'untilLevel'>> = 
   // A fixed spot: the nearest trees are often next to aggressive NPCs (Draynor's jail guards).
   'chop-trees': { activity: 'chop normal trees for logs', targets: ['Tree', 'Dead tree', 'Evergreen tree'], action: 'Chop down', product: 'Logs', skill: 'Woodcutting', keep: ['axe'], area: { name: 'trees by Varrock West bank', point: { x: 3170, y: 3450, plane: 0 } } },
   'chop-oaks': { activity: 'chop oak trees for oak logs', targets: ['Oak tree'], action: 'Chop down', product: 'Oak logs', skill: 'Woodcutting', keep: ['axe'] },
+  'chop-yews': { activity: 'chop yew trees for yew logs', targets: ['Yew tree'], action: 'Chop down', product: 'Yew logs', skill: 'Woodcutting', keep: ['axe'], area: { name: 'Edgeville yew trees', point: { x: 3087, y: 3470, plane: 0 } } },
   'chop-willows': { activity: 'chop willow trees for willow logs', targets: ['Willow tree'], action: 'Chop down', product: 'Willow logs', skill: 'Woodcutting', keep: ['axe'] },
   'mine-copper': { activity: 'mine copper ore', targets: ['Copper rocks'], action: 'Mine', product: 'Copper ore', skill: 'Mining', keep: ['pickaxe'] },
   'mine-tin': { activity: 'mine tin ore', targets: ['Tin rocks'], action: 'Mine', product: 'Tin ore', skill: 'Mining', keep: ['pickaxe'] },
+  // The Dwarven Mine (Falador trapdoor) has coal, mithril and adamantite close together.
+  'mine-coal': { activity: 'mine coal', targets: ['Coal rocks'], action: 'Mine', product: 'Coal', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine coal', point: { x: 3017, y: 9720, plane: 0 } } },
+  'mine-mithril': { activity: 'mine mithril ore', targets: ['Mithril rocks'], action: 'Mine', product: 'Mithril ore', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine mithril', point: { x: 3033, y: 9719, plane: 0 } } },
+  'mine-adamant': { activity: 'mine adamantite ore', targets: ['Adamantite rocks'], action: 'Mine', product: 'Adamantite ore', skill: 'Mining', keep: ['pickaxe'], area: { name: 'Dwarven Mine adamantite', point: { x: 3037, y: 9716, plane: 0 } } },
   'mine-iron': { activity: 'mine iron ore', targets: ['Iron rocks'], action: 'Mine', product: 'Iron ore', skill: 'Mining', keep: ['pickaxe'] },
 };
 
@@ -269,7 +275,7 @@ const BANK_TARGETS = ['Bank booth', 'Bank chest', 'Banker'];
 /** Look-alikes that are not banks: a poll booth ("Use") opens the poll menu, a deposit box only deposits. */
 export const NOT_BANKS = ['Poll booth', 'Bank Deposit Box', 'Bank deposit box', 'Deposit Box'];
 
-function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
+export function goal(text: string, targets: string[], actions: string[], doneWhen: DoneCondition | undefined, maxSteps: number, keep: string[]): PlannedSubGoal {
   return { text, targets, actions, doneWhen, isDone: compile(doneWhen), maxSteps, keep };
 }
 
@@ -334,7 +340,8 @@ export function nextGatherStep(task: GatherTask, s: Snapshot, bankItems: string[
   }
 
   if (full && (hasProduct || junk.length)) {
-    if (task.bank) {
+    // Only worthless leftovers are ever dropped; everything else is banked.
+    if (task.bank || ![...(hasProduct ? [task.product] : junk)].every(isDroppable)) {
       return {
         kind: 'subgoal',
         subgoal: { ...goal('go to the nearest bank and open it', BANK_TARGETS, ['Bank'], { bankOpen: true }, 300, task.keep), avoid: NOT_BANKS },

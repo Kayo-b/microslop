@@ -89,6 +89,90 @@ public final class AgentWidgets
 		return Rs2Widget.clickWidget(found[1]);
 	}
 
+
+	/** The gold jewellery interface opened by using a bar on a furnace with a mould (group 446). */
+	private static final int JEWELLERY_GROUP = 446;
+
+	public static boolean isJewelleryOpen()
+	{
+		return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			Widget close = client().getWidget(JEWELLERY_GROUP, 1);
+			return close != null && !close.isHidden();
+		}).orElse(false);
+	}
+
+	private static Client client()
+	{
+		return Microbot.getClient();
+	}
+
+	/** Products the jewellery interface offers: the widgets whose action reads "Make <product>". */
+	public static List<String> jewelleryOptions(Client client)
+	{
+		List<String> names = new ArrayList<>();
+		Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			for (Widget w : jewelleryWidgets(client))
+			{
+				String product = jewelleryProduct(w);
+				if (product != null && !names.contains(product))
+				{
+					names.add(product);
+				}
+			}
+			return true;
+		});
+		return names;
+	}
+
+	/** Clicks the product named {@code option} (case-insensitive, e.g. "Gold ring"); false when not offered. */
+	public static boolean jewellery(Client client, String option)
+	{
+		String wanted = option.toLowerCase(Locale.ROOT);
+		Widget found = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+			for (Widget w : jewelleryWidgets(client))
+			{
+				String product = jewelleryProduct(w);
+				if (product != null && product.toLowerCase(Locale.ROOT).equals(wanted))
+				{
+					return w;
+				}
+			}
+			return null;
+		}).orElse(null);
+		return found != null && Rs2Widget.clickWidget(found);
+	}
+
+	private static String jewelleryProduct(Widget w)
+	{
+		String[] actions = w.getActions();
+		if (w.isHidden() || actions == null)
+		{
+			return null;
+		}
+		for (String a : actions)
+		{
+			if (a != null && a.startsWith("Make ") && a.length() > 5)
+			{
+				return Rs2UiHelper.stripColTags(a.substring(5)).trim();
+			}
+		}
+		return null;
+	}
+
+	private static List<Widget> jewelleryWidgets(Client client)
+	{
+		List<Widget> out = new ArrayList<>();
+		for (int child = 0; child < 128; child++)
+		{
+			Widget w = client.getWidget(JEWELLERY_GROUP, child);
+			if (w != null)
+			{
+				collect(w, out, 0);
+			}
+		}
+		return out;
+	}
+
 	public static boolean isTanningOpen()
 	{
 		return Rs2Widget.isWidgetVisible(InterfaceID.TANNER, 0);

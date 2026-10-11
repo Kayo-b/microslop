@@ -129,7 +129,8 @@ export interface CampaignDeps {
   health(): Promise<Health>;
   login(world: number): Promise<boolean>;
   relaunchClient(): Promise<void>;
-  runActivity(a: Activity, minutes: number): Promise<{ output: string; timedOut: boolean; code: number | null }>;
+  /** `endedBy`: why the run watcher ended this run (its SIGTERM is not a crash). */
+  runActivity(a: Activity, minutes: number): Promise<{ output: string; timedOut: boolean; code: number | null; endedBy?: string }>;
   rebuildDataset(): Promise<void>;
   sleep(ms: number): Promise<void>;
   now(): number;
@@ -195,8 +196,8 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
     d.log(`▶ ${act.name} (${minutes.toFixed(0)} min): agent run ${act.args.join(' ')}`);
     const run = await d.runActivity(act, minutes);
     const parsed = parseOutcome(run.output);
-    const status: ActivityStatus = run.timedOut ? 'timeout' : (parsed?.status ?? 'crashed');
-    const reason = run.timedOut ? 'time budget used' : (parsed?.reason ?? `exit code ${run.code}`);
+    const status: ActivityStatus = run.timedOut ? 'timeout' : run.endedBy ? 'stopped' : (parsed?.status ?? 'crashed');
+    const reason = run.timedOut ? 'time budget used' : run.endedBy ? `ended by the run watcher: ${run.endedBy}` : (parsed?.reason ?? `exit code ${run.code}`);
     const result = { activity: act.name, status, reason, startedAt, minutes: Math.round((d.now() - t0) / 600) / 100 };
     results.push(result);
     d.record(result);
@@ -207,7 +208,7 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
       d.log(status === 'complete' ? `${act.name} reached: stopping` : `${act.name} cannot progress: stopping (see llm-report and the roadmap)`);
       break;
     }
-    if (status === 'impossible' || status === 'error' || status === 'crashed') cooldowns.set(act.name, cfg.cooldownRounds);
+    if (status === 'impossible' || status === 'error' || status === 'crashed') cooldowns.set(act.name, cfg.activities.length > 1 ? cfg.cooldownRounds : 1); // a lone job has nothing to rotate to: sit out one round, not several
     last = act.name;
 
     if (cfg.rebuildEvery > 0 && results.length % cfg.rebuildEvery === 0) {
@@ -227,6 +228,16 @@ export async function runCampaign(cfg: CampaignConfig, d: CampaignDeps): Promise
 // ---------------------------------------------------------------------------------------------
 
 const ENGINE_DIR = path.resolve(import.meta.dirname, '..', '..');
+
+/** The watcher's reason when it ended agent `pid` (see SKIP_FILE in watcher.ts), else undefined. */
+function watcherSkip(pid: number | undefined): string | undefined {
+  try {
+    const s = JSON.parse(readFileSync(path.join(ENGINE_DIR, 'data', 'watch', 'skipped.json'), 'utf8')) as { pid?: number; reason?: string };
+    return pid !== undefined && s.pid === pid ? (s.reason || 'stuck') : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 async function agentRequest(method: 'GET' | 'POST', route: string, body?: unknown, timeoutMs = 10_000): Promise<unknown> {
   const token = (await readFile(path.join(os.homedir(), '.runelite', '.agent-token'), 'utf8').catch(() => '')).trim();
@@ -311,7 +322,7 @@ function processDeps(cfg: CampaignConfig, dir: string, hasLlm: boolean, stop: { 
           clearTimeout(timer);
           stop.child = null;
           out.end();
-          resolve({ output: tail, timedOut, code });
+          resolve({ output: tail, timedOut, code, endedBy: watcherSkip(child.pid) });
         });
       }),
     rebuildDataset: () =>

@@ -8,6 +8,7 @@ import { compile, type DoneCondition } from '../planner/conditions.ts';
 import type { Planner, PlannerContext, PlanStep } from '../planner/types.ts';
 import type { Snapshot } from '../types.ts';
 import { GRAND_EXCHANGE } from './AcquirePlanner.ts';
+import { geLosesToShop, sellValue } from './sellValue.ts';
 
 /** The bank booths next to the Grand Exchange clerks. */
 export const GRAND_EXCHANGE_BANK = { name: 'Grand Exchange bank', point: { x: 3164, y: 3489, plane: 0 } };
@@ -17,6 +18,8 @@ export interface SellOptions {
   items: string[];
   /** Bank contents last seen (name -> count); null when never seen. */
   bank: () => Map<string, number> | null;
+  /** Value check: guide price and store value per item. Items the Grand Exchange would undersell are not sold there. */
+  prices?: { guide: (item: string) => number | null; store: (item: string) => number | null; log?: (msg: string) => void };
 }
 
 function step(text: string, targets: string[], actions: string[], doneWhen: DoneCondition, maxSteps: number, extra: object = {}): PlanStep {
@@ -28,10 +31,24 @@ export class SellPlanner implements Planner {
   private readonly o: SellOptions;
   /** Products whose sale failed this run; not retried. */
   private readonly failed = new Set<string>();
+  private readonly warned = new Set<string>();
 
   constructor(o: SellOptions) {
     this.o = o;
     this.name = `sell:${o.items.join(',')}`;
+  }
+
+  /** False (and noted once) when a general store would pay more than a quick Grand Exchange sale. */
+  private worthSellingOnGe(item: string): boolean {
+    const p = this.o.prices;
+    if (!p) return true;
+    const v = sellValue(p.guide(item), p.store(item));
+    if (!geLosesToShop(v)) return true;
+    if (!this.warned.has(item)) {
+      this.warned.add(item);
+      p.log?.(`[sell] ${item}: Grand Exchange nets ${v.ge ?? '?'} gp, a general store ${v.shop} gp: not selling it on the Grand Exchange`);
+    }
+    return false;
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
@@ -40,7 +57,7 @@ export class SellPlanner implements Planner {
     if (report?.result === 'blocked' && /ge_sell/.test(report.trail.join(' '))) {
       for (const item of this.o.items) if (report.trail.some((t) => t.includes(item))) this.failed.add(item);
     }
-    const items = this.o.items.filter((i) => !this.failed.has(i));
+    const items = this.o.items.filter((i) => !this.failed.has(i) && this.worthSellingOnGe(i));
     const carried = items.filter((i) => s.inventory.items.some((x) => x.name === i));
     const bank = s.bank.open ? new Map(s.bank.items.map((b) => [b.name, b.quantity])) : this.o.bank();
     const banked = items.filter((i) => (bank?.get(i) ?? 0) > 0);
@@ -70,3 +87,23 @@ export class SellPlanner implements Planner {
 
 /** Coins carried. */
 export const carriedCoins = (s: Snapshot) => s.inventory.items.filter((i) => i.name === 'Coins').reduce((n, i) => n + i.quantity, 0);
+
+/** Coins above this are banked before walking anywhere (a PK or a misclick would cost the stack). */
+export const SAFE_CARRY = 10_000;
+
+/**
+ * Coins to take out of the bank for a buying trip: up to `cap`, never the whole stack (a character
+ * walked around with 6M and would have lost it all by dying). 0 when enough is carried already.
+ */
+export function coinTopUp(bankCoins: number, carried: number, cap: number): number {
+  const room = cap - carried;
+  if (room < cap / 2) return 0;
+  return Math.min(bankCoins, room);
+}
+
+/** True within a short walk of the Grand Exchange bank: coins are only taken out of the bank here. */
+export function nearGrandExchange(s: Snapshot, radius = 30): boolean {
+  const p = s.player?.position;
+  const b = GRAND_EXCHANGE_BANK.point;
+  return !!p && p.plane === b.plane && Math.abs(p.x - b.x) <= radius && Math.abs(p.y - b.y) <= radius;
+}

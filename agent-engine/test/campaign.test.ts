@@ -36,6 +36,7 @@ function fakeDeps(outcomes: string[], health: { reachable: boolean; loggedIn: bo
       d.ran.push(a.name);
       const o = outcomes.shift() ?? 'timeout';
       t += (o === 'timeout' ? minutes : 5) * 60_000;
+      if (o.startsWith('watcher:')) return { output: 'killed mid-step', timedOut: false, code: null, endedBy: o.slice(8) };
       return o === 'timeout' ? { output: '', timedOut: true, code: null } : { output: `[agent] ${o}`, timedOut: false, code: 0 };
     },
   };
@@ -59,4 +60,13 @@ test('campaign: stops after three failed recoveries (expired session)', async ()
   const res = await runCampaign(cfg, d);
   assert.equal(res.length, 0);
   assert.equal(d.logins, 9);
+});
+
+test('campaign: an agent ended by the run watcher is recorded as stopped, not crashed, and runs again', async () => {
+  const cfg = { ...DEFAULT_CONFIG, hours: 0.5, breakMinutes: [1, 1] as [number, number], activities: [{ name: 'a', args: [], final: true }] };
+  const d = fakeDeps(['watcher:looping at the bank', 'timeout'], [{ reachable: true, loggedIn: true }]);
+  const res = await runCampaign(cfg, d);
+  assert.equal(res[0]!.status, 'stopped');
+  assert.match(res[0]!.reason, /ended by the run watcher: looping at the bank/);
+  assert.deepEqual(d.ran.slice(0, 2), ['a', 'a'], 'no cooldown after a watcher skip');
 });

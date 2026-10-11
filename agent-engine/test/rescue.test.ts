@@ -93,3 +93,60 @@ test('rescue: a loop report goes to the rescuer with its evidence; loops share o
   assert.deepEqual(await p.next(ctx(reports)), chop);
   assert.equal(seen.length, 2);
 });
+
+test('rescue: the same sub-goal blocked twice in a row at engine level is rescued before the route is abandoned', async () => {
+  const inner = new Fixed(chop);
+  const rescuer = new Scripted();
+  const log = new MemoryRescueLog();
+  const p = new RescuingPlanner(inner, rescuer, log);
+
+  const noOptions: SubGoalReport = { subgoal: 'smelt the bars', result: 'blocked', reason: 'no options (nothing interactable nearby and no known destination)', steps: 1, trail: [] };
+  assert.deepEqual(await p.next(ctx([noOptions])), chop, 'one failure is left to the scripted planner');
+  assert.deepEqual(await p.next(ctx([noOptions, noOptions])), walkAround);
+  const rec = log.records[0]!;
+  assert.ok(rec.kind === 'rescue' && rec.trigger === 'blocked');
+  assert.deepEqual(await p.next(ctx([noOptions, noOptions])), chop, 'the same streak is not rescued twice');
+  assert.equal(rescuer.calls, 1);
+});
+
+test('rescue: a loop that alternates done and blocked reports (open the bank / fail to use it) is rescued too', async () => {
+  const inner = new Fixed(chop);
+  const rescuer = new Scripted();
+  const p = new RescuingPlanner(inner, rescuer, new MemoryRescueLog());
+  const done: SubGoalReport = { subgoal: 'open the bank', result: 'done', reason: 'completion check passed', steps: 2, trail: [] };
+  const blocked: SubGoalReport = { subgoal: 'close the bank', result: 'blocked', reason: 'no effect: "close the bank" sent 9 times and nothing changed', steps: 1, trail: [] };
+  const reports = [done, blocked, done, blocked, done];
+  assert.deepEqual(await p.next(ctx(reports)), chop, 'two blocked in six is not yet a loop');
+  assert.deepEqual(await p.next(ctx([...reports, blocked])), walkAround, 'three blocked in the last six is');
+  assert.equal(rescuer.calls, 1);
+});
+
+test('rescue: a fresh stuck verdict from the run watcher triggers a rescue once, with its diagnosis and fix as the evidence', async () => {
+  const { readWatchHint } = await import('../src/llm/watchFeed.ts');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(mkdtempSync(path.join(tmpdir(), 'watch-')), 'latest.json');
+  const now = Date.now();
+  const write = (o: object) => writeFileSync(file, JSON.stringify(o));
+  write({ ts: new Date(now - 30_000).toISOString(), status: 'stuck', severity: 3, diagnosis: 'open the bank loops', suggestion: 'withdraw the mould' });
+  assert.equal(readWatchHint(file, now - 60_000, 8 * 60_000, now)?.status, 'stuck');
+  assert.equal(readWatchHint(file, now, 8 * 60_000, now), null, 'a review from before this run started is ignored');
+  write({ ts: new Date(now - 20 * 60_000).toISOString(), status: 'stuck', severity: 3, diagnosis: 'x', suggestion: '' });
+  assert.equal(readWatchHint(file, 0, 8 * 60_000, now), null, 'stale');
+  write({ ts: new Date(now - 30_000).toISOString(), status: 'slow', severity: 3, diagnosis: 'x', suggestion: '' });
+  assert.equal(readWatchHint(file, 0, 8 * 60_000, now), null, 'only stuck or wrong');
+
+  let hint: ReturnType<typeof readWatchHint> = { id: 't1', status: 'stuck', severity: 3, diagnosis: 'open the bank loops', suggestion: 'withdraw the mould' };
+  const seen: string[][] = [];
+  const rescuer: Rescuer = { name: 'r', rescue: async (_c, req) => { seen.push([req.trigger, req.reason, ...(req.evidence ?? [])]); return walkAround; } };
+  const log = new MemoryRescueLog();
+  const p = new RescuingPlanner(new Fixed(chop), rescuer, log, { watchFeed: () => hint });
+  assert.deepEqual(await p.next(ctx()), walkAround);
+  assert.equal(seen[0]![0], 'watcher');
+  assert.match(seen[0]![1]!, /open the bank loops/);
+  assert.match(seen[0]![2]!, /withdraw the mould/);
+  assert.deepEqual(await p.next(ctx()), chop, 'the same verdict is not acted on twice');
+  hint = { id: 't2', status: 'wrong', severity: 2, diagnosis: 'another', suggestion: '' };
+  assert.deepEqual(await p.next(ctx()), walkAround, 'a new verdict is');
+});

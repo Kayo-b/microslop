@@ -8,7 +8,7 @@ strategy   (level | money | gold | quest)  picks a phase from the catalog + live
     sub-goal   planner output, run by the engine
       tick     reflexes -> gates -> Jev/Laya picks one option -> /act -> verify
 watchdog   ends sub-goals that stop making progress
-rescue     Claude proposes one sub-goal when a planner gives up or the watchdog trips
+rescue     Claude proposes one sub-goal when a planner gives up, the watchdog trips, or two sub-goals in a row are blocked
 ```
 
 For a whole build (target levels, quests, items) run from a fresh account, see
@@ -72,6 +72,13 @@ Scripted trading loops (coins in, more coins out; live GE prices from the OSRS W
 - `string-amulets` (`StringingPlanner`, also `--task string-amulets`): at the GE, string the F2P
   amulet with the best margin after the 2% tax (emerald, ~55 gp, on 2026-10-06) with balls of
   wool, 14 per inventory; gives up when no amulet clears 20 gp.
+
+- `herblore` (`HerblorePlanner`, members, also `--task herblore`): needs Herblore 3 and Druidic
+  Ritual. At the GE, picks the best recipe per hour for the level from live prices: clean grimy
+  herbs (27 per trip, one click each), clean grimy herbs then mix them with vials of water into
+  unfinished potions, or mix bought clean herbs (14 + 14, Make All). On 2026-10-06: marrentill
+  cleaning (+188) from level 5, harralander unfinished potions from 22, ranarr from 30; finished
+  potions all lost money. Cleaning XP moves the choice up by itself.
 
 **Rules for fighting routes** (moss giants, hill giants, guards, and any route added later):
 

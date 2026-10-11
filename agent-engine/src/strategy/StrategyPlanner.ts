@@ -6,6 +6,9 @@
  */
 import { AcquirePlanner } from '../goalplan/AcquirePlanner.ts';
 import { SellPlanner } from '../goalplan/SellPlanner.ts';
+import { RunecraftPlanner } from '../goalplan/RunecraftPlanner.ts';
+import { HerblorePlanner } from '../goalplan/HerblorePlanner.ts';
+import { JewelleryPlanner } from '../goalplan/JewelleryPlanner.ts';
 import { SmeltingPlanner } from '../goalplan/SmeltingPlanner.ts';
 import { StringingPlanner } from '../goalplan/StringingPlanner.ts';
 import { TanningPlanner } from '../goalplan/TanningPlanner.ts';
@@ -84,11 +87,24 @@ export interface StrategyDeps {
   prereq?: (phase: Phase, planner: Planner) => Planner;
   /** Grand Exchange prices, for scripted trading loops (tanning). */
   gePrice?: (item: string) => number | null;
+  /** Planner for a hub plugin method (needs the backend); null when not wired. */
+  hub?: (spec: string, untilLevel?: number) => Planner | null;
 }
 
 const MELEE = new Set(['Attack', 'Strength', 'Defence', 'Hitpoints']);
 /** Skills the "level the account" strategy rotates through (lowest first). */
 const ROTATION = ['Melee', 'Ranged', 'Magic', 'Fishing', 'Cooking', 'Woodcutting', 'Mining', 'Smithing', 'Firemaking'];
+
+/** First unfinished quest in the chain behind `quests` whose own quest requirements are done. */
+export function nextQuestFor(quests: string[], p: Profile, seen = new Set<string>()): string | null {
+  for (const q of quests) {
+    if (p.account.quests.get(q) === 'FINISHED' || seen.has(q)) continue;
+    seen.add(q);
+    const pre = QUESTS.find((x) => x.name === q)?.req?.quests ?? [];
+    return nextQuestFor(pre, p, seen) ?? q;
+  }
+  return null;
+}
 
 /** Picks the next phase for a goal; null when nothing fits (or the goal is reached). */
 export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): { phase: Phase; why: string } | { done: string } | null {
@@ -106,7 +122,16 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     const skills = skill ? [skill] : [...ROTATION].sort((a, b) => level(p, a) - level(p, b));
     for (const sk of skills) {
       const lvl = level(p, sk);
-      const method = TRAINING.find((m) => m.skill === sk && lvl >= m.from && lvl < m.to && fits(m) && !skip.has(`train:${m.skill}:${m.name}`));
+      const inBracket = (m: TrainingMethod) => m.skill === sk && lvl >= m.from && lvl < m.to && (members || !m.members) && !skip.has(`train:${m.skill}:${m.name}`);
+      const method = TRAINING.find((m) => inBracket(m) && fits(m));
+      // A scripted method that only lacks quests beats an LLM or slower one: do the quest chain first.
+      const better = TRAINING.find((m) => inBracket(m) && m.exec.kind !== 'llm' && !fits(m) && unmet(m.req, p).every((u) => u.startsWith('quest ')));
+      if (better && (!method || method.exec.kind === 'llm' || (better.xpHour ?? 0) > (method.xpHour ?? 0))) {
+        const quest = nextQuestFor(better.req?.quests ?? [], p);
+        if (quest && !skip.has(`quest:${quest}`)) {
+          return { phase: { id: `quest:${quest}`, text: `do ${quest} (unlocks ${better.name})`, exec: { kind: 'quest', quest } }, why: `${better.name} needs ${quest}` };
+        }
+      }
       if (!method) continue;
       const to = goal.level ? Math.min(goal.level, method.to) : method.to;
       const untilSkill = sk === 'Melee' ? 'Strength' : sk;
@@ -172,7 +197,8 @@ export function choosePhase(goal: StrategyGoal, p: Profile, skip: Set<string>): 
     };
   }
 
-  const named = goal.quest ? QUESTS.find((q) => q.name.toLowerCase() === goal.quest!.toLowerCase()) ?? { name: goal.quest, members: false, reward: '' } : undefined;
+  // A quest the catalog does not know counts as members content: a free account must not wander into it.
+  const named = goal.quest ? QUESTS.find((q) => q.name.toLowerCase() === goal.quest!.toLowerCase()) ?? { name: goal.quest, members: true, reward: '' } : undefined;
   const candidates = named ? [named] : QUESTS;
   for (const q of candidates) {
     if (p.account.quests.get(q.name) === 'FINISHED') {
@@ -233,6 +259,10 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       }
       if (e.preset === 'string-amulets') return deps.gePrice ? new StringingPlanner({ price: deps.gePrice }) : null;
       if (e.preset === 'smelt-steel') return new SmeltingPlanner();
+      if (e.preset === 'craft-jewellery') return deps.gePrice ? new JewelleryPlanner({ price: deps.gePrice }) : null;
+      if (e.preset === 'herblore') return deps.gePrice ? new HerblorePlanner({ price: deps.gePrice }) : null;
+      if (e.preset === 'runecraft') return deps.gePrice ? new RunecraftPlanner({ price: deps.gePrice }) : null;
+      if (e.preset === 'herblore-train') return deps.gePrice ? new HerblorePlanner({ price: deps.gePrice, train: true }) : null;
       return TaskTreePlanner.fromPreset(e.preset, { bank: e.bank, untilLevel, skill: phase.until?.skill, setStyle: MELEE_TRAINED.has(phase.until?.skill ?? '') });
     case 'combat': {
       let area = e.area;
@@ -257,6 +287,8 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
       };
       return new TaskTreePlanner({ kind: 'combat', ...task }, `kill-${e.monster.toLowerCase().replace(/\s+/g, '-')}`);
     }
+    case 'hub':
+      return deps.hub?.(e.spec, untilLevel) ?? null;
     case 'llm':
       return deps.llmPlanner?.() ?? null;
     case 'quest':
@@ -270,7 +302,9 @@ export function plannerFor(phase: Phase, s: Snapshot, deps: StrategyDeps): Plann
     }
     case 'sell': {
       const bank = deps.bank;
-      return new SellPlanner({ items: e.items, bank: () => (bank?.seenAt ? bank.items : null) });
+      const ge = deps.gePrice;
+      const kb = deps.kb;
+      return new SellPlanner({ items: e.items, bank: () => (bank?.seenAt ? bank.items : null), prices: ge && kb ? { guide: ge, store: (i) => kb.itemValue(i), log: (m) => console.log(m) } : undefined });
     }
   }
 }

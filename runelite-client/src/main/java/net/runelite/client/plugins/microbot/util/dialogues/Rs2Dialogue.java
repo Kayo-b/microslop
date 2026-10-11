@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.util.dialogues;
 
+import net.runelite.api.gameval.InterfaceID.Chatbox;
 import net.runelite.api.widgets.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.plugins.microbot.Microbot;
@@ -27,7 +28,7 @@ public class Rs2Dialogue {
      * @return true if any dialogue-related widget is visible and the scroll bar is not visible, false otherwise.
      */
     public static boolean isInDialogue() {
-        return !Rs2Widget.isWidgetVisible(162, 559) && (hasContinue() || hasSelectAnOption());
+        return !Rs2Widget.isWidgetVisible(Chatbox.CHATSCROLLBAR) && (hasContinue() || hasSelectAnOption());
     }
 
     /**
@@ -120,7 +121,7 @@ public class Rs2Dialogue {
      */
     private static boolean hasSpellFilterContinue() {
         return Microbot.getClientThread().runOnClientThreadOptional(() -> {
-            Widget widget = Microbot.getClient().getWidget(162, 44);
+            Widget widget = Microbot.getClient().getWidget(Chatbox.MES_TEXT2);
             return widget != null && !widget.isHidden() && isContinuePromptText(widget.getText());
         }).orElse(false);
     }

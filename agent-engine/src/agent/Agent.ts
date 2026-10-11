@@ -7,7 +7,7 @@ import type { GameIntentEngine, StepResult } from '../engine/GameIntentEngine.ts
 import type { KnowledgeBase } from '../kb/KnowledgeBase.ts';
 import type { PlannedSubGoal, Planner, SubGoalReport } from '../planner/types.ts';
 import { evaluate } from '../planner/conditions.ts';
-import type { GameAction, WorldPoint } from '../types.ts';
+import type { GameAction, Snapshot, WorldPoint } from '../types.ts';
 import { LoopDetector, type LoopDetectorOptions } from './loopDetector.ts';
 import { ProgressWatchdog, type WatchdogOptions } from './watchdog.ts';
 
@@ -90,6 +90,7 @@ export class Agent {
     let subgoals = 0;
     let steps = 0;
     let blockedInARow = 0;
+    let actRepeat = { key: '', sig: '', n: 0 };
 
     const finish = (status: AgentOutcome['status'], reason: string): AgentOutcome => {
       const outcome = { status, reason, subgoals, steps };
@@ -141,7 +142,20 @@ export class Agent {
           // Reported like a one-step sub-goal, so the planner's give-up rules see repeated failures.
           const res = await backend.act(plan.action).catch((e) => ({ success: false, reason: e instanceof Error ? e.message : String(e) }));
           await sleep(waitMs * 2);
-          const report: SubGoalReport = { subgoal: plan.reason, result: res.success ? 'done' : 'blocked', reason: res.success ? 'action sent' : `failed: ${res.reason ?? 'unknown'}`, steps: 1, trail: [] };
+          // The same action sent again and again with nothing changing (a click that opens no
+          // interface, a menu the snapshot cannot see) must end as blocked, not "action sent" forever.
+          const after = await backend.snapshot().catch(() => undefined);
+          const sig = after ? actSignature(after) : '';
+          const key = `${plan.reason}|${JSON.stringify(plan.action)}`;
+          actRepeat = res.success && actRepeat.key === key && actRepeat.sig === sig ? { key, sig, n: actRepeat.n + 1 } : { key, sig, n: res.success ? 1 : 0 };
+          const futile = actRepeat.n >= ACT_NO_EFFECT_LIMIT;
+          const report: SubGoalReport = {
+            subgoal: plan.reason,
+            result: res.success && !futile ? 'done' : 'blocked',
+            reason: futile ? `no effect: "${plan.reason}" sent ${actRepeat.n} times and nothing changed` : res.success ? 'action sent' : `failed: ${res.reason ?? 'unknown'}`,
+            steps: 1,
+            trail: [],
+          };
           reports.push(report);
           this.o.onEvent?.({ type: 'report', report });
           blockedInARow = report.result === 'done' ? 0 : blockedInARow + 1;
@@ -150,6 +164,8 @@ export class Agent {
         }
 
         const sg = plan.subgoal;
+        // A sub-goal in between means the world was acted on: repeated direct actions start counting again.
+        actRepeat = { key: '', sig: '', n: 0 };
         subgoals++;
         this.o.onEvent?.({ type: 'subgoal', subgoal: sg });
 
@@ -237,6 +253,17 @@ export class Agent {
       return finish('error', err instanceof Error ? err.message : String(err));
     }
   }
+}
+
+/** Consecutive identical direct actions with an unchanged state before they count as futile. */
+const ACT_NO_EFFECT_LIMIT = 8;
+
+/** What a direct action could change: items, place, interfaces, animation. */
+function actSignature(s: Snapshot): string {
+  const items = new Map<string, number>();
+  for (const i of s.inventory.items) items.set(`${i.name}${i.noted ? '*' : ''}`, (items.get(`${i.name}${i.noted ? '*' : ''}`) ?? 0) + i.quantity);
+  const p = s.player?.position;
+  return JSON.stringify([[...items].sort(), p && [p.x, p.y, p.plane], s.production?.open, s.bank.open, s.grandExchange?.open, s.shop.open, s.dialogue?.inDialogue, s.player?.animating, s.skills.map((k) => k.xp).join(',')]);
 }
 
 function trail(engine: GameIntentEngine): string[] {

@@ -27,7 +27,7 @@ interface GearTier {
 }
 
 export interface Metal {
-  name: 'Bronze' | 'Iron' | 'Steel';
+  name: 'Bronze' | 'Iron' | 'Steel' | 'Mithril' | 'Adamant';
   bar: string;
   /** Ores consumed per bar. */
   ores: string[];
@@ -111,9 +111,60 @@ export const STEEL: Metal = {
   ],
 };
 
+/** Mithril: 1 ore + 4 coal a bar, from the Dwarven Mine (Falador); Smithing 50, Mining 55. */
+export const MITHRIL: Metal = {
+  name: 'Mithril',
+  bar: 'Mithril bar',
+  ores: ['Mithril ore', 'Coal'],
+  perBar: [1, 4],
+  batch: 5,
+  mineOre: 'Mithril ore',
+  mineRocks: 'Mithril rocks',
+  alsoMine: [{ ore: 'Coal', rocks: 'Coal rocks' }],
+  mine: { name: 'Dwarven Mine mithril and coal', point: { x: 3033, y: 9719, plane: 0 } },
+  filler: 'Mithril dagger',
+  anvil: { name: 'Varrock west anvils', point: { x: 3189, y: 3423, plane: 0 }, targets: ['Anvil'], avoid: ['Rusted anvil'] },
+  gear: [
+    { item: 'Mithril scimitar', level: 55, bars: 2, slot: 'WEAPON' },
+    { item: 'Mithril full helm', level: 57, bars: 2, slot: 'HEAD' },
+    { item: 'Mithril chainbody', level: 61, bars: 3, slot: 'BODY' },
+    { item: 'Mithril kiteshield', level: 62, bars: 3, slot: 'SHIELD' },
+    { item: 'Mithril platelegs', level: 66, bars: 3, slot: 'LEGS' },
+    { item: 'Mithril platebody', level: 68, bars: 5, slot: 'BODY' },
+  ],
+};
+
+/** Adamant: 1 ore + 6 coal a bar; Smithing 70, Mining 70. */
+export const ADAMANT: Metal = {
+  name: 'Adamant',
+  bar: 'Adamantite bar',
+  ores: ['Adamantite ore', 'Coal'],
+  perBar: [1, 6],
+  batch: 3,
+  mineOre: 'Adamantite ore',
+  mineRocks: 'Adamantite rocks',
+  alsoMine: [{ ore: 'Coal', rocks: 'Coal rocks' }],
+  mine: { name: 'Dwarven Mine adamantite and coal', point: { x: 3037, y: 9716, plane: 0 } },
+  filler: 'Adamant dagger',
+  anvil: { name: 'Varrock west anvils', point: { x: 3189, y: 3423, plane: 0 }, targets: ['Anvil'], avoid: ['Rusted anvil'] },
+  gear: [
+    { item: 'Adamant scimitar', level: 75, bars: 2, slot: 'WEAPON' },
+    { item: 'Adamant full helm', level: 77, bars: 2, slot: 'HEAD' },
+    { item: 'Adamant chainbody', level: 81, bars: 3, slot: 'BODY' },
+    { item: 'Adamant kiteshield', level: 82, bars: 3, slot: 'SHIELD' },
+    { item: 'Adamant platelegs', level: 86, bars: 3, slot: 'LEGS' },
+    { item: 'Adamant platebody', level: 88, bars: 5, slot: 'BODY' },
+  ],
+};
+
 /** Iron smelting needs Smithing 15; steel bars 30, but steel gear only starts at 35 (scimitar). */
 const IRON_LEVEL = 15;
 const STEEL_LEVEL = 35;
+/** Mithril/adamant bars need both Smithing and Mining (the ore is mined by the planner). */
+const MITHRIL_SMITHING = 50;
+const MITHRIL_MINING = 55;
+const ADAMANT_SMITHING = 70;
+const ADAMANT_MINING = 70;
 /** Smithing level of the last gear piece this planner makes (steel platebody). */
 export const LAST_GEAR_LEVEL = 48;
 
@@ -166,7 +217,7 @@ export interface SmithingPlannerOptions {
   /** Stop when Smithing reaches this level (and unlocked upgrades are worn). Default 48 (steel platebody). */
   untilLevel?: number;
   /** Force a metal instead of choosing by level. */
-  metal?: 'bronze' | 'iron' | 'steel';
+  metal?: 'bronze' | 'iron' | 'steel' | 'mithril' | 'adamant';
   /** Only mine and smelt; bank the bars and never smith or stop at a level (smelting for profit). */
   smeltOnly?: boolean;
   /** File that remembers unreachable placements across runs. Null disables. Default data/unusable-sites.json. */
@@ -253,7 +304,7 @@ export class SmithingPlanner implements Planner {
   constructor(opts: SmithingPlannerOptions = {}) {
     this.smeltOnly = opts.smeltOnly ?? false;
     this.untilLevel = opts.smeltOnly ? 100 : (opts.untilLevel ?? LAST_GEAR_LEVEL);
-    this.forced = opts.metal === 'bronze' ? BRONZE : opts.metal === 'iron' ? IRON : opts.metal === 'steel' ? STEEL : undefined;
+    this.forced = opts.metal ? { bronze: BRONZE, iron: IRON, steel: STEEL, mithril: MITHRIL, adamant: ADAMANT }[opts.metal] : undefined;
     this.memoryFile = opts.memoryFile === undefined ? path.resolve('data/unusable-sites.json') : opts.memoryFile;
     if (this.memoryFile && existsSync(this.memoryFile)) {
       for (const k of JSON.parse(readFileSync(this.memoryFile, 'utf8')) as string[]) this.unusable.add(k);
@@ -266,8 +317,13 @@ export class SmithingPlanner implements Planner {
     writeFileSync(this.memoryFile, JSON.stringify([...this.unusable], null, 1));
   }
 
-  private metal(smithing: number): Metal {
-    return this.forced ?? (smithing >= STEEL_LEVEL ? STEEL : smithing >= IRON_LEVEL ? IRON : BRONZE);
+  private metal(s: Snapshot): Metal {
+    if (this.forced) return this.forced;
+    const smithing = level(s, 'Smithing');
+    const mining = level(s, 'Mining');
+    if (smithing >= ADAMANT_SMITHING && mining >= ADAMANT_MINING) return ADAMANT;
+    if (smithing >= MITHRIL_SMITHING && mining >= MITHRIL_MINING) return MITHRIL;
+    return smithing >= STEEL_LEVEL ? STEEL : smithing >= IRON_LEVEL ? IRON : BRONZE;
   }
 
   async next(ctx: PlannerContext): Promise<PlanStep> {
@@ -275,7 +331,7 @@ export class SmithingPlanner implements Planner {
     if (s.bank.open) this.bank = new Map(s.bank.items.map((i) => [i.name, i.quantity]));
 
     // Learn before the give-up check: an unreachable site is replaced, not retried.
-    this.learnFromReports(ctx, this.metal(level(s, 'Smithing')));
+    this.learnFromReports(ctx, this.metal(s));
 
     const last = ctx.reports.slice(-3);
     if (last.length === 3 && last.every((r) => r.result !== 'done' && r.subgoal === last[0]!.subgoal)) {
@@ -283,9 +339,9 @@ export class SmithingPlanner implements Planner {
     }
 
     const smithing = level(s, 'Smithing');
-    const metal = this.metal(smithing);
+    const metal = this.metal(s);
     const route = await this.route(metal, ctx);
-    const allGear = [...BRONZE.gear, ...IRON.gear, ...STEEL.gear];
+    const allGear = [...BRONZE.gear, ...IRON.gear, ...STEEL.gear, ...MITHRIL.gear, ...ADAMANT.gear];
 
     // Done at the target level only once every unlocked upgrade is made and worn.
     const pendingUpgrade = metal.gear.some(

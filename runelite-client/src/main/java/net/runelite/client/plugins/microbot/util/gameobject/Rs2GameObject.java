@@ -318,10 +318,6 @@ public class Rs2GameObject {
         Predicate<TileObject> namePred = nameMatches(objectName, exact);
 
         Predicate<GameObject> filter = o -> {
-            if (!Rs2GameObject.isReachable(o)) {
-                return false;
-            }
-
             if (!namePred.test(o)) {
                 return false;
             }
@@ -334,12 +330,14 @@ public class Rs2GameObject {
             return true;
         };
 
-        Rs2WorldPoint playerLocation = Rs2Player.getRs2WorldPoint();
-        return getGameObjects(filter, anchorPoint, distance)
-                .stream()
-                .min(Comparator.comparingInt(o ->
-                        Rs2WorldPoint.quickDistance(playerLocation.getWorldPoint(), o.getWorldLocation())))
-                .orElse(null);
+        return Microbot.getClientThread().runOnClientThreadOptional(() -> {
+            List<GameObject> candidates = getGameObjects(filter, anchorPoint, distance);
+            if (candidates.isEmpty()) {
+                return null;
+            }
+            WorldPoint playerLocation = Rs2Player.getRs2WorldPoint().getWorldPoint();
+            return findNearestReachable(candidates, GameObject::getWorldLocation, playerLocation, Rs2GameObject::isReachable);
+        }).orElse(null);
     }
 
     /**
@@ -2114,5 +2112,16 @@ public class Rs2GameObject {
         }
         Microbot.getNaturalMouse().moveTo(point.getX(), point.getY());
         return true;
+    }
+
+    static <T> T findNearestReachable(List<T> candidates, Function<? super T, WorldPoint> location, WorldPoint from, Predicate<? super T> reachable) {
+        List<T> sorted = new ArrayList<>(candidates);
+        sorted.sort(Comparator.comparingInt(c -> Rs2WorldPoint.quickDistance(from, location.apply(c))));
+        for (T candidate : sorted) {
+            if (reachable.test(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 }

@@ -27,7 +27,7 @@ export function llmReport(calls: LlmCallRecord[], rescues: (RescueRecord | Rescu
   const outcomes = new Map(rescues.filter((r): r is RescueOutcomeRecord => r.kind === 'outcome').map((o) => [o.id, o]));
   if (asked.length) {
     out.push('', 'Rescues by trigger (sub-goal result after the rescue):');
-    for (const trigger of ['impossible', 'stuck', 'loop'] as const) {
+    for (const trigger of ['impossible', 'stuck', 'loop', 'blocked'] as const) {
       const rs = asked.filter((r) => r.trigger === trigger);
       if (!rs.length) continue;
       const done = rs.filter((r) => outcomes.get(r.id)?.result === 'done').length;

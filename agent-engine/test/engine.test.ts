@@ -529,3 +529,73 @@ test('two carried items the sub-goal names can be used on each other', () => {
   assert.ok(use, JSON.stringify(c.map((x) => x.label)));
   assert.deepEqual(use!.gameAction, { op: 'use_item_on', itemSlot: 0, target: { kind: 'inventory', slot: 1, id: 272 } });
 });
+
+test('a slot-addressed action that finds its slot changed re-decides instead of counting a failure', async () => {
+  const s = snapshot({ inventory: { freeSlots: 26, items: [item(0, 199, 'Grimy guam leaf', { actions: ['Clean', 'Drop'] }), item(1, 199, 'Grimy guam leaf', { actions: ['Clean', 'Drop'] })] } });
+  const backend = {
+    snapshot: async () => s,
+    act: async () => ({ success: false, op: 'interact', tick: 1, reason: 'slot_changed' }),
+  } as never;
+  const decider = new ScriptedDecisionEngine((p) => {
+    const t = p.questions.target as { criteria: Record<string, string> };
+    return { op: { choice: 'interact' }, target: { choice: Object.keys(t.criteria).find((k) => k.includes('#Clean'))! } };
+  });
+  const engine = new GameIntentEngine({ backend, decisionEngine: decider, maxFailures: 3 });
+  for (let i = 0; i < 5; i++) {
+    const r = await engine.step({ text: 'clean all the grimy guam leafs', targets: ['Grimy guam leaf'], actions: ['Clean'] });
+    assert.equal(r.kind, 'waiting', `step ${i}: ${r.kind}`);
+  }
+});
+
+test('candidates: a free account is never offered a destination outside the free-to-play map', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const { inF2pArea } = await import('../src/strategy/f2p.ts');
+  const kb = { findPlaces: () => [{ name: 'Karamja Volcano', point: { x: 2829, y: 9580, plane: 0 } }], nearestBanks: () => [], nearestObjects: () => [], nearestSpawns: () => [] } as never;
+  const s = snapshot();
+  const goal = { text: 'mine gold ore', destination: { name: 'Varrock gold mine' } } as never;
+  assert.equal(buildDestinations(s, kb, goal, 5).length, 1, 'members accounts are offered it');
+  assert.equal(buildDestinations(s, kb, goal, 5, inF2pArea).length, 0, 'free accounts are not');
+});
+
+test('candidates: coordinates written in the sub-goal text beat the nearest object of that name', async () => {
+  const { buildDestinations } = await import('../src/engine/candidates.ts');
+  const kb = { findPlaces: () => [], nearestBanks: () => [], nearestObjects: () => [{ name: 'Mysterious ruins', point: { x: 3052, y: 3444, plane: 0 } }], nearestSpawns: () => [] } as never;
+  const goal = { text: 'Walk to the Air Altar mysterious ruins around 2985,3292', targets: ['Mysterious ruins'] } as never;
+  const d = buildDestinations(snapshot(), kb, goal, 5);
+  assert.equal(d.length, 1);
+  assert.deepEqual([d[0]!.to.x, d[0]!.to.y], [2985, 3292]);
+});
+
+test('engine: when the decision engine is down, the fallback LLM picks and the sub-goal does not block', async () => {
+  const initial = snapshot({ inventory: { freeSlots: 28, items: [item(0, 303, 'Small fishing net')] } });
+  const game = new FakeGame({ initial, actionTicks: 1 });
+  const server = await startFakeServer(game, 'tok');
+  const down = { name: 'down', decide: async () => { throw new Error('503'); } };
+  let asked = '';
+  const fallback: Escalator = {
+    choose: async (req) => {
+      asked = req.reason;
+      const spot = req.candidates.find((c) => c.action === 'Small Net')!;
+      return { op: 'interact', optionId: spot.id, note: 'picked by the fallback' };
+    },
+  };
+  const engine = new GameIntentEngine({
+    backend: new MicrobotBackend({ port: server.port, token: 'tok' }),
+    decisionEngine: down as never,
+    fallbackEscalator: fallback,
+    decisionRetries: 0,
+    verify: noSleep,
+  });
+  const goal: SubGoal = { text: 'catch shrimp', targets: ['Fishing spot'], actions: ['Small Net'], isDone: () => false };
+  try {
+    const r = await engine.step(goal);
+    assert.notEqual(r.kind, 'blocked', JSON.stringify(r));
+    assert.match(asked, /decision engine unavailable/);
+    assert.ok(game.acts.some((a) => a.op === 'interact' && a.action === 'Small Net'));
+    // Without a fallback the same failure still blocks.
+    const plain = new GameIntentEngine({ backend: new MicrobotBackend({ port: server.port, token: 'tok' }), decisionEngine: down as never, decisionRetries: 0, verify: noSleep });
+    assert.equal((await plain.step(goal)).kind, 'blocked');
+  } finally {
+    await server.close();
+  }
+});
