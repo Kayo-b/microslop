@@ -187,7 +187,7 @@ export class HerblorePlanner implements Planner {
     // Re-picked only between batches (no inputs carried or banked), so a price wobble never
     // strands half-bought inputs, while a new level (Herblore 5: guam -> marrentill) takes effect
     // at the next purchase instead of the next run.
-    const stockLeft = (x: NonNullable<typeof this.recipe>) => x.inputs.some((n) => count(n) > 0 || (bank?.get(n) ?? 0) > 0);
+    const stockLeft = (x: NonNullable<typeof this.recipe>) => x.inputs.every((n) => count(n) > 0 || (bank?.get(n) ?? 0) > 0);
     if (this.recipe === undefined || ((this.recipe === null || !stockLeft(this.recipe)) && s.grandExchange?.open)) {
       const wallet = carriedCoins(s) + (bank?.get('Coins') ?? 0);
       this.recipe = this.o.train ? trainingRecipe(level, this.o.price, wallet) : nextRecipe(level, this.o.price, wallet);
@@ -225,18 +225,23 @@ export class HerblorePlanner implements Planner {
       const mid = cleaned ? [cleaned] : [];
       // Product notes stay once no inputs are left: they were just withdrawn to be sold (depositing
       // them again looped withdraw/deposit, as tanning once did with leather).
-      const inputsLeft = inputs.some((n) => count(n) > 0 || s.bank.items.some((b) => b.name === n));
+      // A trip is only live while every input is held, banked, or (grimy) already cleaned: a lone
+      // leftover input (13 vials, herbs gone) is junk, else it was kept, nothing withdrawn, the bank
+      // closed and reopened forever.
+      const tripLive = inputs.every((n, k) => count(n) > 0 || s.bank.items.some((b) => b.name === n) || (k === 0 && cleaned !== undefined && count(cleaned) > 0));
+      const inputsLeft = tripLive;
+      const keep = tripLive ? inputs : [];
       const junk = s.inventory.items.find(
-        (i) => i.name !== 'Coins' && !(!i.noted && (inputs.includes(i.name) || mid.includes(i.name))) && !(i.noted && !inputsLeft && products.includes(i.name)),
+        (i) => i.name !== 'Coins' && !(!i.noted && (keep.includes(i.name) || mid.includes(i.name))) && !(i.noted && !inputsLeft && products.includes(i.name)),
       );
       if (junk) return { kind: 'act', action: { op: 'bank_deposit', itemId: junk.id, amount: 'all' }, reason: `deposit the ${junk.noted ? 'noted ' : ''}${junk.name}` };
-      for (const name of inputs) {
+      for (const name of keep) {
         const stack = s.bank.items.find((b) => b.name === name);
         // Never more than the free slots: a full inventory refuses the withdraw (withdraw_failed).
         const amount = Math.min(r!.perTrip - count(name), stack?.quantity ?? 0, s.inventory.freeSlots);
         if (stack && amount > 0) return { kind: 'act', action: { op: 'bank_withdraw', itemId: stack.id, amount }, reason: `withdraw ${name}` };
       }
-      if (!inputs.some((n) => count(n) > 0)) {
+      if (!keep.some((n) => count(n) > 0)) {
         const product = s.bank.items.find((b) => products.includes(b.name) && !inputs.includes(b.name));
         if (product) return { kind: 'act', action: { op: 'bank_withdraw', itemId: product.id, amount: 'all', noted: true }, reason: `withdraw the ${product.name} as notes to sell` };
         const coinStack = s.bank.items.find((b) => b.name === 'Coins');
