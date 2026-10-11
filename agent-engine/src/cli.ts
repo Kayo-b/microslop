@@ -49,7 +49,7 @@ import { SmithingPlanner } from './planner/SmithingPlanner.ts';
 import { HerblorePlanner } from './goalplan/HerblorePlanner.ts';
 import { JewelleryPlanner } from './goalplan/JewelleryPlanner.ts';
 import { StringingPlanner } from './goalplan/StringingPlanner.ts';
-import { HubPluginPlanner, stopRunningHubPlugin } from './goalplan/HubPluginPlanner.ts';
+import { HubPluginPlanner, stopRunningHubPlugin, stopStrayHubPlugins } from './goalplan/HubPluginPlanner.ts';
 import { HUB_SPECS } from './goalplan/hubSpecs.ts';
 import { TanningPlanner } from './goalplan/TanningPlanner.ts';
 import { COOK_PRESETS, CookingPlanner } from './planner/CookingPlanner.ts';
@@ -613,6 +613,8 @@ async function run(): Promise<void> {
   });
 
   console.log(`[agent] goal: ${goal} | planner: ${planner.name} | log: ${logger.file}`);
+  // A hub plugin left enabled by an earlier run restarts with the client and fights this run.
+  await stopStrayHubPlugins(backend).catch(() => {});
   const outcome = await agent.run(goal);
   await stopRunningHubPlugin();
   console.log(`[agent] ${outcome.status}: ${outcome.reason} (${outcome.subgoals} sub-goals, ${outcome.steps} steps)`);

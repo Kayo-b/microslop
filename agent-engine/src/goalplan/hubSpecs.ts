@@ -308,3 +308,13 @@ export const HUB_SPECS: Record<string, () => HubSpec> = {
   gotr: () => GOTR,
   smithing: smithingSpec,
 };
+
+/** Every hub plugin class a spec can start (smithing may use either of its two). */
+export const HUB_PLUGIN_CLASSES: string[] = [
+  `${PKG}.aiomagic.AIOMagicPlugin`,
+  `${PKG}.agility.MicroAgilityPlugin`,
+  `${PKG}.gotr.GotrPlugin`,
+  `${PKG}.varrockanvil.VarrockAnvilPlugin`,
+  `${PKG}.smelting.AutoSmeltingPlugin`,
+  `${PKG}.mahoganyhomez.MahoganyHomesPlugin`,
+];

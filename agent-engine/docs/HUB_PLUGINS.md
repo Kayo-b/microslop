@@ -32,3 +32,12 @@ They are disabled by default; the planner starts and stops them. `pluginState` s
 - Some plugins pop a Swing message box when they stop (`Microbot.showMessage`); harmless.
 - The run watcher counts rising total XP as progress (the agent only waits while a plugin trains).
 - Only bulk-traded products: 2,500 low-volume items (platelegs, bronze) would sink the price.
+
+## A stopped-by-nobody plugin restarts with the client
+
+A hub plugin's enabled flag is saved in the client config. If the agent that started it dies before
+its stop reaches the client (time limit, kill, client restart), the plugin starts again by itself the
+next time the client launches and walks/clicks alongside every later run (2026-10-11: Agility left on
+char2 broke a smithing campaign for 2 h and made a GE search type into the chat). `agent run` now
+stops every leftover hub plugin before it starts (`stopStrayHubPlugins`), and a failed stop is retried
+once and logged. Manual fix: `microbot-cli scripts stop --class <className>` (also clears the flag).

@@ -135,6 +135,12 @@ export class MicrobotBackend implements GameBackend {
     return { loaded: Boolean(p), active: Boolean(p?.active) };
   }
 
+  /** Every plugin the client knows, with whether it runs now or is enabled (starts with the client). */
+  async pluginList(): Promise<{ className: string; active: boolean; enabled: boolean }[]> {
+    const list = (await this.request('GET', '/scripts')) as { scripts?: { className: string; active: boolean; enabled: boolean }[] };
+    return (list.scripts ?? []).map((x) => ({ className: x.className, active: Boolean(x.active), enabled: Boolean(x.enabled) }));
+  }
+
   private async request(method: 'GET' | 'POST', route: string, body?: unknown, retried = false): Promise<unknown> {
     const token = await this.loadToken();
     let res: Response;
