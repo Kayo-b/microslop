@@ -2,6 +2,7 @@ package net.runelite.client.plugins.microbot.util.player;
 
 import lombok.Getter;
 import net.runelite.api.*;
+import net.runelite.api.Point;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldArea;
 import net.runelite.api.coords.WorldPoint;
@@ -42,6 +43,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -408,24 +411,56 @@ public class Rs2Player {
         return false;
     }
 
+    private static final ReentrantLock RUN_TOGGLE_LOCK = new ReentrantLock();
+    private static final long RUN_TOGGLE_RETRY_NANOS = TimeUnit.MILLISECONDS.toNanos(1200);
+    private static long lastRunToggleAttempt;
+    private static boolean runToggleAttempted;
+
     /**
-     * Toggles the player's run energy on or off.
+     * Requests the desired run state. Enabling requires energy strictly above
+     * {@link Microbot#runEnergyThreshold} (hundredths of a percent; default 1000 = 10%).
+     * Disabling and an already satisfied state do not require energy.
      *
-     * @param toggle {@code true} to enable running, {@code false} to disable it.
-     * @return {@code true} if the toggle action was performed successfully or was already in the desired state,
-     *         {@code false} if the run energy toggle widget was not found.
+     * @return true only when the desired state is observed; false includes a pending click,
+     *         insufficient energy, unavailable orb, retry cooldown, or a client-thread request
+     *         that would require a mouse gesture. Call again from the normal script loop.
      */
     public static boolean toggleRunEnergy(boolean toggle) {
-        if (Microbot.getVarbitPlayerValue(173) == 0 && !toggle) return true;
-        if (Microbot.getVarbitPlayerValue(173) == 1 && toggle) return true;
-
-        Widget widget = Rs2Widget.getWidget(WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId());
-        if (widget == null) return false;
-
-        Microbot.getMouse().click(widget.getCanvasLocation());
-        sleep(150, 300);
-
-        return true;
+        if (Thread.currentThread().isInterrupted() || !RUN_TOGGLE_LOCK.tryLock()) return false;
+        try {
+            Boolean satisfied = Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getClient().getGameState() == GameState.LOGGED_IN
+                            && (Microbot.getClient().getVarpValue(173) == 1) == toggle).orElse(false);
+            if (satisfied) return true;
+            if (Microbot.getClientThread().isClientThread()) return false;
+            if (runToggleAttempted && System.nanoTime() - lastRunToggleAttempt < RUN_TOGGLE_RETRY_NANOS) {
+                return false;
+            }
+            Point target = Microbot.getClientThread().runOnClientThreadOptional(() -> {
+                Client client = Microbot.getClient();
+                if (client.getGameState() != GameState.LOGGED_IN
+                        || (client.getVarpValue(173) == 1) == toggle
+                        || (toggle && client.getEnergy() <= Math.max(0, Microbot.runEnergyThreshold))) return null;
+                Widget widget = Rs2Widget.getWidget(WidgetInfo.MINIMAP_TOGGLE_RUN_ORB.getId());
+                if (widget == null || widget.isHidden()) return null;
+                Rectangle bounds = widget.getBounds();
+                if (bounds == null || bounds.width < 3 || bounds.height < 3 || bounds.x < 0 || bounds.y < 0
+                        || !Rs2UiHelper.isRectangleWithinCanvas(bounds)) return null;
+                return new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+            }).orElse(null);
+            if (target == null) return false;
+            try {
+                Microbot.getMouse().click(target);
+            } finally {
+                lastRunToggleAttempt = System.nanoTime();
+                runToggleAttempted = true;
+            }
+            return Microbot.getClientThread().runOnClientThreadOptional(() ->
+                    Microbot.getClient().getGameState() == GameState.LOGGED_IN
+                            && (Microbot.getClient().getVarpValue(173) == 1) == toggle).orElse(false);
+        } finally {
+            RUN_TOGGLE_LOCK.unlock();
+        }
     }
 
     /**

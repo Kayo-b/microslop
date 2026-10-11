@@ -1,5 +1,6 @@
 package net.runelite.client.plugins.microbot.shortestpath;
 
+import net.runelite.api.Quest;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.client.plugins.microbot.shortestpath.pathfinder.Pathfinder;
@@ -804,6 +805,35 @@ public class WalkerRouteCorpusTest {
                 arrives(ascending, DRAYNOR_SEWER_EAST_SURFACE, 1));
         assertTrue("ascent route must approach the mapped east underground ladder",
                 visits(ascending, DRAYNOR_SEWER_EAST_UNDER, 2));
+    }
+
+    @Test
+    public void draynorRoadPassesTheClosedSewerTrapdoorWithoutUsingIt() {
+        WorldPoint trapdoor = new WorldPoint(3084, 3272, 0);
+        WorldPoint goal = new WorldPoint(3080, 3252, 0);
+        Pathfinder pathfinder = runPathfinder(configWith(WalkerRouteCorpusTest::unrestricted),
+                new WorldPoint(3086, 3284, 0), goal);
+        List<WorldPoint> path = pathfinder.getPath();
+
+        assertTrue(arrives(path, goal, 1));
+        assertTrue(visits(path, trapdoor, 1));
+        assertFalse(selectsTransportObject(pathfinder, 6435));
+        assertFalse(path.stream().anyMatch(point -> point.getY() > 9000));
+    }
+
+    @Test
+    public void zanarisShedDoorRequiresLostCity() {
+        Transport shed = allTransports.getOrDefault(new WorldPoint(3202, 3169, 0), Collections.emptySet()).stream()
+                .filter(transport -> transport.getObjectId() == 2406)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Zanaris shed door row is missing"));
+
+        assertTrue(shed.getQuests().containsKey(Quest.LOST_CITY));
+        assertTrue(shed.isMembers());
+        assertEquals(1, shed.getItemRequirements().size());
+        assertTrue(shed.getItemRequirements().get(0).getAlternatives().containsKey(ItemID.DRAMEN_STAFF));
+        assertTrue(shed.getItemRequirements().get(0).getAlternatives().containsKey(ItemID.LUNAR_MOONCLAN_LIMINAL_STAFF));
+        assertFalse(unrestricted(shed));
     }
 
     // ---- Barrows mounds, individual crypts and randomized tunnel boundary -------------------------
